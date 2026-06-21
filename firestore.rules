@@ -1,0 +1,212 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================================
+    // HELPER FUNCTIONS
+    // ============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function getUserRole() {
+      let rolePath = /databases/$(database)/documents/userRoles/$(request.auth.uid);
+      return exists(rolePath) ? get(rolePath).data.role : null;
+    }
+
+    function hasRole(role) {
+      return isAuthenticated() && getUserRole() == role;
+    }
+
+    function hasAnyRole(roles) {
+      return isAuthenticated() && getUserRole() in roles;
+    }
+
+    function isAdmin() {
+      return hasRole('ADMIN');
+    }
+
+    function getSupervisorDepartment() {
+      let rolePath = /databases/$(database)/documents/userRoles/$(request.auth.uid);
+      let roleData = exists(rolePath) ? get(rolePath).data : null;
+      let employeeId = roleData != null ? roleData.employeeId : null;
+      let empPath = /databases/$(database)/documents/employees/$(employeeId);
+      return employeeId != null && exists(empPath) ? get(empPath).data.department : null;
+    }
+
+
+    // ============================================================
+    // userRoles - Role assignments (sensitive)
+    // Single-doc reads: user's own doc only
+    // Collection queries: admins only (approvals page, admin users page)
+    // Writes: Firebase Admin SDK only (server-side)
+    // ============================================================
+    match /userRoles/{userId} {
+      allow get: if isAuthenticated() && request.auth.uid == userId;
+      allow list: if isAuthenticated() && isAdmin();
+      allow write: if false; // Managed by Firebase Admin SDK only
+    }
+
+
+    // ============================================================
+    // employees - Staff directory
+    // All authenticated users can read
+    // Create/Update: ADMIN or PRODUCTION_SUPERVISOR (own department only)
+    // Delete: ADMIN only
+    // ============================================================
+    match /employees/{employeeId} {
+      allow read: if isAuthenticated();
+      allow create: if isAdmin() || (hasRole('PRODUCTION_SUPERVISOR') && request.resource.data.department == getSupervisorDepartment());
+      allow update: if isAdmin() || (hasRole('PRODUCTION_SUPERVISOR') && resource.data.department == getSupervisorDepartment() && request.resource.data.department == resource.data.department);
+      allow delete: if isAdmin();
+    }
+
+
+    // ============================================================
+    // workers - Secondary worker list for target assignment
+    // All authenticated users can read; only admins write
+    // ============================================================
+    match /workers/{workerId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+
+    // ============================================================
+    // productionStages - Stage definitions & default targets
+    // All authenticated users can read; only admins write
+    // ============================================================
+    match /productionStages/{stageId} {
+      allow read: if isAuthenticated();
+      allow write: if isAdmin();
+    }
+
+
+    // ============================================================
+    // targetConfigs - Per-worker daily target overrides
+    // All authenticated users can read; only admins write
+    // ============================================================
+    match /targetConfigs/{configId} {
+      allow read: if isAuthenticated();
+      allow create, update, delete: if isAdmin();
+    }
+
+
+    // ============================================================
+    // productionEntries - Daily production records
+    // All authenticated users can read
+    // Create: PRODUCTION_SUPERVISOR or ADMIN
+    // Update: ADMIN or PRODUCTION_SUPERVISOR (paymentStatus/paymentId only)
+    // Delete: ADMIN only
+    // ============================================================
+    match /productionEntries/{entryId} {
+      allow read: if isAuthenticated();
+      allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+      allow update: if isAdmin() || (hasRole('PRODUCTION_SUPERVISOR') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'paymentId']));
+      allow delete: if isAdmin();
+    }
+
+
+    // ============================================================
+    // batches - Production batch lifecycle
+    // All authenticated users can read
+    // Create/Update: PRODUCTION_SUPERVISOR or ADMIN
+    // Delete: ADMIN only
+    // ============================================================
+    match /batches/{batchId} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+      allow delete: if isAdmin();
+    }
+
+
+    // ============================================================
+    // counters - Sequential counters (e.g. batch numbering)
+    // All authenticated users can read
+    // Write: PRODUCTION_SUPERVISOR or ADMIN (for batch number generation)
+    // ============================================================
+    match /counters/{counterId} {
+      allow read: if isAuthenticated();
+      allow write: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+    }
+
+
+    // ============================================================
+    // payments - Payment records & receipts
+    // All authenticated users can read
+    // Create: ADMIN or PRODUCTION_SUPERVISOR (via Pay Due flow)
+    // No update/delete (immutable once created)
+    // ============================================================
+    match /payments/{paymentId} {
+      allow read: if isAuthenticated();
+      allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+      allow update, delete: if false;
+    }
+
+
+    // ============================================================
+    // stockIns - Stock received into inventory
+    // All authenticated users can read
+    // Create: ADMIN, STORE_MANAGER, or PRODUCTION_SUPERVISOR
+    // Update/Delete: ADMIN only
+    // ============================================================
+    match /stockIns/{stockInId} {
+      allow read: if isAuthenticated();
+      allow create: if hasAnyRole(['ADMIN', 'STORE_MANAGER', 'PRODUCTION_SUPERVISOR']);
+      allow update, delete: if isAdmin();
+    }
+
+
+    // ============================================================
+    // stockOuts - Stock dispatched from inventory
+    // All authenticated users can read
+    // Create: STORE_MANAGER or ADMIN or PRODUCTION_SUPERVISOR
+    // Update/Delete: ADMIN only
+    // ============================================================
+    match /stockOuts/{stockOutId} {
+      allow read: if isAuthenticated();
+      allow create: if hasAnyRole(['ADMIN', 'STORE_MANAGER', 'PRODUCTION_SUPERVISOR']);
+      allow update, delete: if isAdmin();
+    }
+
+
+    // ============================================================
+    // saleTransactions - Sales records
+    // All authenticated users can read
+    // Create: SALES_STAFF or ADMIN
+    // Update/Delete: ADMIN only
+    // ============================================================
+    match /saleTransactions/{transactionId} {
+      allow read: if isAuthenticated();
+      allow create: if hasAnyRole(['ADMIN', 'SALES_STAFF']);
+      allow update, delete: if isAdmin();
+    }
+
+
+    // ============================================================
+    // salesTargets - Sales target goals (monthly/quarterly/annual)
+    // All authenticated users can read
+    // Create: SALES_STAFF or ADMIN
+    // Update/Delete: ADMIN only
+    // ============================================================
+    match /salesTargets/{targetId} {
+      allow read: if isAuthenticated();
+      allow create: if hasAnyRole(['ADMIN', 'SALES_STAFF']);
+      allow update, delete: if isAdmin();
+    }
+
+
+    // ============================================================
+    // expenses - Business expense records
+    // All authenticated users can read
+    // Create: FINANCE or ADMIN
+    // Update/Delete: ADMIN only
+    // ============================================================
+    match /expenses/{expenseId} {
+      allow read: if isAuthenticated();
+      allow create: if hasAnyRole(['ADMIN', 'FINANCE']);
+      allow update, delete: if isAdmin();
+    }
+  }
+}
