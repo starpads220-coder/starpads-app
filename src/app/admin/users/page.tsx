@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import { orderBy } from "firebase/firestore";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
 import { UserRole, Employee } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
@@ -12,6 +13,7 @@ type Tab = "all" | "pending";
 
 export default function AdminUsersPage() {
   const { userRole } = useAuth();
+  const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<Tab>("all");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionError, setActionError] = useState("");
@@ -19,13 +21,25 @@ export default function AdminUsersPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
 
-  const { data: users = [], isLoading: usersLoading } = useCollectionQuery<UserRole>("userRoles", [], {
-    staleTime: 5 * 60 * 1000,
+  const { data: users = [], isLoading: usersLoading } = useQuery<UserRole[]>({
+    queryKey: ["users"],
+    queryFn: async () => {
+      const res = await fetch(`/api/users?adminUid=${userRole?.uid}`);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to fetch users");
+      return data.users;
+    },
+    enabled: !!userRole?.uid,
+    staleTime: 30 * 1000,
   });
 
   const { data: employees = [] } = useCollectionQuery<Employee>("employees", [
     orderBy("name"),
   ], { staleTime: 10 * 60 * 1000 });
+
+  const invalidateUsers = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: ["users"] });
+  }, [queryClient]);
 
   const displayedUsers = activeTab === "pending"
     ? users.filter((u) => u.status === "pending")
@@ -47,6 +61,7 @@ export default function AdminUsersPage() {
         return;
       }
       setActionSuccess("User approved successfully.");
+      invalidateUsers();
     } catch {
       setActionError("Network error. Please try again.");
     } finally {
@@ -71,6 +86,7 @@ export default function AdminUsersPage() {
         return;
       }
       setActionSuccess("User rejected and removed.");
+      invalidateUsers();
     } catch {
       setActionError("Network error. Please try again.");
     } finally {
@@ -96,6 +112,7 @@ export default function AdminUsersPage() {
         return;
       }
       setActionSuccess("User deleted successfully.");
+      invalidateUsers();
     } catch {
       setActionError("Network error. Please try again.");
     } finally {
