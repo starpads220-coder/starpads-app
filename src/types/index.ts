@@ -15,6 +15,8 @@ export type MaterialType = "FLANNEL" | "FLEECE" | "PUL" | "COMBINED";
 export type PackSize = "HALF_DOZEN" | "DOZEN" | "CARTON";
 
 export type CustomerType = "BULK" | "RETAIL" | "AGENT";
+export type CustomerCategory = "B2B" | "B2C";
+export type CustomerSubType = "INDIVIDUAL" | "PRIVATE_COMPANY" | "NON_PROFIT" | "RETAILER";
 
 export type PaymentMethod = "CASH" | "MOBILE_MONEY" | "BANK_TRANSFER";
 
@@ -130,6 +132,8 @@ export interface SaleTransaction {
   date: string;
   customerName: string;
   customerType: CustomerType;
+  customerCategory?: CustomerCategory;
+  customerSubType?: CustomerSubType;
   packSize: PackSize;
   quantitySold: number;
   unitPrice: number;
@@ -171,7 +175,7 @@ export interface UserRole {
 export const PACK_SIZES: Record<PackSize, number> = {
   HALF_DOZEN: 6,
   DOZEN: 12,
-  CARTON: 60,
+  CARTON: 120,
 };
 
 export const STAGE_LABELS: Record<StageId, string> = {

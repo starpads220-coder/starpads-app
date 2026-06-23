@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
         const batches = batchesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Batch));
         const allEntries = prodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductionEntry));
 
-        const PACK_SIZES: Record<string, number> = { HALF_DOZEN: 6, DOZEN: 12, CARTON: 60 };
+        const PACK_SIZES: Record<string, number> = { HALF_DOZEN: 6, DOZEN: 12, CARTON: 120 };
         const stock: Record<string, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0 };
         stockIns.forEach((si) => { stock[si.packSize] += si.quantity; });
         stockOuts.forEach((so) => { stock[so.packSize] -= so.quantity; });

@@ -20,15 +20,19 @@ import { SalesCalendar } from "@/components/ui/SalesCalendar";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import {
+  CustomerCategory,
+  CustomerSubType,
   CustomerType,
   Expense,
   PackSize,
+  PACK_SIZES,
   PaymentMethod,
   SaleTransaction,
   SalesTarget,
 } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
 import { ReportCard } from "@/components/reports/ReportCard";
+import { ChartCard } from "@/components/ui/ChartCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 
 const SalesCharts = dynamic(() => import("@/components/sales/SalesCharts"), {
@@ -45,7 +49,7 @@ const SalesCharts = dynamic(() => import("@/components/sales/SalesCharts"), {
 });
 
 type TabKey = "dashboard" | "calendar" | "entry";
-type AnalyticsPeriod = "week" | "month" | "12months" | "custom";
+type AnalyticsPeriod = "day" | "week" | "month" | "12months" | "custom";
 type SalesTargetType = "MONTHLY" | "QUARTERLY" | "SIX_MONTHS" | "ANNUAL";
 
 const SALES_TARGET_TYPE_LABELS: Record<SalesTargetType, string> = {
@@ -60,6 +64,9 @@ function getPeriodBounds(period: AnalyticsPeriod, customStart?: string, customEn
   const todayStr = now.toISOString().split("T")[0];
 
   switch (period) {
+    case "day": {
+      return { start: todayStr, end: todayStr };
+    }
     case "week": {
       const weekStart = new Date(now);
       weekStart.setDate(now.getDate() - 6);
@@ -90,6 +97,12 @@ function getDateKey(date = new Date()) {
   return date.toISOString().split("T")[0];
 }
 
+const EXPECTED_PRICES: Record<PackSize, number> = {
+  HALF_DOZEN: 72000,
+  DOZEN: 144000,
+  CARTON: 1440000,
+};
+
 
 
 export default function SalesPage() {
@@ -116,6 +129,8 @@ export default function SalesPage() {
     date: getDateKey(),
     customerName: "",
     customerType: "RETAIL" as CustomerType,
+    customerCategory: "" as CustomerCategory | "",
+    customerSubType: "" as CustomerSubType | "",
     packSize: "HALF_DOZEN" as PackSize,
     quantitySold: 0,
     unitPrice: 0,
@@ -170,11 +185,143 @@ export default function SalesPage() {
     [expenses, periodBounds]
   );
 
+  const totalRevenue = useMemo(
+    () => filteredTransactions.reduce((s, t) => s + t.totalAmount, 0),
+    [filteredTransactions]
+  );
+
+  const totalSalesCount = filteredTransactions.length;
+
+  const totalPadsSold = useMemo(
+    () => filteredTransactions.reduce((s, t) => s + t.quantitySold * PACK_SIZES[t.packSize], 0),
+    [filteredTransactions]
+  );
+
+  const totalCustomers = useMemo(() => {
+    const unique = new Set(filteredTransactions.map((t) => t.customerName));
+    return unique.size;
+  }, [filteredTransactions]);
+
+  const newCustomers = useMemo(() => {
+    const periodStart = periodBounds.start;
+    const periodCustomers = filteredTransactions.map((t) => t.customerName);
+    const beforePeriodCustomers = new Set(
+      transactions
+        .filter((t) => t.date < periodStart)
+        .map((t) => t.customerName)
+    );
+    return periodCustomers.filter((name) => !beforePeriodCustomers.has(name)).length;
+  }, [filteredTransactions, transactions, periodBounds.start]);
+
+  const b2bCount = useMemo(
+    () => filteredTransactions.filter((t) => t.customerCategory === "B2B").length,
+    [filteredTransactions]
+  );
+
+  const b2cCount = useMemo(
+    () => filteredTransactions.filter((t) => t.customerCategory === "B2C").length,
+    [filteredTransactions]
+  );
+
+  const discountedPacksCount = useMemo(
+    () => filteredTransactions
+      .filter((t) => t.unitPrice < EXPECTED_PRICES[t.packSize])
+      .reduce((sum, t) => sum + t.quantitySold, 0),
+    [filteredTransactions]
+  );
+
+  const totalPacksSold = useMemo(
+    () => filteredTransactions.reduce((sum, t) => sum + t.quantitySold, 0),
+    [filteredTransactions]
+  );
+
+  const averageDiscountPercent = useMemo(() => {
+    if (filteredTransactions.length === 0) return 0;
+    const total = filteredTransactions.reduce((sum, t) => {
+      const expected = EXPECTED_PRICES[t.packSize];
+      if (t.unitPrice >= expected) return sum;
+      return sum + ((expected - t.unitPrice) / expected) * 100;
+    }, 0);
+    return total / filteredTransactions.length;
+  }, [filteredTransactions]);
+
+  const last7DaysRevenue = useMemo(() => {
+    const data: number[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().split("T")[0];
+      data.push(filteredTransactions.filter((t) => t.date === key).reduce((s, t) => s + t.totalAmount, 0));
+    }
+    return data;
+  }, [filteredTransactions]);
+
+  const last7DaysSalesCount = useMemo(() => {
+    const data: number[] = [];
+    for (let i = 6; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = d.toISOString().split("T")[0];
+      data.push(filteredTransactions.filter((t) => t.date === key).length);
+    }
+    return data;
+  }, [filteredTransactions]);
+
+  const packSizeBreakdown = useMemo(() => {
+    const hd = filteredTransactions.filter((t) => t.packSize === "HALF_DOZEN").reduce((s, t) => s + t.quantitySold, 0);
+    const dz = filteredTransactions.filter((t) => t.packSize === "DOZEN").reduce((s, t) => s + t.quantitySold, 0);
+    const ct = filteredTransactions.filter((t) => t.packSize === "CARTON").reduce((s, t) => s + t.quantitySold, 0);
+    const total = hd + dz + ct || 1;
+    return [
+      { name: "½ Doz", value: hd, pct: (hd / total) * 100, color: "#EF4444" },
+      { name: "Doz", value: dz, pct: (dz / total) * 100, color: "#3B82F6" },
+      { name: "Carton", value: ct, pct: (ct / total) * 100, color: "#84CC16" },
+    ];
+  }, [filteredTransactions]);
+
+  const customerTypeSplit = useMemo(() => {
+    const retail = filteredTransactions.filter((t) => t.customerType === "RETAIL").reduce((s, t) => s + t.totalAmount, 0);
+    const bulk = filteredTransactions.filter((t) => t.customerType === "BULK").reduce((s, t) => s + t.totalAmount, 0);
+    const agent = filteredTransactions.filter((t) => t.customerType === "AGENT").reduce((s, t) => s + t.totalAmount, 0);
+    const total = retail + bulk + agent || 1;
+    return [
+      { name: "Retail", value: retail, pct: (retail / total) * 100, color: "#F97316" },
+      { name: "Bulk", value: bulk, pct: (bulk / total) * 100, color: "#22C55E" },
+      { name: "Agent", value: agent, pct: (agent / total) * 100, color: "#A855F7" },
+    ];
+  }, [filteredTransactions]);
+
+  const discountedRatio = useMemo(() => {
+    const disc = discountedPacksCount;
+    const full = Math.max(0, totalPacksSold - disc);
+    const total = disc + full || 1;
+    return { discounted: disc, fullPrice: full, discountedPct: (disc / total) * 100, fullPct: (full / total) * 100 };
+  }, [discountedPacksCount, totalPacksSold]);
+
+  type DiscountByPack = Record<PackSize, number> & { topPack: string };
+
+  const discountByPack = useMemo((): DiscountByPack => {
+    const discounts: Record<string, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0 };
+    filteredTransactions.forEach((t) => {
+      const expected = EXPECTED_PRICES[t.packSize];
+      if (t.unitPrice < expected) {
+        discounts[t.packSize] += (expected - t.unitPrice) * t.quantitySold;
+      }
+    });
+    const entries = Object.entries(discounts).filter(([, v]) => v > 0);
+    const topPack = entries.length === 0 ? "None" : entries.sort((a, b) => b[1] - a[1])[0][0];
+    return { HALF_DOZEN: discounts.HALF_DOZEN, DOZEN: discounts.DOZEN, CARTON: discounts.CARTON, topPack };
+  }, [filteredTransactions]);
+
   const { data: salesTargets = [] } = useCollectionQuery<SalesTarget>("salesTargets", [
     orderBy("createdAt", "desc"),
   ], { staleTime: 30 * 1000 });
 
   const totalAmount = form.quantitySold * form.unitPrice;
+  const expectedPrice = EXPECTED_PRICES[form.packSize];
+  const expectedTotal = form.quantitySold * expectedPrice;
+  const formDiscountAmount = Math.max(0, expectedTotal - totalAmount);
+  const formDiscountPercent = expectedTotal > 0 ? (formDiscountAmount / expectedTotal) * 100 : 0;
 
   const salespersonEmployees = useMemo(
     () => employees.filter((e) => e.department === "SALES"),
@@ -194,6 +341,8 @@ export default function SalesPage() {
         date: getDateKey(),
         customerName: "",
         customerType: "RETAIL",
+        customerCategory: "",
+        customerSubType: "",
         packSize: "HALF_DOZEN",
         quantitySold: 0,
         unitPrice: 0,
@@ -309,12 +458,12 @@ export default function SalesPage() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Analytics</h2>
               <p className="text-sm text-gray-500">
-                {analyticsPeriod === "week" ? "Last 7 days" : analyticsPeriod === "month" ? "Last 30 days" : analyticsPeriod === "12months" ? "Last 12 months" : "Custom period"}
+                {analyticsPeriod === "day" ? "Today" : analyticsPeriod === "week" ? "Last 7 days" : analyticsPeriod === "month" ? "Last 30 days" : analyticsPeriod === "12months" ? "Last 12 months" : "Custom period"}
               </p>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-                {(["week", "month", "12months", "custom"] as const).map((p) => (
+                {(["day", "week", "month", "12months", "custom"] as const).map((p) => (
                   <button
                     key={p}
                     onClick={() => setAnalyticsPeriod(p)}
@@ -322,7 +471,7 @@ export default function SalesPage() {
                       analyticsPeriod === p ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
                     }`}
                   >
-                    {p === "week" ? "Week" : p === "month" ? "Month" : p === "12months" ? "12 Months" : "Custom"}
+                    {p === "day" ? "Day" : p === "week" ? "Week" : p === "month" ? "Month" : p === "12months" ? "12 Months" : "Custom"}
                   </button>
                 ))}
               </div>
@@ -336,6 +485,280 @@ export default function SalesPage() {
                 </div>
               )}
             </div>
+          </div>
+
+          {/* Row 1: Revenue, Sales, Products Sold */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <ChartCard title="Total Revenue">
+              <p className="text-2xl font-bold text-gray-900">UGX {totalRevenue.toLocaleString()}</p>
+              {last7DaysRevenue.length > 0 && (
+                <div className="mt-2 w-full" style={{ height: 50 }}>
+                  <svg width="100%" height="50" viewBox="0 0 100 50" preserveAspectRatio="none">
+                    <defs>
+                      <linearGradient id="revSparkGrad" x1="0" y1="0" x2="1" y2="0">
+                        <stop offset="0%" stopColor="#EF4444" stopOpacity={0.4} />
+                        <stop offset="50%" stopColor="#F97316" stopOpacity={0.25} />
+                        <stop offset="100%" stopColor="#FBBF24" stopOpacity={0.05} />
+                      </linearGradient>
+                    </defs>
+                    {(() => {
+                      const max = Math.max(...last7DaysRevenue, 1);
+                      const pts = last7DaysRevenue.map((v, i) => `${(i / (last7DaysRevenue.length - 1)) * 100},${50 - (v / max) * 42}`).join(" ");
+                      const barColors = ["#EF4444", "#F97316", "#FBBF24", "#84CC16", "#3B82F6", "#A855F7", "#EC4899"];
+                      return (
+                        <>
+                          <polygon points={`0,50 ${pts} 100,50`} fill="url(#revSparkGrad)" />
+                          <polyline points={pts} fill="none" stroke="#F97316" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                          {last7DaysRevenue.map((v, i) => (
+                            <circle key={i} cx={(i / (last7DaysRevenue.length - 1)) * 100} cy={50 - (v / max) * 42} r={2} fill={barColors[i]} stroke="#fff" strokeWidth={0.5} />
+                          ))}
+                        </>
+                      );
+                    })()}
+                  </svg>
+                </div>
+              )}
+            </ChartCard>
+            <ChartCard title="Total Sales">
+              <p className="text-2xl font-bold text-gray-900">{totalSalesCount}</p>
+              {last7DaysSalesCount.length > 0 && (
+                <div className="mt-2 w-full" style={{ height: 50 }}>
+                  <svg width="100%" height="50" viewBox="0 0 100 50" preserveAspectRatio="none">
+                    {(() => {
+                      const max = Math.max(...last7DaysSalesCount, 1);
+                      const barW = 80 / last7DaysSalesCount.length;
+                      const barColors = ["#EF4444", "#F97316", "#FBBF24", "#84CC16", "#3B82F6", "#A855F7", "#EC4899"];
+                      return last7DaysSalesCount.map((v, i) => {
+                        const h = (v / max) * 42;
+                        const x = 10 + i * barW;
+                        return (
+                          <rect key={i} x={x} y={50 - h} width={Math.max(barW - 2, 4)} height={Math.max(h, 2)} rx={2} fill={barColors[i % barColors.length]} opacity={0.85} />
+                        );
+                      });
+                    })()}
+                  </svg>
+                </div>
+              )}
+            </ChartCard>
+            <ChartCard title="Products Sold (Pads)">
+              <p className="text-2xl font-bold text-gray-900">{totalPadsSold.toLocaleString()}</p>
+              <div className="mt-3 space-y-2">
+                {packSizeBreakdown.map((p) => (
+                  <div key={p.name}>
+                    <div className="flex justify-between text-[10px] font-semibold">
+                      <span className="text-gray-500">{p.name}</span>
+                      <span className="text-gray-800">{p.value.toLocaleString()}</span>
+                    </div>
+                    <div className="w-full h-2 bg-gray-100 rounded-full overflow-hidden mt-0.5">
+                      <div className="h-full rounded-full" style={{ width: `${p.pct}%`, backgroundColor: p.color }} />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </ChartCard>
+          </div>
+
+          {/* Row 2: Customers, New Customers, B2C vs B2B */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <ChartCard title="Total Customers">
+              <p className="text-2xl font-bold text-gray-900">{totalCustomers}</p>
+              <div className="mt-2 flex items-center gap-3">
+                <div className="shrink-0" style={{ width: 56, height: 56 }}>
+                  <svg width="56" height="56" viewBox="0 0 56 56">
+                    {(() => {
+                      const cx = 28, cy = 28, r = 22, circ = 2 * Math.PI * r;
+                      let offset = 0;
+                      return customerTypeSplit.map((s) => {
+                        const seg = (s.pct / 100) * circ;
+                        const dash = `${seg} ${circ - seg}`;
+                        const rot = (offset / circ) * 360 - 90;
+                        offset += seg;
+                        return (
+                          <circle key={s.name} cx={cx} cy={cy} r={r} fill="none" stroke={s.color} strokeWidth={5} strokeDasharray={dash} strokeLinecap="round" transform={`rotate(${rot} ${cx} ${cy})`} opacity={0.9} />
+                        );
+                      });
+                    })()}
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0 space-y-1">
+                  {customerTypeSplit.map((s) => (
+                    <div key={s.name} className="flex items-center justify-between text-[10px]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
+                        <span className="font-semibold text-gray-500">{s.name}</span>
+                      </div>
+                      <span className="font-bold text-gray-800">{s.pct.toFixed(0)}%</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </ChartCard>
+            <ChartCard title="New Customers">
+              <p className="text-2xl font-bold text-gray-900">{newCustomers}</p>
+              <div className="mt-2 w-full" style={{ height: 50 }}>
+                <svg width="100%" height="50" viewBox="0 0 100 50" preserveAspectRatio="none">
+                  <defs>
+                    <linearGradient id="custGrad" x1="0" y1="0" x2="1" y2="0">
+                      <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.3} />
+                      <stop offset="100%" stopColor="#A855F7" stopOpacity={0.05} />
+                    </linearGradient>
+                  </defs>
+                  {(() => {
+                    const growthData = last7DaysSalesCount.map((_, i) => {
+                      const slice = last7DaysSalesCount.slice(0, i + 1);
+                      const unique = new Set<string>();
+                      slice.forEach((_, j) => {
+                        const d = new Date();
+                        d.setDate(d.getDate() - (6 - j));
+                        const key = d.toISOString().split("T")[0];
+                        filteredTransactions.filter((t) => t.date === key).forEach((t) => unique.add(t.customerName));
+                      });
+                      return unique.size;
+                    });
+                    const max = Math.max(...growthData, 1);
+                    const pts = growthData.map((v, i) => `${(i / (growthData.length - 1)) * 100},${50 - (v / max) * 42}`).join(" ");
+                    const dotColors = ["#EF4444", "#F97316", "#FBBF24", "#84CC16", "#3B82F6", "#A855F7", "#EC4899"];
+                    return (
+                      <>
+                        <polygon points={`0,50 ${pts} 100,50`} fill="url(#custGrad)" />
+                        <polyline points={pts} fill="none" stroke="#3B82F6" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round" />
+                        {growthData.map((v, i) => (
+                          <circle key={i} cx={(i / (growthData.length - 1)) * 100} cy={50 - (v / max) * 42} r={2} fill={dotColors[i % dotColors.length]} stroke="#fff" strokeWidth={0.5} />
+                        ))}
+                      </>
+                    );
+                  })()}
+                </svg>
+              </div>
+            </ChartCard>
+            <ChartCard title="B2C vs B2B">
+              {(() => {
+                const total = b2bCount + b2cCount;
+                const b2cPct = total > 0 ? (b2cCount / total) * 100 : 0;
+                const b2bPct = total > 0 ? (b2bCount / total) * 100 : 0;
+                const max = Math.max(b2cCount, b2bCount, 1);
+                return (
+                  <div className="space-y-3">
+                    <div>
+                      <div className="flex items-center justify-between text-[10px] font-semibold mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: "#EF4444" }} />
+                          <span className="text-gray-600">B2C</span>
+                        </div>
+                        <span className="text-gray-900">{b2cCount} ({b2cPct.toFixed(0)}%)</span>
+                      </div>
+                      <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${(b2cCount / max) * 100}%`, backgroundColor: "#EF4444" }} />
+                      </div>
+                    </div>
+                    <div>
+                      <div className="flex items-center justify-between text-[10px] font-semibold mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-sm shrink-0" style={{ backgroundColor: "#3B82F6" }} />
+                          <span className="text-gray-600">B2B</span>
+                        </div>
+                        <span className="text-gray-900">{b2bCount} ({b2bPct.toFixed(0)}%)</span>
+                      </div>
+                      <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${(b2bCount / max) * 100}%`, backgroundColor: "#3B82F6" }} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </ChartCard>
+          </div>
+
+          {/* Row 3: Discount Metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <ChartCard title="Discounted Packs">
+              <p className="text-2xl font-bold text-gray-900">{discountedPacksCount}</p>
+              <p className="text-xs text-gray-400 mt-1">out of {totalPacksSold} total packs sold</p>
+              <div className="mt-2 flex items-center gap-2">
+                <div className="shrink-0" style={{ width: 48, height: 48 }}>
+                  <svg width="48" height="48" viewBox="0 0 48 48">
+                    {(() => {
+                      const cx = 24, cy = 24, r = 18, circ = 2 * Math.PI * r;
+                      const discSeg = (discountedRatio.discountedPct / 100) * circ;
+                      const fullSeg = (discountedRatio.fullPct / 100) * circ;
+                      return (
+                        <>
+                          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#f1f5f9" strokeWidth={4} />
+                          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#FBBF24" strokeWidth={4} strokeDasharray={`${discSeg} ${circ - discSeg}`} strokeLinecap="round" transform={`rotate(-90 ${cx} ${cy})`} opacity={0.9} />
+                          <circle cx={cx} cy={cy} r={r} fill="none" stroke="#22C55E" strokeWidth={4} strokeDasharray={`${fullSeg} ${circ - fullSeg}`} strokeLinecap="round" transform={`rotate(${(discountedRatio.discountedPct / 100) * 360 - 90} ${cx} ${cy})`} opacity={0.9} />
+                        </>
+                      );
+                    })()}
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0 space-y-0.5">
+                  <div className="flex items-center justify-between text-[10px]">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: "#FBBF24" }} />
+                      <span className="font-semibold text-gray-500">Discounted</span>
+                    </div>
+                    <span className="font-bold text-gray-800">{discountedRatio.discountedPct.toFixed(1)}%</span>
+                  </div>
+                  <div className="flex items-center justify-between text-[10px]">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: "#22C55E" }} />
+                      <span className="font-semibold text-gray-500">Full Price</span>
+                    </div>
+                    <span className="font-bold text-gray-800">{discountedRatio.fullPct.toFixed(1)}%</span>
+                  </div>
+                </div>
+              </div>
+            </ChartCard>
+            <ChartCard title="Average Discount">
+              <p className="text-2xl font-bold text-gray-900">{averageDiscountPercent.toFixed(1)}%</p>
+              <p className="text-xs text-gray-400 mt-1">across all products</p>
+              <div className="mt-2 flex justify-center" style={{ height: 52 }}>
+                <svg width="100" height="52" viewBox="0 0 100 52">
+                  {(() => {
+                    const pct = Math.min(averageDiscountPercent, 100);
+                    const circ = Math.PI * 38;
+                    const dash = (pct / 100) * circ;
+                    const color = pct >= 20 ? "#EF4444" : pct >= 10 ? "#F97316" : "#FBBF24";
+                    return (
+                      <>
+                        <path d={`M 6 50 A 44 44 0 0 1 94 50`} fill="none" stroke="#f1f5f9" strokeWidth={8} strokeLinecap="round" />
+                        <path d={`M 6 50 A 44 44 0 0 1 94 50`} fill="none" stroke={color} strokeWidth={8} strokeLinecap="round" strokeDasharray={`${dash} ${circ}`} style={{ transition: "stroke-dashoffset 1s ease" }} />
+                      </>
+                    );
+                  })()}
+                </svg>
+              </div>
+            </ChartCard>
+            <ChartCard title="Discount by Pack Size">
+              <p className="text-xs text-gray-400 mb-2">Total discount value per pack type</p>
+              <div className="space-y-2">
+                {([
+                  { key: "HALF_DOZEN" as const, label: "Half Dozen", color: "#F97316" },
+                  { key: "DOZEN" as const, label: "Dozen", color: "#3B82F6" },
+                  { key: "CARTON" as const, label: "Carton", color: "#FBBF24" },
+                ]).map((p) => {
+                  const val = discountByPack[p.key];
+                  const maxVal = Math.max(discountByPack.HALF_DOZEN, discountByPack.DOZEN, discountByPack.CARTON, 1);
+                  const barPct = (val / maxVal) * 100;
+                  const isTop = discountByPack.topPack === p.key;
+                  return (
+                    <div key={p.key}>
+                      <div className="flex items-center justify-between text-xs mb-0.5">
+                        <span className={`font-semibold ${isTop ? "text-gray-900" : "text-gray-500"}`}>
+                          {p.label} {isTop && "★"}
+                        </span>
+                        <span className={`font-bold ${isTop ? "text-gray-900" : "text-gray-600"}`}>
+                          UGX {val.toLocaleString()}
+                        </span>
+                      </div>
+                      <div className="w-full h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div className="h-full rounded-full" style={{ width: `${barPct}%`, backgroundColor: p.color, opacity: isTop ? 1 : 0.5 }} />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </ChartCard>
           </div>
 
           <SalesCharts transactions={filteredTransactions} expenses={filteredExpenses} salesTargets={salesTargets} />
@@ -441,6 +864,56 @@ export default function SalesPage() {
             )}
           </div>
 
+          {/* Sales List */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-gray-900">Sales List</h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? "s" : ""} in this period
+                </p>
+              </div>
+            </div>
+            <div className="overflow-x-auto max-h-80 overflow-y-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50 sticky top-0">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pack</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payment</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Salesperson</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {filteredTransactions.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">No transactions in this period.</td>
+                    </tr>
+                  ) : (
+                    filteredTransactions.map((t) => (
+                      <tr key={t.id} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{t.date}</td>
+                        <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{t.customerName}</td>
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                          {t.packSize === "HALF_DOZEN" ? "Half Dozen" : t.packSize === "DOZEN" ? "Dozen" : "Carton"}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-700 whitespace-nowrap">{t.quantitySold}</td>
+                        <td className="px-4 py-3 text-right font-medium text-gray-900 whitespace-nowrap">UGX {t.totalAmount.toLocaleString()}</td>
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
+                          {t.paymentMethod === "CASH" ? "Cash" : t.paymentMethod === "MOBILE_MONEY" ? "M.Money" : "Bank Transfer"}
+                        </td>
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{employees.find((e) => e.id === t.salespersonId)?.name || t.salespersonId}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
           <ReportCard title="Sales Report" subtitle="Download a PDF summary of sales and revenue data" onGenerate={handleGenerateReport} />
         </>
       )}
@@ -481,6 +954,18 @@ export default function SalesPage() {
               />
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Customer Channel</label>
+              <select
+                value={form.customerCategory}
+                onChange={(event) => setForm({ ...form, customerCategory: event.target.value as CustomerCategory })}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+              >
+                <option value="">Select...</option>
+                <option value="B2B">B2B (Business)</option>
+                <option value="B2C">B2C (Consumer)</option>
+              </select>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Customer Type</label>
               <select
                 value={form.customerType}
@@ -493,16 +978,33 @@ export default function SalesPage() {
               </select>
             </div>
             <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Customer Sub-Type</label>
+              <select
+                value={form.customerSubType}
+                onChange={(event) => setForm({ ...form, customerSubType: event.target.value as CustomerSubType })}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+              >
+                <option value="">Select...</option>
+                <option value="INDIVIDUAL">Individual</option>
+                <option value="PRIVATE_COMPANY">Private Company</option>
+                <option value="NON_PROFIT">Non-Profit Organization</option>
+                <option value="RETAILER">Retailer</option>
+              </select>
+            </div>
+            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Pack Size</label>
               <select
                 value={form.packSize}
                 onChange={(event) => setForm({ ...form, packSize: event.target.value as PackSize })}
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
               >
-                <option value="HALF_DOZEN">Half Dozen (6 pads)</option>
-                <option value="DOZEN">Dozen (12 pads)</option>
-                <option value="CARTON">Carton (60 pads)</option>
+                <option value="HALF_DOZEN">Half Dozen (6 Packs)</option>
+                <option value="DOZEN">Dozen (12 Packs)</option>
+                <option value="CARTON">Carton (120 packs)</option>
               </select>
+              <p className="mt-1 text-xs text-gray-500">
+                Expected price: UGX {expectedPrice.toLocaleString()} per pack
+              </p>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
@@ -529,6 +1031,11 @@ export default function SalesPage() {
                 min={0}
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
               />
+              {form.unitPrice > 0 && form.unitPrice < expectedPrice && (
+                <p className="mt-1 text-xs text-amber-600">
+                  Discount: UGX {formDiscountAmount.toLocaleString()} ({formDiscountPercent.toFixed(1)}% off)
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Total Amount</label>

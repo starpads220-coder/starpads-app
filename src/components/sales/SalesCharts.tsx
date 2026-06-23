@@ -37,21 +37,21 @@ function getWeekRangeLabel(start: Date, end: Date) {
 }
 
 const colorWheel = [
-  palette.violet,
-  palette.sky,
-  palette.emerald,
-  palette.rose,
-  palette.yellow,
-  palette.teal,
-  palette.indigo,
-  palette.orange,
-  palette.pink,
+  "#EF4444",
+  "#F97316",
+  "#FBBF24",
+  "#84CC16",
+  "#3B82F6",
+  "#A855F7",
+  "#EC4899",
+  "#14B8A6",
+  "#06B6D4",
 ];
 
 const paymentColorMap: Record<string, string> = {
-  CASH: palette.emerald,
-  MOBILE_MONEY: palette.violet,
-  BANK_TRANSFER: palette.blue,
+  CASH: "#22C55E",
+  MOBILE_MONEY: "#A855F7",
+  BANK_TRANSFER: "#F97316",
 };
 
 interface GlassTooltipProps {
@@ -181,7 +181,7 @@ function SemiCircularGauge({
   const clamped = Math.max(0, Math.min(percent, 100));
   const offset = circumference - clamped / 100 * circumference;
 
-  const stopColor = clamped >= 20 ? "#22c55e" : clamped >= 10 ? palette.yellow : palette.red;
+  const stopColor = clamped >= 20 ? "#84CC16" : clamped >= 10 ? "#F97316" : "#EF4444";
 
   return (
     <div className="flex flex-col items-center justify-center flex-1">
@@ -491,9 +491,9 @@ export default function SalesCharts({ transactions, expenses, salesTargets = [] 
       typeTotals[t.customerType] = (typeTotals[t.customerType] || 0) + t.totalAmount;
     });
     const typeColors: Record<string, string> = {
-      RETAIL: palette.sky,
-      BULK: palette.violet,
-      AGENT: palette.emerald,
+      RETAIL: "#F97316",
+      BULK: "#A855F7",
+      AGENT: "#22C55E",
     };
     return Object.entries(typeTotals).map(([name, value]) => ({
       name: name === "RETAIL" ? "Retail" : name === "BULK" ? "Bulk" : "Agent",
@@ -690,13 +690,16 @@ export default function SalesCharts({ transactions, expenses, salesTargets = [] 
       <svg className="absolute w-0 h-0" aria-hidden>
         <defs>
           <linearGradient id="weeklyBarGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={palette.violet} stopOpacity={0.9} />
-            <stop offset="100%" stopColor={palette.violet} stopOpacity={0.5} />
+            <stop offset="0%" stopColor="#A855F7" stopOpacity={0.9} />
+            <stop offset="100%" stopColor="#A855F7" stopOpacity={0.5} />
           </linearGradient>
           <linearGradient id="revenueAreaGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={palette.orange} stopOpacity={0.3} />
-            <stop offset="50%" stopColor={palette.orange} stopOpacity={0.08} />
-            <stop offset="100%" stopColor={palette.orange} stopOpacity={0} />
+            <stop offset="0%" stopColor="#EF4444" stopOpacity={0.15} />
+            <stop offset="95%" stopColor="#EF4444" stopOpacity={0.01} />
+          </linearGradient>
+          <linearGradient id="expensesAreaGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#3B82F6" stopOpacity={0.12} />
+            <stop offset="95%" stopColor="#3B82F6" stopOpacity={0.01} />
           </linearGradient>
           <filter id="areaLineGlow">
             <feGaussianBlur stdDeviation="3" result="blur" />
@@ -717,12 +720,11 @@ export default function SalesCharts({ transactions, expenses, salesTargets = [] 
             <MultiLineAreaChart
               data={last30Revenue}
               series={[
-                { dataKey: "revenue", name: "Revenue", color: palette.orange, gradientId: "revGrad" },
-                { dataKey: "expenses", name: "Expenses", color: palette.blue, gradientId: "expGrad" },
-                { dataKey: "profit", name: "Profit", color: palette.green, gradientId: "proGrad" },
+                { dataKey: "revenue", name: "Revenue", color: "#EF4444", gradientId: "revGrad" },
+                { dataKey: "expenses", name: "Expenses", color: "#3B82F6", gradientId: "expGrad" },
               ]}
               title="Revenue Trend"
-              subtitle="30-day revenue, expenses & profit"
+              subtitle="30-day revenue vs expenses"
               height={220}
               badge={dailyRevenue > 0 ? { label: "Today", value: formatCurrency(dailyRevenue), color: "green" } : undefined}
             />
@@ -743,7 +745,7 @@ export default function SalesCharts({ transactions, expenses, salesTargets = [] 
                 percent={monthlyProgress}
                 value={monthlyRevenue}
                 target={monthlyTargetAmount}
-                color={monthlyProgress >= 80 ? palette.emerald : monthlyProgress >= 50 ? palette.violet : palette.yellow}
+                color={monthlyProgress >= 80 ? "#22C55E" : monthlyProgress >= 50 ? "#A855F7" : "#FBBF24"}
               />
             )}
           </ChartCard>
@@ -786,11 +788,11 @@ export default function SalesCharts({ transactions, expenses, salesTargets = [] 
 
           <StackedColumnChart
             data={packSizeData}
-            series={[
-              { dataKey: "HALF_DOZEN", name: "Half Dozen", color: palette.sky, stackId: "a" },
-              { dataKey: "DOZEN", name: "Dozen", color: palette.emerald, stackId: "a" },
-              { dataKey: "CARTON", name: "Carton", color: palette.violet, stackId: "a" },
-            ]}
+              series={[
+                { dataKey: "HALF_DOZEN", name: "Half Dozen", color: "#EF4444", stackId: "a" },
+                { dataKey: "DOZEN", name: "Dozen", color: "#FBBF24", stackId: "a" },
+                { dataKey: "CARTON", name: "Carton", color: "#84CC16", stackId: "a" },
+              ]}
             title="Pack Size Volume"
             subtitle="Daily units sold by pack size"
             height={220}

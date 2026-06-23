@@ -303,7 +303,7 @@ export default function StoragePage() {
             </div>
           </ChartCard>
 
-          <ChartCard title="Carton" subtitle="60-pad packs in stock" variant="gradient" accentColor={palette.purple}>
+          <ChartCard title="Carton" subtitle="120-pad packs in stock" variant="gradient" accentColor={palette.purple}>
             <div className="flex flex-col items-center justify-center h-full">
               <span className="text-3xl font-bold text-purple-500">{currentStock.CARTON.toLocaleString()}</span>
               <span className="text-xs text-gray-400 mt-1">packs</span>
@@ -476,9 +476,9 @@ export default function StoragePage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Pack Size</label>
               <select value={stockInForm.packSize} onChange={(e) => setStockInForm({ ...stockInForm, packSize: e.target.value as PackSize })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
-                <option value="HALF_DOZEN">Half Dozen (6 pads)</option>
-                <option value="DOZEN">Dozen (12 pads)</option>
-                <option value="CARTON">Carton (60 pads)</option>
+                <option value="HALF_DOZEN">Half Dozen (6 Packs)</option>
+                <option value="DOZEN">Dozen (12 Packs)</option>
+                <option value="CARTON">Carton (120 packs)</option>
               </select>
             </div>
             <div>
@@ -549,9 +549,9 @@ export default function StoragePage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Pack Size</label>
               <select value={stockOutForm.packSize} onChange={(e) => setStockOutForm({ ...stockOutForm, packSize: e.target.value as PackSize })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
-                <option value="HALF_DOZEN">Half Dozen (6 pads)</option>
-                <option value="DOZEN">Dozen (12 pads)</option>
-                <option value="CARTON">Carton (60 pads)</option>
+                <option value="HALF_DOZEN">Half Dozen (6 Packs)</option>
+                <option value="DOZEN">Dozen (12 Packs)</option>
+                <option value="CARTON">Carton (120 packs)</option>
               </select>
             </div>
             <div>

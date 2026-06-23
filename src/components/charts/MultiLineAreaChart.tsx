@@ -55,9 +55,8 @@ export function MultiLineAreaChart({
           <defs>
             {series.map((s) => (
               <linearGradient key={s.gradientId} id={s.gradientId} x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor={s.color} stopOpacity={0.25} />
-                <stop offset="60%" stopColor={s.color} stopOpacity={0.08} />
-                <stop offset="100%" stopColor={s.color} stopOpacity={0} />
+                <stop offset="0%" stopColor={s.color} stopOpacity={0.15} />
+                <stop offset="95%" stopColor={s.color} stopOpacity={0.01} />
               </linearGradient>
             ))}
           </defs>
@@ -66,7 +65,7 @@ export function MultiLineAreaChart({
           <YAxis tickFormatter={formatCompact} axisLine={false} tickLine={false} tick={tickStyles.y} width={45} />
           <Tooltip content={<ChartTooltip formatter={formatCompact} />} cursor={{ stroke: "#e2e8f0", strokeWidth: 1, strokeDasharray: "4 4" }} />
           {showLegend && <Legend verticalAlign="top" height={28} iconType="circle" fontSize={10} wrapperStyle={{ fontWeight: 700, color: "#64748b" }} />}
-          {series.map((s) => (
+          {series.map((s, i) => (
             <Area
               key={s.dataKey}
               type="monotone"
@@ -78,7 +77,7 @@ export function MultiLineAreaChart({
               activeDot={{ r: 5, fill: "#fff", stroke: s.color, strokeWidth: 2.5 }}
               name={s.name}
               animationDuration={anim.duration}
-              animationBegin={anim.begin}
+              animationBegin={anim.begin + i * 200}
             />
           ))}
         </AreaChart>
