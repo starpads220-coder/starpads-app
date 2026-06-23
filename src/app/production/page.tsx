@@ -38,9 +38,9 @@ import { palette, chartColors } from "@/components/charts";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 
-type TimeWindow = "today" | "week" | "month";
+type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
 
-function getDateBounds(window: TimeWindow) {
+function getDateBounds(window: TimeWindow, customStart?: string, customEnd?: string) {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
   if (window === "today") return { start: todayStr, end: todayStr };
@@ -49,7 +49,13 @@ function getDateBounds(window: TimeWindow) {
   const weekStartStr = weekStart.toISOString().split("T")[0];
   if (window === "week") return { start: weekStartStr, end: todayStr };
   const monthStartStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-  return { start: monthStartStr, end: todayStr };
+  if (window === "month") return { start: monthStartStr, end: todayStr };
+  if (window === "12months") {
+    const yearStart = new Date(now);
+    yearStart.setFullYear(now.getFullYear() - 1);
+    return { start: yearStart.toISOString().split("T")[0], end: todayStr };
+  }
+  return { start: customStart || todayStr, end: customEnd || todayStr };
 }
 
 const CUTTING_RATIOS: Record<string, number> = {
@@ -75,6 +81,8 @@ export default function ProductionPage() {
   const { userRole } = useAuth();
   const [saving, setSaving] = useState(false);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("today");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [viewDate, setViewDate] = useState(new Date().toISOString().split("T")[0]);
 
   const [form, setForm] = useState({
@@ -127,7 +135,7 @@ export default function ProductionPage() {
     return () => unsub();
   }, []);
 
-  const { start, end } = getDateBounds(timeWindow);
+  const { start, end } = getDateBounds(timeWindow, customStart, customEnd);
   const filteredEntries = useMemo(() =>
     entries.filter((e) => e.date >= start && e.date <= end),
     [entries, start, end]
@@ -400,6 +408,10 @@ export default function ProductionPage() {
 
   const handleWindowChange = (tw: TimeWindow) => {
     setTimeWindow(tw);
+    if (tw !== "custom") {
+      setCustomStart("");
+      setCustomEnd("");
+    }
   };
 
   const handleGenerateReport = useCallback(async (selection: PeriodSelection) => {
@@ -430,7 +442,7 @@ export default function ProductionPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Production</h1>
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          {(["today", "week", "month"] as const).map((tw) => (
+          {(["today", "week", "month", "12months", "custom"] as const).map((tw) => (
             <button
               key={tw}
               onClick={() => handleWindowChange(tw)}
@@ -438,11 +450,20 @@ export default function ProductionPage() {
                 timeWindow === tw ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
               }`}
             >
-              {tw === "today" ? "Today" : tw === "week" ? "This Week" : "This Month"}
+              {tw === "today" ? "Today" : tw === "week" ? "This Week" : tw === "month" ? "This Month" : tw === "12months" ? "12 Months" : "Custom"}
             </button>
           ))}
         </div>
       </div>
+      {timeWindow === "custom" && (
+        <div className="flex items-center gap-2">
+          <input type="date" value={customStart} onChange={(e) => setCustomStart(e.target.value)}
+            className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
+          <span className="text-xs text-gray-400">to</span>
+          <input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)}
+            className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <ChartCard title="Total Pieces" subtitle="All stages combined" variant="gradient" accentColor="#3b82f6">

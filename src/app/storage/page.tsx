@@ -29,6 +29,34 @@ import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 
 const PADS_PER_PACK = 3;
 
+type StoragePeriod = "today" | "week" | "month" | "12months" | "custom";
+
+function getStoragePeriodBounds(period: StoragePeriod, customStart?: string, customEnd?: string) {
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
+  switch (period) {
+    case "today":
+      return { start: todayStr, end: todayStr };
+    case "week": {
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - 6);
+      return { start: weekStart.toISOString().split("T")[0], end: todayStr };
+    }
+    case "month": {
+      const monthStart = new Date(now);
+      monthStart.setDate(now.getDate() - 29);
+      return { start: monthStart.toISOString().split("T")[0], end: todayStr };
+    }
+    case "12months": {
+      const yearStart = new Date(now);
+      yearStart.setFullYear(now.getFullYear() - 1);
+      return { start: yearStart.toISOString().split("T")[0], end: todayStr };
+    }
+    case "custom":
+      return { start: customStart || todayStr, end: customEnd || todayStr };
+  }
+}
+
 export default function StoragePage() {
   const { userRole } = useAuth();
   const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
@@ -47,6 +75,12 @@ export default function StoragePage() {
   };
 
   const [moveEntryId, setMoveEntryId] = useState<string | null>(null);
+  const [storagePeriod, setStoragePeriod] = useState<StoragePeriod>("month");
+  const [storageCustomStart, setStorageCustomStart] = useState("");
+  const [storageCustomEnd, setStorageCustomEnd] = useState("");
+  const [stockOutPeriod, setStockOutPeriod] = useState<StoragePeriod>("month");
+  const [stockOutCustomStart, setStockOutCustomStart] = useState("");
+  const [stockOutCustomEnd, setStockOutCustomEnd] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -114,12 +148,39 @@ export default function StoragePage() {
     "saleTransactions", [orderBy("date", "desc")], { staleTime: 60 * 1000 }
   );
 
-  const currentStock = useMemo(() => {
+  const periodBounds = useMemo(
+    () => getStoragePeriodBounds(storagePeriod, storageCustomStart, storageCustomEnd),
+    [storagePeriod, storageCustomStart, storageCustomEnd]
+  );
+
+  const periodStockIns = useMemo(
+    () => stockIns.filter((si) => si.date >= periodBounds.start && si.date <= periodBounds.end),
+    [stockIns, periodBounds]
+  );
+
+  const periodStockOuts = useMemo(
+    () => stockOuts.filter((so) => so.date >= periodBounds.start && so.date <= periodBounds.end),
+    [stockOuts, periodBounds]
+  );
+
+  const cumulativeStock = useMemo(() => {
     const stock: Record<PackSize, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0 };
     stockIns.forEach((si) => { stock[si.packSize as PackSize] += si.quantity; });
     stockOuts.forEach((so) => { stock[so.packSize as PackSize] -= so.quantity; });
     return stock;
   }, [stockIns, stockOuts]);
+
+  const cumulativeTotalPads = useMemo(
+    () => Object.entries(cumulativeStock).reduce((sum, [size, qty]) => sum + qty * PACK_SIZES[size as PackSize], 0),
+    [cumulativeStock]
+  );
+
+  const currentStock = useMemo(() => {
+    const stock: Record<PackSize, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0 };
+    periodStockIns.forEach((si) => { stock[si.packSize as PackSize] += si.quantity; });
+    periodStockOuts.forEach((so) => { stock[so.packSize as PackSize] -= so.quantity; });
+    return stock;
+  }, [periodStockIns, periodStockOuts]);
 
   const totalPads = useMemo(
     () => Object.entries(currentStock).reduce((sum, [size, qty]) => sum + qty * PACK_SIZES[size as PackSize], 0),
@@ -145,8 +206,8 @@ export default function StoragePage() {
     const recentSales = sales.filter((s) => s.date >= sevenDaysAgoStr);
     const recentSalesPads = recentSales.reduce((sum, s) => sum + s.quantitySold * PACK_SIZES[s.packSize as PackSize], 0);
     const avgDailySales = recentSalesPads / 7;
-    return avgDailySales > 0 ? Math.round(totalPads / avgDailySales) : 999;
-  }, [sales, totalPads]);
+    return avgDailySales > 0 ? Math.round(cumulativeTotalPads / avgDailySales) : 999;
+  }, [sales, cumulativeTotalPads]);
 
   const stageCounts = useMemo(() => {
     const counts: Record<StageId, number> = {
@@ -184,24 +245,55 @@ export default function StoragePage() {
       .map(([date, pads]) => ({ label: date, value: pads }));
   }, [stockIns]);
 
-  const stockHeatmapData = useMemo(() => {
+  const periodDailyStockInData = useMemo(() => {
     const byDate: Record<string, number> = {};
-    stockIns.forEach((si) => {
+    periodStockIns.forEach((si) => {
+      const pads = si.quantity * PACK_SIZES[si.packSize as PackSize];
+      byDate[si.date] = (byDate[si.date] || 0) + pads;
+    });
+    return Object.entries(byDate)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, pads]) => ({ label: date, value: pads }));
+  }, [periodStockIns]);
+
+  const periodStockHeatmapData = useMemo(() => {
+    const byDate: Record<string, number> = {};
+    periodStockIns.forEach((si) => {
       byDate[si.date] = (byDate[si.date] || 0) + si.quantity * PACK_SIZES[si.packSize as PackSize];
     });
     return Object.entries(byDate).map(([date, value]) => ({ date, value }));
-  }, [stockIns]);
+  }, [periodStockIns]);
 
-  const recentActivity = useMemo(() => {
+  const periodRecentActivity = useMemo(() => {
     const activities: { date: string; type: "in" | "out"; label: string; value: number }[] = [];
-    stockIns.slice(0, 10).forEach((si) => {
+    periodStockIns.slice(0, 10).forEach((si) => {
       activities.push({ date: si.date, type: "in", label: "Stock In", value: si.quantity * PACK_SIZES[si.packSize as PackSize] });
     });
-    stockOuts.slice(0, 10).forEach((so) => {
+    periodStockOuts.slice(0, 10).forEach((so) => {
       activities.push({ date: so.date, type: "out", label: "Stock Out", value: so.quantity * PACK_SIZES[so.packSize as PackSize] });
     });
     return activities.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 6);
-  }, [stockIns, stockOuts]);
+  }, [periodStockIns, periodStockOuts]);
+
+  const stockOutBounds = useMemo(
+    () => getStoragePeriodBounds(stockOutPeriod, stockOutCustomStart, stockOutCustomEnd),
+    [stockOutPeriod, stockOutCustomStart, stockOutCustomEnd]
+  );
+
+  const stockOutPeriodData = useMemo(
+    () => stockOuts.filter((so) => so.date >= stockOutBounds.start && so.date <= stockOutBounds.end),
+    [stockOuts, stockOutBounds]
+  );
+
+  const stockOutPadsDispatched = useMemo(
+    () => stockOutPeriodData.reduce((sum, so) => sum + so.quantity * PACK_SIZES[so.packSize as PackSize], 0),
+    [stockOutPeriodData]
+  );
+
+  const stockOutPacksDispatched = useMemo(
+    () => stockOutPeriodData.reduce((sum, so) => sum + so.quantity, 0),
+    [stockOutPeriodData]
+  );
 
   const handleStockInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -288,32 +380,65 @@ export default function StoragePage() {
       </div>
 
       {activeTab === "dashboard" && (
+        <>
+        <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Overview</h2>
+            <p className="text-sm text-gray-500">
+              {storagePeriod === "today" ? "Today" : storagePeriod === "week" ? "Last 7 days" : storagePeriod === "month" ? "Last 30 days" : storagePeriod === "12months" ? "Last 12 months" : "Custom period"}
+            </p>
+          </div>
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+            {(["today", "week", "month", "12months", "custom"] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setStoragePeriod(p)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md ${
+                  storagePeriod === p ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+                }`}
+              >
+                {p === "today" ? "Today" : p === "week" ? "This Week" : p === "month" ? "This Month" : p === "12months" ? "12 Months" : "Custom"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {storagePeriod === "custom" && (
+          <div className="flex items-center gap-2">
+            <input type="date" value={storageCustomStart} onChange={(e) => setStorageCustomStart(e.target.value)}
+              className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
+            <span className="text-xs text-gray-400">to</span>
+            <input type="date" value={storageCustomEnd} onChange={(e) => setStorageCustomEnd(e.target.value)}
+              className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
+          </div>
+        )}
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <ChartCard title="Half Dozen" subtitle="6-pad packs in stock" variant="gradient" accentColor={palette.blue}>
+          <ChartCard title="Half Dozen" subtitle="6-pad packs in period" variant="gradient" accentColor={palette.blue}>
             <div className="flex flex-col items-center justify-center h-full">
               <span className="text-3xl font-bold text-blue-500">{currentStock.HALF_DOZEN.toLocaleString()}</span>
               <span className="text-xs text-gray-400 mt-1">packs</span>
             </div>
           </ChartCard>
 
-          <ChartCard title="Dozen" subtitle="12-pad packs in stock" variant="gradient" accentColor={palette.indigo}>
+          <ChartCard title="Dozen" subtitle="12-pad packs in period" variant="gradient" accentColor={palette.indigo}>
             <div className="flex flex-col items-center justify-center h-full">
               <span className="text-3xl font-bold text-indigo-500">{currentStock.DOZEN.toLocaleString()}</span>
               <span className="text-xs text-gray-400 mt-1">packs</span>
             </div>
           </ChartCard>
 
-          <ChartCard title="Carton" subtitle="120-pad packs in stock" variant="gradient" accentColor={palette.purple}>
+          <ChartCard title="Carton" subtitle="120-pad packs in period" variant="gradient" accentColor={palette.purple}>
             <div className="flex flex-col items-center justify-center h-full">
               <span className="text-3xl font-bold text-purple-500">{currentStock.CARTON.toLocaleString()}</span>
               <span className="text-xs text-gray-400 mt-1">packs</span>
             </div>
           </ChartCard>
 
-          <ChartCard title="Total Pads" subtitle="All pack sizes combined" variant="gradient" accentColor={palette.emerald}>
+          <ChartCard title="Total Pads" subtitle="All pack sizes in period" variant="gradient" accentColor={palette.emerald}>
             <div className="flex flex-col items-center justify-center h-full">
               <span className="text-3xl font-bold text-emerald-500">{totalPads.toLocaleString()}</span>
-              <span className="text-xs text-gray-400 mt-1">pads in stock</span>
+              <span className="text-xs text-gray-400 mt-1">pads in period</span>
             </div>
           </ChartCard>
 
@@ -340,7 +465,7 @@ export default function StoragePage() {
           </ChartCard>
 
           <VerticalBarChart
-            data={dailyStockInData}
+            data={periodDailyStockInData}
             series={[{ dataKey: "value", name: "Pads", color: palette.blue }]}
             title="Daily Stock-In"
             subtitle="Pads received per day"
@@ -348,15 +473,15 @@ export default function StoragePage() {
           />
 
           <CalendarHeatmap
-            data={stockHeatmapData}
+            data={periodStockHeatmapData}
             title="Stock Activity"
             subtitle="Pads received per day"
           />
 
           <ChartCard title="Recent Activity" subtitle="Latest stock movements" variant="gradient">
-            {recentActivity.length > 0 ? (
+            {periodRecentActivity.length > 0 ? (
               <div className="space-y-2">
-                {recentActivity.map((a, i) => (
+                {periodRecentActivity.map((a, i) => (
                   <div key={i} className="flex justify-between items-center py-1 border-b border-gray-50 last:border-0">
                     <div className="flex items-center gap-2">
                       <span className={`w-2 h-2 rounded-full ${a.type === "in" ? "bg-emerald-400" : "bg-red-400"}`} />
@@ -376,7 +501,7 @@ export default function StoragePage() {
             )}
           </ChartCard>
         </div>
-      )}
+      </>)}
 
       {activeTab === "wip" && (
         <div className="space-y-4">
@@ -510,6 +635,61 @@ export default function StoragePage() {
       )}
 
       {activeTab === "stock-out" && (
+        <>
+        <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900">Stock-Out Metrics</h2>
+            <p className="text-sm text-gray-500">
+              {stockOutPeriod === "today" ? "Today" : stockOutPeriod === "week" ? "Last 7 days" : stockOutPeriod === "month" ? "Last 30 days" : stockOutPeriod === "12months" ? "Last 12 months" : "Custom period"}
+            </p>
+          </div>
+          <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+            {(["today", "week", "month", "12months", "custom"] as const).map((p) => (
+              <button
+                key={p}
+                onClick={() => setStockOutPeriod(p)}
+                className={`px-3 py-1.5 text-sm font-medium rounded-md ${
+                  stockOutPeriod === p ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+                }`}
+              >
+                {p === "today" ? "Today" : p === "week" ? "This Week" : p === "month" ? "This Month" : p === "12months" ? "12 Months" : "Custom"}
+              </button>
+            ))}
+          </div>
+        </div>
+        {stockOutPeriod === "custom" && (
+          <div className="flex items-center gap-2">
+            <input type="date" value={stockOutCustomStart} onChange={(e) => setStockOutCustomStart(e.target.value)}
+              className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
+            <span className="text-xs text-gray-400">to</span>
+            <input type="date" value={stockOutCustomEnd} onChange={(e) => setStockOutCustomEnd(e.target.value)}
+              className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
+          </div>
+        )}
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <ChartCard title="Pads Dispatched" subtitle="Total pads sent out" variant="gradient" accentColor={palette.rose}>
+            <div className="flex flex-col items-center justify-center h-full">
+              <span className="text-3xl font-bold text-rose-500">{stockOutPadsDispatched.toLocaleString()}</span>
+              <span className="text-xs text-gray-400 mt-1">pads</span>
+            </div>
+          </ChartCard>
+
+          <ChartCard title="Packs Dispatched" subtitle="Total packs dispatched" variant="gradient" accentColor={palette.orange}>
+            <div className="flex flex-col items-center justify-center h-full">
+              <span className="text-3xl font-bold text-orange-500">{stockOutPacksDispatched.toLocaleString()}</span>
+              <span className="text-xs text-gray-400 mt-1">packs</span>
+            </div>
+          </ChartCard>
+
+          <ChartCard title="Dispatch Transactions" subtitle="Stock-out entries logged" variant="gradient" accentColor={palette.blue}>
+            <div className="flex flex-col items-center justify-center h-full">
+              <span className="text-3xl font-bold text-blue-500">{stockOutPeriodData.length.toLocaleString()}</span>
+              <span className="text-xs text-gray-400 mt-1">transactions</span>
+            </div>
+          </ChartCard>
+        </div>
         <form onSubmit={handleStockOutSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
           <h2 className="text-lg font-semibold">Stock-Out Entry</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -575,7 +755,7 @@ export default function StoragePage() {
             </button>
           </div>
         </form>
-      )}
+      </>)}
 
       <ReportCard title="Storage Report" subtitle="Download a PDF summary of stock and inventory data" onGenerate={handleGenerateReport} />
     </div>
