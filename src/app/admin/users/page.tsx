@@ -1,12 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import {
-  orderBy,
-  doc,
-  deleteDoc,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase";
+import { orderBy } from "firebase/firestore";
 import { useAuth } from "@/lib/auth-context";
 import { UserRole, Employee } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
@@ -86,14 +81,27 @@ export default function AdminUsersPage() {
 
   const handleDelete = async () => {
     if (!deleteTarget) return;
+    setActionLoading(deleteTarget);
+    setActionError("");
+    setActionSuccess("");
     try {
-      await deleteDoc(doc(db, "userRoles", deleteTarget));
-      setActionSuccess("User role document removed.");
-    } catch (err) {
-      console.error("Failed to delete user:", err);
-      setActionError("Failed to delete user.");
+      const res = await fetch("/api/delete-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: deleteTarget, adminUid: userRole?.uid }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setActionError(data.error || "Failed to delete user");
+        return;
+      }
+      setActionSuccess("User deleted successfully.");
+    } catch {
+      setActionError("Network error. Please try again.");
+    } finally {
+      setActionLoading(null);
+      setDeleteTarget(null);
     }
-    setDeleteTarget(null);
   };
 
   return (
@@ -227,7 +235,7 @@ export default function AdminUsersPage() {
         <ConfirmDialog
           open={deleteTarget !== null}
           title="Delete User"
-          message="Are you sure you want to delete this user? This will remove their Firestore role document but will not delete their Firebase Auth account."
+          message="Are you sure you want to delete this user? This will permanently remove their account and all associated data."
           confirmLabel="Delete"
           onConfirm={handleDelete}
           onCancel={() => setDeleteTarget(null)}

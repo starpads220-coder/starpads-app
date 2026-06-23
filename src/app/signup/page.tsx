@@ -36,7 +36,13 @@ export default function SignupPage() {
         body: JSON.stringify({ email, password, role }),
       });
 
-      const data = await res.json();
+      let data: { error?: string };
+      try {
+        data = await res.json();
+      } catch {
+        setError(`Server error (${res.status}). Please check server configuration and try again.`);
+        return;
+      }
 
       if (!res.ok) {
         setError(data.error || "Failed to create account");
@@ -46,7 +52,7 @@ export default function SignupPage() {
       setPendingRole(role);
       setSuccess(true);
     } catch {
-      setError("Network error. Please try again.");
+      setError("Network error. Please check your connection and try again.");
     } finally {
       setLoading(false);
     }

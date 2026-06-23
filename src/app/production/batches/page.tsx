@@ -6,7 +6,10 @@ import {
   addDoc,
   updateDoc,
   doc,
+  getDoc,
   getDocs,
+  setDoc,
+  runTransaction,
   Timestamp,
   orderBy,
 } from "firebase/firestore";
@@ -14,6 +17,7 @@ import { db } from "@/lib/firebase";
 import { Batch } from "@/types";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
+import { showToast } from "@/components/ui/Toast";
 
 export default function BatchesPage() {
   const [creating, setCreating] = useState(false);
@@ -24,17 +28,32 @@ export default function BatchesPage() {
   ], { staleTime: 2 * 60 * 1000 });
 
   const generateBatchNumber = async (): Promise<string> => {
-    // Find the highest existing batch number to properly account for deletions
-    const snap = await getDocs(collection(db, "batches"));
-    let maxSeq = 0;
-    snap.docs.forEach((d) => {
-      const num = d.data().batchNumber as string | undefined;
-      if (num) {
-        const parsed = parseInt(num.replace("P", ""), 10);
-        if (!isNaN(parsed) && parsed > maxSeq) maxSeq = parsed;
-      }
+    const counterRef = doc(db, "counters", "batchCounter");
+
+    // One-time init: scan existing batches to seed the counter
+    const counterSnap = await getDoc(counterRef);
+    if (!counterSnap.exists()) {
+      const batchSnap = await getDocs(collection(db, "batches"));
+      let maxSeq = 0;
+      batchSnap.docs.forEach((d) => {
+        const num = d.data().batchNumber as string | undefined;
+        if (num) {
+          const parsed = parseInt(num.replace("P", ""), 10);
+          if (!isNaN(parsed) && parsed > maxSeq) maxSeq = parsed;
+        }
+      });
+      await setDoc(counterRef, { currentSeq: maxSeq });
+    }
+
+    // Atomically increment the counter (no race conditions)
+    const nextSeq = await runTransaction(db, async (transaction) => {
+      const snap = await transaction.get(counterRef);
+      const current: number = snap.data()?.currentSeq ?? 0;
+      const next = current + 1;
+      transaction.update(counterRef, { currentSeq: next });
+      return next;
     });
-    const nextSeq = maxSeq + 1;
+
     return `P${String(nextSeq).padStart(4, "0")}`;
   };
 
@@ -53,6 +72,10 @@ export default function BatchesPage() {
         createdAt: Timestamp.now(),
       };
       await addDoc(collection(db, "batches"), batchData);
+      showToast(`Batch ${batchNumber} created successfully`, "success");
+    } catch (err) {
+      console.error("Failed to create batch:", err);
+      showToast("Failed to create batch. Please try again.", "error");
     } finally {
       setCreating(false);
     }
