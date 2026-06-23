@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   collection,
   query,
@@ -59,6 +60,7 @@ function getStoragePeriodBounds(period: StoragePeriod, customStart?: string, cus
 
 export default function StoragePage() {
   const { userRole } = useAuth();
+  const queryClient = useQueryClient();
   const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
   const [activeTab, setActiveTab] = useState<"dashboard" | "stock-in" | "stock-out" | "wip" | "analytics">("dashboard");
   const [saving, setSaving] = useState(false);
@@ -81,6 +83,9 @@ export default function StoragePage() {
   const [stockOutPeriod, setStockOutPeriod] = useState<StoragePeriod>("month");
   const [stockOutCustomStart, setStockOutCustomStart] = useState("");
   const [stockOutCustomEnd, setStockOutCustomEnd] = useState("");
+  const [wipPeriod, setWipPeriod] = useState<StoragePeriod>("month");
+  const [wipCustomStart, setWipCustomStart] = useState("");
+  const [wipCustomEnd, setWipCustomEnd] = useState("");
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -89,8 +94,15 @@ export default function StoragePage() {
     const quantityParam = params.get("quantity");
     const batchRefParam = params.get("batchRef");
     const entryIdParam = params.get("entryId");
+    const customerRefParam = params.get("customerRef");
+    const destinationParam = params.get("destination");
+    const packSizeParam = params.get("packSize");
+    const dispatchedByParam = params.get("dispatchedBy");
     if (tabParam === "stock-in") {
       setActiveTab("stock-in");
+    }
+    if (tabParam === "stock-out") {
+      setActiveTab("stock-out");
     }
     if (dateParam || quantityParam || batchRefParam) {
       setStockInForm((prev) => ({
@@ -98,6 +110,18 @@ export default function StoragePage() {
         date: dateParam || prev.date,
         quantity: quantityParam ? parseInt(quantityParam, 10) || 0 : prev.quantity,
         batchRef: batchRefParam || prev.batchRef,
+      }));
+    }
+    if (customerRefParam || destinationParam || packSizeParam || dispatchedByParam || dateParam) {
+      setStockOutForm((prev) => ({
+        ...prev,
+        date: dateParam || prev.date,
+        customerRef: customerRefParam || prev.customerRef,
+        destination: destinationParam || prev.destination,
+        packSize: (packSizeParam as PackSize) || prev.packSize,
+        quantity: quantityParam ? parseInt(quantityParam, 10) || 0 : prev.quantity,
+        batchRef: batchRefParam || prev.batchRef,
+        dispatchedBy: dispatchedByParam || prev.dispatchedBy,
       }));
     }
     if (entryIdParam) {
@@ -141,7 +165,7 @@ export default function StoragePage() {
   );
 
   const { data: productionEntries = [] } = useCollectionQuery<ProductionEntry>(
-    "productionEntries", [], { staleTime: 60 * 1000 }
+    "productionEntries", [], { staleTime: 0 }
   );
 
   const { data: sales = [] } = useCollectionQuery<SaleTransaction>(
@@ -210,18 +234,20 @@ export default function StoragePage() {
   }, [sales, cumulativeTotalPads]);
 
   const stageCounts = useMemo(() => {
+    const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
+    const filtered = productionEntries.filter((e) => e.date >= wipBounds.start && e.date <= wipBounds.end);
     const counts: Record<StageId, number> = {
       "STG-01": 0, "STG-02": 0, "STG-03": 0, "STG-04": 0, "STG-05": 0, "STG-06": 0, "STG-07": 0,
     };
-    productionEntries.forEach((e) => { counts[e.stageId] += e.actualPieces; });
+    filtered.forEach((e) => { counts[e.stageId] += e.actualPieces; });
     return counts;
-  }, [productionEntries]);
+  }, [productionEntries, wipPeriod, wipCustomStart, wipCustomEnd]);
 
   const totalPackagedPads = stageCounts["STG-07"];
 
   const wipCut = Math.max(0, stageCounts["STG-01"] - stageCounts["STG-02"]);
-  const wipSewn = Math.max(0, stageCounts["STG-03"] - stageCounts["STG-04"]);
-  const wipOverlocked = Math.max(0, stageCounts["STG-04"] - stageCounts["STG-06"]);
+  const wipSewn = Math.max(0, (stageCounts["STG-02"] + stageCounts["STG-03"]) - stageCounts["STG-04"]);
+  const wipOverlocked = Math.max(0, stageCounts["STG-04"] - stageCounts["STG-05"]);
   const wipPouches = Math.max(0, stageCounts["STG-05"] - stageCounts["STG-06"]);
   const wipPinned = Math.max(0, stageCounts["STG-06"] - totalPackagedPads);
 
@@ -320,6 +346,8 @@ export default function StoragePage() {
         batchUpdates.completionDate = new Date().toISOString().split("T")[0];
       }
       await updateDoc(batchDocRef, batchUpdates);
+      queryClient.invalidateQueries({ queryKey: ["stockIns"] });
+      queryClient.invalidateQueries({ queryKey: ["batches"] });
       setStockInForm({ date: new Date().toISOString().split("T")[0], batchRef: "", packSize: "HALF_DOZEN", quantity: 0, receivedBy: "", notes: "" });
     } finally {
       setSaving(false);
@@ -331,6 +359,7 @@ export default function StoragePage() {
     setSaving(true);
     try {
       await addDoc(collection(db, "stockOuts"), { ...stockOutForm, createdAt: Timestamp.now() });
+      queryClient.invalidateQueries({ queryKey: ["stockOuts"] });
       setStockOutForm({ date: new Date().toISOString().split("T")[0], destination: "", customerRef: "", batchRef: "", packSize: "HALF_DOZEN", quantity: 0, dispatchedBy: "" });
     } finally {
       setSaving(false);
@@ -505,33 +534,62 @@ export default function StoragePage() {
 
       {activeTab === "wip" && (
         <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-gray-900">Work-In-Progress (WIP) Summary</h2>
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Work-In-Progress (WIP) Summary</h2>
+              <p className="text-sm text-gray-500">
+                {wipPeriod === "today" ? "Today" : wipPeriod === "week" ? "Last 7 days" : wipPeriod === "month" ? "Last 30 days" : wipPeriod === "12months" ? "Last 12 months" : "Custom period"}
+              </p>
+            </div>
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+              {(["today", "week", "month", "12months", "custom"] as const).map((p) => (
+                <button
+                  key={p}
+                  onClick={() => setWipPeriod(p)}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md ${
+                    wipPeriod === p ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+                  }`}
+                >
+                  {p === "today" ? "Today" : p === "week" ? "This Week" : p === "month" ? "This Month" : p === "12months" ? "12 Months" : "Custom"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {wipPeriod === "custom" && (
+            <div className="flex items-center gap-2">
+              <input type="date" value={wipCustomStart} onChange={(e) => setWipCustomStart(e.target.value)}
+                className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
+              <span className="text-xs text-gray-400">to</span>
+              <input type="date" value={wipCustomEnd} onChange={(e) => setWipCustomEnd(e.target.value)}
+                className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <ChartCard title="Cut Pieces" subtitle="STG-01" variant="gradient" accentColor={wipCut > 500 ? palette.orange : palette.blue}>
+            <ChartCard title="Cut Pieces" subtitle="STG-01 awaiting sewing" variant="gradient" accentColor={wipCut > 500 ? palette.orange : palette.blue}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold" style={{ color: wipCut > 500 ? palette.orange : palette.blue }}>{wipCut.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
               </div>
             </ChartCard>
-            <ChartCard title="Sewn Pads" subtitle="STG-03" variant="gradient" accentColor={wipSewn > 500 ? palette.orange : palette.blue}>
+            <ChartCard title="Sewn Pads" subtitle="STG-02+STG-03 awaiting overlocking" variant="gradient" accentColor={wipSewn > 500 ? palette.orange : palette.blue}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold" style={{ color: wipSewn > 500 ? palette.orange : palette.blue }}>{wipSewn.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pads in queue</span>
               </div>
             </ChartCard>
-            <ChartCard title="Overlocked" subtitle="STG-04" variant="gradient" accentColor={wipOverlocked > 500 ? palette.orange : palette.blue}>
+            <ChartCard title="Overlocked" subtitle="STG-04 awaiting pouches" variant="gradient" accentColor={wipOverlocked > 500 ? palette.orange : palette.blue}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold" style={{ color: wipOverlocked > 500 ? palette.orange : palette.blue }}>{wipOverlocked.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
               </div>
             </ChartCard>
-            <ChartCard title="Pouches" subtitle="STG-05" variant="gradient" accentColor={wipPouches > 500 ? palette.orange : palette.blue}>
+            <ChartCard title="Pouches" subtitle="STG-05 awaiting pinning" variant="gradient" accentColor={wipPouches > 500 ? palette.orange : palette.blue}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold" style={{ color: wipPouches > 500 ? palette.orange : palette.blue }}>{wipPouches.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
               </div>
             </ChartCard>
-            <ChartCard title="Pinned" subtitle="STG-06" variant="gradient" accentColor={wipPinned > 500 ? palette.orange : palette.blue}>
+            <ChartCard title="Pinned" subtitle="STG-06 awaiting packaging" variant="gradient" accentColor={wipPinned > 500 ? palette.orange : palette.blue}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold" style={{ color: wipPinned > 500 ? palette.orange : palette.blue }}>{wipPinned.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>

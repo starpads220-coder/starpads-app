@@ -141,6 +141,7 @@ export interface SaleTransaction {
   paymentMethod: PaymentMethod;
   salespersonId: string;
   notes: string;
+  batchRef?: string;
 }
 
 export interface Expense {

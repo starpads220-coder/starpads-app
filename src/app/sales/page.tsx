@@ -29,6 +29,7 @@ import {
   PaymentMethod,
   SaleTransaction,
   SalesTarget,
+  Batch,
 } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
 import { ReportCard } from "@/components/reports/ReportCard";
@@ -137,11 +138,28 @@ export default function SalesPage() {
     paymentMethod: "CASH" as PaymentMethod,
     salespersonId: "",
     notes: "",
+    batchRef: "",
   });
+
+  const [recentSale, setRecentSale] = useState<{
+    date: string;
+    customerName: string;
+    customerType: CustomerType;
+    batchRef: string;
+    batchNumber: string;
+    packSize: PackSize;
+    quantitySold: number;
+    salespersonId: string;
+    salespersonName: string;
+  } | null>(null);
 
   const { data: employees = [] } = useCollectionQuery<{ id: string; name: string; role: string; department: string }>("employees", [
     orderBy("name"),
   ], { staleTime: 10 * 60 * 1000 });
+
+  const { data: batches = [] } = useCollectionQuery<Batch>("batches", [
+    orderBy("startDate", "desc"),
+  ], { staleTime: 2 * 60 * 1000 });
 
   useEffect(() => {
     const unsub1 = onSnapshot(
@@ -337,6 +355,19 @@ export default function SalesPage() {
         totalAmount,
         createdAt: Timestamp.now(),
       });
+      const salesperson = employees.find((e) => e.id === form.salespersonId);
+      const batch = batches.find((b) => b.id === form.batchRef);
+      setRecentSale({
+        date: form.date,
+        customerName: form.customerName,
+        customerType: form.customerType,
+        batchRef: form.batchRef,
+        batchNumber: batch?.batchNumber || "",
+        packSize: form.packSize,
+        quantitySold: form.quantitySold,
+        salespersonId: form.salespersonId,
+        salespersonName: salesperson?.name || form.salespersonId,
+      });
       setForm({
         date: getDateKey(),
         customerName: "",
@@ -349,6 +380,7 @@ export default function SalesPage() {
         paymentMethod: "CASH",
         salespersonId: "",
         notes: "",
+        batchRef: "",
       });
     } finally {
       setSaving(false);
@@ -761,6 +793,58 @@ export default function SalesPage() {
             </ChartCard>
           </div>
 
+          {recentSale && (
+            <ChartCard
+              title="Move to Stock Out"
+              subtitle="Recent sale ready for stock-out recording"
+              variant="gradient"
+              accentColor="#f43f5e"
+            >
+              <div className="space-y-3">
+                <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+                  <div className="text-gray-500 text-xs">Date</div>
+                  <div className="text-gray-900 text-xs font-semibold">{recentSale.date}</div>
+                  <div className="text-gray-500 text-xs">Customer</div>
+                  <div className="text-gray-900 text-xs font-semibold">{recentSale.customerName}</div>
+                  <div className="text-gray-500 text-xs">Batch</div>
+                  <div className="text-gray-900 text-xs font-semibold">{recentSale.batchNumber || "—"}</div>
+                  <div className="text-gray-500 text-xs">Pack</div>
+                  <div className="text-gray-900 text-xs font-semibold">
+                    {recentSale.packSize === "HALF_DOZEN" ? "Half Dozen" : recentSale.packSize === "DOZEN" ? "Dozen" : "Carton"}
+                  </div>
+                  <div className="text-gray-500 text-xs">Qty</div>
+                  <div className="text-gray-900 text-xs font-semibold">{recentSale.quantitySold}</div>
+                  <div className="text-gray-500 text-xs">Destination</div>
+                  <div className="text-gray-900 text-xs font-semibold">
+                    {recentSale.customerType === "BULK" ? "Bulk Customer" : recentSale.customerType === "RETAIL" ? "Retail" : "Agent"}
+                  </div>
+                  <div className="text-gray-500 text-xs">Dispatched By</div>
+                  <div className="text-gray-900 text-xs font-semibold">{recentSale.salespersonName}</div>
+                </div>
+                <button
+                  onClick={() => {
+                    const params = new URLSearchParams({
+                      tab: "stock-out",
+                      date: recentSale.date,
+                      customerRef: recentSale.customerName,
+                      destination: recentSale.customerType === "BULK" ? "BULK_CUSTOMER" : recentSale.customerType,
+                      packSize: recentSale.packSize,
+                      quantity: String(recentSale.quantitySold),
+                      dispatchedBy: recentSale.salespersonId,
+                      customerName: recentSale.customerName,
+                    });
+                    if (recentSale.batchRef) params.set("batchRef", recentSale.batchRef);
+                    setRecentSale(null);
+                    window.location.href = `/storage?${params.toString()}`;
+                  }}
+                  className="w-full py-2 px-4 bg-rose-500 text-white text-sm font-medium rounded-md hover:bg-rose-600 transition"
+                >
+                  Move to Stock Out →
+                </button>
+              </div>
+            </ChartCard>
+          )}
+
           <SalesCharts transactions={filteredTransactions} expenses={filteredExpenses} salesTargets={salesTargets} />
 
           {/* Sales Targets Section */}
@@ -1071,6 +1155,19 @@ export default function SalesPage() {
                   <option key={employee.id} value={employee.id}>
                     {employee.name}
                   </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Batch</label>
+              <select
+                value={form.batchRef}
+                onChange={(event) => setForm({ ...form, batchRef: event.target.value })}
+                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+              >
+                <option value="">Select batch (optional)...</option>
+                {batches.filter((b) => b.status === "ACTIVE").map((b) => (
+                  <option key={b.id} value={b.id}>{b.batchNumber} — {b.packsProduced.toLocaleString()} / {b.maxPacks.toLocaleString()} packs</option>
                 ))}
               </select>
             </div>
