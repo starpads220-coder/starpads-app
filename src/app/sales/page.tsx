@@ -126,6 +126,8 @@ export default function SalesPage() {
   const [targetSaving, setTargetSaving] = useState(false);
   const [editingTargetId, setEditingTargetId] = useState<string | null>(null);
 
+  const [padsInput, setPadsInput] = useState(0);
+
   const [form, setForm] = useState({
     date: getDateKey(),
     customerName: "",
@@ -368,6 +370,7 @@ export default function SalesPage() {
         salespersonId: form.salespersonId,
         salespersonName: salesperson?.name || form.salespersonId,
       });
+      setPadsInput(0);
       setForm({
         date: getDateKey(),
         customerName: "",
@@ -1079,29 +1082,59 @@ export default function SalesPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Pack Size</label>
               <select
                 value={form.packSize}
-                onChange={(event) => setForm({ ...form, packSize: event.target.value as PackSize })}
+                onChange={(event) => {
+                  const newPackSize = event.target.value as PackSize;
+                  setForm({ ...form, packSize: newPackSize, quantitySold: padsInput / PACK_SIZES[newPackSize] });
+                }}
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
               >
-                <option value="HALF_DOZEN">Half Dozen (6 Packs)</option>
-                <option value="DOZEN">Dozen (12 Packs)</option>
-                <option value="CARTON">Carton (120 packs)</option>
+                <option value="HALF_DOZEN">Half Dozen (6 pads/pack)</option>
+                <option value="DOZEN">Dozen (12 pads/pack)</option>
+                <option value="CARTON">Carton (120 pads/pack)</option>
               </select>
               <p className="mt-1 text-xs text-gray-500">
                 Expected price: UGX {expectedPrice.toLocaleString()} per pack
               </p>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Number of Pads</label>
               <input
                 type="number"
-                value={form.quantitySold || ""}
-                onChange={(event) =>
-                  setForm({ ...form, quantitySold: Number.parseInt(event.target.value, 10) || 0 })
-                }
+                value={padsInput || ""}
+                onChange={(event) => {
+                  const pads = Number.parseFloat(event.target.value) || 0;
+                  setPadsInput(pads);
+                  setForm((f) => ({ ...f, quantitySold: pads / PACK_SIZES[f.packSize] }));
+                }}
                 required
                 min={1}
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Total Packs</label>
+              <input
+                type="number"
+                value={padsInput > 0 ? form.quantitySold : ""}
+                readOnly
+                step="any"
+                className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500"
+              />
+              {padsInput > 0 && (() => {
+                const totalPads = Math.round(padsInput);
+                const packSize = PACK_SIZES[form.packSize];
+                const fullPacks = Math.floor(padsInput / packSize);
+                const remainingPads = padsInput % packSize;
+                const packLabel = form.packSize === "HALF_DOZEN" ? "half-dozen" : form.packSize === "DOZEN" ? "dozen" : "carton";
+                return (
+                  <p className="mt-1 text-xs text-gray-500">
+                    {fullPacks > 0 && `${fullPacks} full ${packLabel} pack${fullPacks > 1 ? "s" : ""} (${fullPacks * packSize} pads)`}
+                    {fullPacks > 0 && remainingPads > 0 && " + "}
+                    {remainingPads > 0 && `${remainingPads} individual pad${remainingPads > 1 ? "s" : ""}`}
+                    {" = "}{padsInput} total pad{padsInput > 1 ? "s" : ""}
+                  </p>
+                );
+              })()}
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Unit Price (UGX)</label>
