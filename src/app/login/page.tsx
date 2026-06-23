@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent, useEffect } from "react";
+import { useState, FormEvent } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/lib/auth-context";
 import Link from "next/link";
@@ -11,27 +11,8 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [checking, setChecking] = useState(true);
   const { login } = useAuth();
   const router = useRouter();
-
-  useEffect(() => {
-    async function check() {
-      try {
-        const res = await fetch("/api/check-admin");
-        const data = await res.json();
-        if (!data.adminExists) {
-          router.replace("/setup");
-          return;
-        }
-      } catch {
-        // API unavailable, show login normally
-      } finally {
-        setChecking(false);
-      }
-    }
-    check();
-  }, [router]);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -57,14 +38,6 @@ export default function LoginPage() {
       setLoading(false);
     }
   };
-
-  if (checking) {
-    return (
-      <div className="fixed inset-0 flex items-center justify-center bg-gray-900 text-gray-400">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white" />
-      </div>
-    );
-  }
 
   return (
     <div
@@ -123,7 +96,7 @@ export default function LoginPage() {
               <div className="text-center pt-2">
                 <span className="text-xs text-gray-500">
                   First time here?{" "}
-                  <Link href="/setup" className="text-blue-600 font-semibold hover:underline">
+                  <Link href="/signup" className="text-blue-600 font-semibold hover:underline">
                     Sign Up
                   </Link>
                 </span>
