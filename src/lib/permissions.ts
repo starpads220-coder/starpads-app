@@ -18,7 +18,6 @@ export const ROLE_ROUTES: Record<EmployeeRole, string[]> = {
     "/storage",
     "/payments",
     "/admin/employees",
-    "/admin/users",
   ],
   WORKER: [],
   STORE_MANAGER: [],

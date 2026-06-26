@@ -100,8 +100,8 @@ const styles = StyleSheet.create({
 
 const STAGE_LABELS: Record<string, string> = {
   "STG-01": "Cutting",
-  "STG-02": "Sewing - M+O",
-  "STG-03": "Sewing - In/Top",
+  "STG-02": "Sewing Inner [M]",
+  "STG-03": "Sewing Outer [TL]",
   "STG-04": "Overlocking",
   "STG-05": "Pouch Making",
   "STG-06": "Pinning",

@@ -27,23 +27,24 @@ export function NavBar() {
 
   const allowedRoutes = ROLE_ROUTES[(userRole?.role ?? "") as EmployeeRole] ?? [];
   const navItems = ALL_NAV_ITEMS.filter((item) => allowedRoutes.includes(item.href));
+  const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
 
   return (
     <header className="sticky top-0 z-40 w-full pt-4 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
       <div className="bg-black/90 border border-gray-800 backdrop-blur-lg p-1 rounded-full shadow-xl shadow-black/30">
-        <div className="flex items-center justify-between h-12 pl-4 pr-1">
-          <div className="flex items-center gap-8">
-            <Link
-              href="/"
-              className="text-base font-bold text-white whitespace-nowrap hover:text-gray-300 transition-colors pl-1"
-            >
-              Star Durable Pads
-            </Link>
+        <div className="flex items-center h-12 pl-4 pr-1">
+          <Link
+            href="/"
+            className="text-base font-bold text-white whitespace-nowrap hover:text-gray-300 transition-colors pl-1"
+          >
+            Star Durable Pads
+          </Link>
+          <div className={`${isSupervisor ? "flex-1 flex justify-center" : "ml-8"}`}>
             <div className="hidden md:block">
               <GooeyNav items={navItems} />
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 ml-auto">
             <Link
               href="/profile"
               className="text-sm font-semibold px-4 py-1.5 rounded-full text-gray-300 hover:text-white hover:bg-gray-800 transition-colors"

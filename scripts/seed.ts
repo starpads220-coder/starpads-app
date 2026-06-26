@@ -25,9 +25,9 @@ const app = initializeApp({
 const db = getFirestore(app);
 
 const STAGES = [
-  { stageId: "STG-01", name: "Cutting", defaultTarget: 700, unit: "pieces", defaultWageRate: 10000 },
-  { stageId: "STG-02", name: "Sewing - Middle + Outer", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
-  { stageId: "STG-03", name: "Sewing - Inner/Top Layer", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
+  { stageId: "STG-01", name: "Cutting", defaultTarget: 700, unit: "pieces", defaultWageRate: 10000, materialTargets: { FLEECE: 700, FLANNEL: 350, PUL: 350 } },
+  { stageId: "STG-02", name: "Sewing Inner [Middle]", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
+  { stageId: "STG-03", name: "Sewing Outer [TopLayer]", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
   { stageId: "STG-04", name: "Overlocking", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
   { stageId: "STG-05", name: "Pouch Making", defaultTarget: 200, unit: "pieces", defaultWageRate: 10000 },
   { stageId: "STG-06", name: "Checking & Pinning", defaultTarget: 400, unit: "pieces", defaultWageRate: 8000 },

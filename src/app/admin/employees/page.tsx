@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
+import { useQueryClient } from "@tanstack/react-query";
 import { Employee, EmployeeRole, Department } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
@@ -36,6 +37,7 @@ const roleOptions: EmployeeRole[] = [
 const departmentOptions: Department[] = ["PRODUCTION", "STORAGE", "SALES"];
 
 export default function AdminEmployeesPage() {
+  const queryClient = useQueryClient();
   const { userRole } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -48,10 +50,9 @@ export default function AdminEmployeesPage() {
   ], { staleTime: 10 * 60 * 1000 });
 
   const supervisorDepartment = useMemo(() => {
-    if (userRole?.role !== "PRODUCTION_SUPERVISOR" || !userRole.employeeId) return null;
-    const sup = employees.find((e) => e.id === userRole.employeeId);
-    return sup?.department ?? null;
-  }, [userRole, employees]);
+    if (userRole?.role !== "PRODUCTION_SUPERVISOR") return null;
+    return "PRODUCTION" as Department;
+  }, [userRole]);
 
   const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
   const isAdmin = userRole?.role === "ADMIN";
@@ -112,6 +113,7 @@ export default function AdminEmployeesPage() {
           createdAt: Timestamp.now(),
         });
       }
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
       resetForm();
     } finally {
       setSaving(false);
@@ -122,6 +124,7 @@ export default function AdminEmployeesPage() {
     await updateDoc(doc(db, "employees", emp.id), {
       isActive: !emp.isActive,
     });
+    queryClient.invalidateQueries({ queryKey: ["employees"] });
     setDeleteTarget(null);
   };
 

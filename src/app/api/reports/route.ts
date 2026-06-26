@@ -9,10 +9,13 @@ import { ExpensesPDF } from "@/components/reports/ExpensesPDF";
 import { AnalyticsPDF } from "@/components/reports/AnalyticsPDF";
 import { PaymentsPDF } from "@/components/reports/PaymentsPDF";
 import { WorkerPDF } from "@/components/reports/WorkerPDF";
+import { NssfPDF } from "@/components/reports/NssfPDF";
+import { PayeePDF } from "@/components/reports/PayeePDF";
 import type { ProductionEntry, SaleTransaction, Expense, StockIn, StockOut, Batch, Employee, Payment } from "@/types";
 import type { StageId } from "@/types";
+import { computeNssfEmployee, computeNssfBusiness, computePayeeTax, getPayeeBracket } from "@/lib/deductions";
 
-const VALID_SCREENS = ["production", "storage", "sales", "expenses", "analytics", "payments", "worker"] as const;
+const VALID_SCREENS = ["production", "storage", "sales", "expenses", "analytics", "payments", "worker", "nssf", "payee"] as const;
 type Screen = (typeof VALID_SCREENS)[number];
 
 interface EmployeeMap {
@@ -313,6 +316,9 @@ export async function GET(request: NextRequest) {
         let totalDue = 0;
         let totalPaid = 0;
         let totalPieces = 0;
+        let totalNssfEmployee = 0;
+        let totalNssfBusiness = 0;
+        let totalPayee = 0;
         const workerMap: Record<string, { due: number; paid: number; count: number; name: string }> = {};
 
         prodEntries.forEach((e) => {
@@ -330,21 +336,42 @@ export async function GET(request: NextRequest) {
           }
         });
 
-        const workerBreakdown = Object.entries(workerMap).map(([, w]) => ({
-          employeeName: w.name,
-          totalDue: w.due,
-          totalPaid: w.paid,
-          entriesCount: w.count,
-        }));
+        const workerBreakdown = Object.entries(workerMap).map(([, w]) => {
+          const gross = w.due + w.paid;
+          const nssfEmp = computeNssfEmployee(gross);
+          const nssfBus = computeNssfBusiness(gross);
+          const payee = computePayeeTax(gross);
+          totalNssfEmployee += nssfEmp;
+          totalNssfBusiness += nssfBus;
+          totalPayee += payee;
+          return {
+            employeeName: w.name,
+            totalDue: w.due,
+            totalPaid: w.paid,
+            entriesCount: w.count,
+            nssfEmployee: nssfEmp,
+            nssfBusiness: nssfBus,
+            payeeTax: payee,
+            netPay: gross - nssfEmp - payee,
+          };
+        });
 
-        const entries = prodEntries.map((e) => ({
-          date: e.date,
-          employeeName: employees[e.employeeId] || e.employeeId,
-          stageId: e.stageId,
-          actualPieces: e.actualPieces || 0,
-          earningsUgx: e.earningsUgx || 0,
-          status: e.paymentStatus === "paid" ? "Paid" : "Due",
-        }));
+        const entries = prodEntries.map((e) => {
+          const gross = e.earningsUgx || 0;
+          const nssfEmp = computeNssfEmployee(gross);
+          const payee = computePayeeTax(gross);
+          return {
+            date: e.date,
+            employeeName: employees[e.employeeId] || e.employeeId,
+            stageId: e.stageId,
+            actualPieces: e.actualPieces || 0,
+            earningsUgx: gross,
+            status: e.paymentStatus === "paid" ? "Paid" : "Due",
+            nssfEmployee: nssfEmp,
+            payeeTax: payee,
+            netPay: gross - nssfEmp - payee,
+          };
+        });
 
         const totalAmount = totalDue + totalPaid;
         const paidRatio = totalAmount > 0 ? Math.round((totalPaid / totalAmount) * 100) : 0;
@@ -357,6 +384,9 @@ export async function GET(request: NextRequest) {
           totalPieces,
           workerCount: Object.keys(workerMap).length,
           paidRatio,
+          totalNssfEmployee,
+          totalNssfBusiness,
+          totalPayee,
           workerBreakdown,
           entries,
         });
@@ -396,6 +426,9 @@ export async function GET(request: NextRequest) {
         let totalActual = 0;
         let totalTarget = 0;
         let totalEarnings = 0;
+        let totalNssfEmployee = 0;
+        let totalNssfBusiness = 0;
+        let totalPayee = 0;
         const stageMap: Record<string, number> = {};
         const daysSet = new Set<string>();
 
@@ -415,13 +448,28 @@ export async function GET(request: NextRequest) {
           .map(([sid, value]) => ({ label: sid, value }))
           .sort((a, b) => b.value - a.value);
 
-        const paymentHistory = prodEntries.map((e) => ({
-          date: e.date,
-          stageId: e.stageId,
-          actualPieces: e.actualPieces || 0,
-          earningsUgx: e.earningsUgx || 0,
-          status: e.paymentStatus === "paid" ? "Paid" : "Due",
-        }));
+        const paymentHistory = prodEntries.map((e) => {
+          const gross = e.earningsUgx || 0;
+          const nssfEmp = computeNssfEmployee(gross);
+          const nssfBus = computeNssfBusiness(gross);
+          const payee = computePayeeTax(gross);
+          totalNssfEmployee += nssfEmp;
+          totalNssfBusiness += nssfBus;
+          totalPayee += payee;
+          return {
+            date: e.date,
+            stageId: e.stageId,
+            actualPieces: e.actualPieces || 0,
+            earningsUgx: gross,
+            status: e.paymentStatus === "paid" ? "Paid" : "Due",
+            nssfEmployee: nssfEmp,
+            nssfBusiness: nssfBus,
+            payeeTax: payee,
+            netPay: gross - nssfEmp - payee,
+          };
+        });
+
+        const totalNetPay = totalEarnings - totalNssfEmployee - totalPayee;
 
         pdfElement = React.createElement(WorkerPDF, {
           title,
@@ -432,10 +480,106 @@ export async function GET(request: NextRequest) {
           totalTarget,
           performancePct,
           totalEarnings,
+          totalNssfEmployee,
+          totalNssfBusiness,
+          totalPayee,
+          totalNetPay,
           daysWorked: daysSet.size,
           entriesCount: prodEntries.length,
           stageDistribution,
           paymentHistory,
+        });
+        break;
+      }
+
+      case "nssf": {
+        let queryNssf: FirebaseFirestore.Query = db
+          .collection("productionEntries")
+          .where("date", ">=", startDate)
+          .where("date", "<=", endDate);
+        if (employeeId) {
+          queryNssf = queryNssf.where("employeeId", "==", employeeId);
+        }
+        const entriesSnapNssf = await queryNssf.orderBy("date", "asc").limit(2000).get();
+
+        const prodEntriesNssf = entriesSnapNssf.docs.map((d) => ({ id: d.id, ...d.data() } as ProductionEntry));
+
+        const nssfWorkerMap: Record<string, { gross: number; name: string }> = {};
+        prodEntriesNssf.forEach((e) => {
+          if (!nssfWorkerMap[e.employeeId]) {
+            nssfWorkerMap[e.employeeId] = { gross: 0, name: employees[e.employeeId] || e.employeeId };
+          }
+          nssfWorkerMap[e.employeeId].gross += e.earningsUgx || 0;
+        });
+
+        const nssfRows = Object.entries(nssfWorkerMap).map(([, w]) => {
+          const empDed = computeNssfEmployee(w.gross);
+          const busCont = computeNssfBusiness(w.gross);
+          return {
+            employeeName: w.name,
+            grossAmount: w.gross,
+            employeeDeduction: empDed,
+            businessContribution: busCont,
+          };
+        });
+
+        const totalEmpDed = nssfRows.reduce((s, r) => s + r.employeeDeduction, 0);
+        const totalBusCont = nssfRows.reduce((s, r) => s + r.businessContribution, 0);
+
+        pdfElement = React.createElement(NssfPDF, {
+          title,
+          period: periodLabel,
+          rows: nssfRows,
+          totalEmployeeDeductions: totalEmpDed,
+          totalBusinessContributions: totalBusCont,
+          totalCombined: totalEmpDed + totalBusCont,
+        });
+        break;
+      }
+
+      case "payee": {
+        let queryPayee: FirebaseFirestore.Query = db
+          .collection("productionEntries")
+          .where("date", ">=", startDate)
+          .where("date", "<=", endDate);
+        if (employeeId) {
+          queryPayee = queryPayee.where("employeeId", "==", employeeId);
+        }
+        const entriesSnapPayee = await queryPayee.orderBy("date", "asc").limit(2000).get();
+
+        const prodEntriesPayee = entriesSnapPayee.docs.map((d) => ({ id: d.id, ...d.data() } as ProductionEntry));
+
+        const payeeWorkerMap: Record<string, { gross: number; name: string }> = {};
+        prodEntriesPayee.forEach((e) => {
+          if (!payeeWorkerMap[e.employeeId]) {
+            payeeWorkerMap[e.employeeId] = { gross: 0, name: employees[e.employeeId] || e.employeeId };
+          }
+          payeeWorkerMap[e.employeeId].gross += e.earningsUgx || 0;
+        });
+
+        const payeeRows = Object.entries(payeeWorkerMap).map(([, w]) => {
+          const bracket = getPayeeBracket(w.gross);
+          const tax = computePayeeTax(w.gross);
+          return {
+            employeeName: w.name,
+            grossAmount: w.gross,
+            bracketLabel: bracket.label,
+            bracketRate: bracket.rate,
+            payeeTax: tax,
+          };
+        });
+
+        const totalPayeeCollected = payeeRows.reduce((s, r) => s + r.payeeTax, 0);
+        const taxableCount = payeeRows.filter((r) => r.payeeTax > 0).length;
+        const taxFreeCount = payeeRows.length - taxableCount;
+
+        pdfElement = React.createElement(PayeePDF, {
+          title,
+          period: periodLabel,
+          rows: payeeRows,
+          totalPayee: totalPayeeCollected,
+          taxableCount,
+          taxFreeCount,
         });
         break;
       }

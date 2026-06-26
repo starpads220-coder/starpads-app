@@ -163,6 +163,11 @@ interface PaymentReceiptPDFProps {
   periodEnd: string;
   paidDate: string;
   entries: ReceiptEntry[];
+  grossAmount: number;
+  nssfEmployeeDeduction: number;
+  nssfBusinessContribution: number;
+  payeeTax: number;
+  netPayAmount: number;
   totalAmount: number;
 }
 
@@ -174,6 +179,11 @@ export const PaymentReceiptPDF = ({
   periodEnd,
   paidDate,
   entries,
+  grossAmount,
+  nssfEmployeeDeduction,
+  nssfBusinessContribution,
+  payeeTax,
+  netPayAmount,
   totalAmount,
 }: PaymentReceiptPDFProps) => (
   <Document>
@@ -222,6 +232,29 @@ export const PaymentReceiptPDF = ({
             </View>
           );
         })}
+      </View>
+
+      <View style={{ ...styles.totalRow, flexDirection: "column", alignItems: "stretch", marginBottom: 20 }}>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+          <Text style={{ fontSize: 11, color: "#666" }}>Gross Earnings</Text>
+          <Text style={{ fontSize: 11, fontWeight: "bold" }}>UGX {grossAmount.toLocaleString()}</Text>
+        </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+          <Text style={{ fontSize: 11, color: "#666" }}>NSSF Employee Deduction (5%)</Text>
+          <Text style={{ fontSize: 11, fontWeight: "bold", color: "#dc2626" }}>- UGX {nssfEmployeeDeduction.toLocaleString()}</Text>
+        </View>
+        <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
+          <Text style={{ fontSize: 11, color: "#666" }}>PAYEE Tax</Text>
+          <Text style={{ fontSize: 11, fontWeight: "bold", color: "#dc2626" }}>- UGX {payeeTax.toLocaleString()}</Text>
+        </View>
+        <View style={{ borderTopWidth: 1, borderTopColor: "#111", paddingTop: 4, marginTop: 2, flexDirection: "row", justifyContent: "space-between" }}>
+          <Text style={{ fontSize: 13, fontWeight: "bold" }}>Net Pay</Text>
+          <Text style={{ fontSize: 13, fontWeight: "bold", color: "#059669" }}>UGX {netPayAmount.toLocaleString()}</Text>
+        </View>
+        <View style={{ borderTopWidth: 1, borderTopColor: "#e5e7eb", borderStyle: "dashed", paddingTop: 4, marginTop: 4, flexDirection: "row", justifyContent: "space-between" }}>
+          <Text style={{ fontSize: 10, color: "#999", fontStyle: "italic" }}>NSSF Business Contribution (10% — paid by employer)</Text>
+          <Text style={{ fontSize: 10, fontWeight: "bold", color: "#2563eb" }}>UGX {nssfBusinessContribution.toLocaleString()}</Text>
+        </View>
       </View>
 
       <Text style={styles.amountPaid}>

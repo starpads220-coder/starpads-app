@@ -30,6 +30,13 @@ import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 
 const PADS_PER_PACK = 3;
 
+const MATERIAL_LABELS: Record<string, string> = {
+  FLEECE: "Fleece [Inner]",
+  FLANNEL: "Flannel [Outer]",
+  PUL: "PUL",
+  COMBINED: "Combined",
+};
+
 type StoragePeriod = "today" | "week" | "month" | "12months" | "custom";
 
 function getStoragePeriodBounds(period: StoragePeriod, customStart?: string, customEnd?: string) {
@@ -250,6 +257,13 @@ export default function StoragePage() {
   const wipOverlocked = Math.max(0, stageCounts["STG-04"] - stageCounts["STG-05"]);
   const wipPouches = Math.max(0, stageCounts["STG-05"] - stageCounts["STG-06"]);
   const wipPinned = Math.max(0, stageCounts["STG-06"] - totalPackagedPads);
+
+  const wipEntries = useMemo(() => {
+    const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
+    return productionEntries
+      .filter((e) => e.date >= wipBounds.start && e.date <= wipBounds.end)
+      .sort((a, b) => b.date.localeCompare(a.date));
+  }, [productionEntries, wipPeriod, wipCustomStart, wipCustomEnd]);
 
   const packsBySizeData = useMemo(() => {
     const bySize: Record<string, number> = {};
@@ -571,7 +585,7 @@ export default function StoragePage() {
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
               </div>
             </ChartCard>
-            <ChartCard title="Sewn Pads" subtitle="STG-02+STG-03 awaiting overlocking" variant="gradient" accentColor={wipSewn > 500 ? palette.orange : palette.blue}>
+            <ChartCard title="Sewn Pads" subtitle="Sewing stages awaiting overlocking" variant="gradient" accentColor={wipSewn > 500 ? palette.orange : palette.blue}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold" style={{ color: wipSewn > 500 ? palette.orange : palette.blue }}>{wipSewn.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pads in queue</span>
@@ -609,6 +623,41 @@ export default function StoragePage() {
             </ChartCard>
           </div>
           <p className="text-xs text-gray-500">Orange accent indicates potential bottlenecks where WIP has accumulated above 500.</p>
+
+          {/* WIP Entries */}
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
+            <h2 className="text-lg font-semibold text-gray-900">Production Entries</h2>
+            {wipEntries.length === 0 ? (
+              <div className="text-center text-gray-400 py-4">No production entries in this period.</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 text-sm">
+                  <thead className="bg-gray-50">
+                    <tr>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stage</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pieces</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {wipEntries.map((e, i) => (
+                      <tr key={e.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                        <td className="px-4 py-3 text-sm text-gray-700">{e.date}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{e.stageId}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">
+                          {employees.find((emp) => emp.id === e.employeeId)?.name ?? e.employeeId}
+                        </td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{e.materialType ? MATERIAL_LABELS[e.materialType] || e.materialType : "—"}</td>
+                        <td className="px-4 py-3 text-sm font-medium text-gray-900">{e.actualPieces.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -633,6 +682,7 @@ export default function StoragePage() {
       )}
 
       {activeTab === "stock-in" && (
+        <>
         <form onSubmit={handleStockInSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
           <h2 className="text-lg font-semibold">Stock-In Entry</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -690,6 +740,46 @@ export default function StoragePage() {
             </button>
           </div>
         </form>
+
+        {/* Stock-In Entries */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-gray-900">Stock-In Entries</h2>
+          {stockIns.length === 0 ? (
+            <div className="text-center text-gray-400 py-4">No stock-in entries recorded.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pack Size</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Received By</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {stockIns.map((si, i) => (
+                    <tr key={si.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                      <td className="px-4 py-3 text-sm text-gray-700">{si.date}</td>
+                      <td className="px-4 py-3 text-sm font-mono text-gray-700">{si.batchRef}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {si.packSize === "HALF_DOZEN" ? "Half Dozen" : si.packSize === "DOZEN" ? "Dozen" : "Carton"}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{si.quantity.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {employees.find((e) => e.id === si.receivedBy)?.name ?? si.receivedBy}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-500">{si.notes || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+        </>
       )}
 
       {activeTab === "stock-out" && (
@@ -813,6 +903,49 @@ export default function StoragePage() {
             </button>
           </div>
         </form>
+
+        {/* Stock-Out Entries */}
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
+          <h2 className="text-lg font-semibold text-gray-900">Stock-Out Entries</h2>
+          {stockOuts.length === 0 ? (
+            <div className="text-center text-gray-400 py-4">No stock-out entries recorded.</div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-full divide-y divide-gray-200 text-sm">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Destination</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer Ref</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pack Size</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dispatched By</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {stockOuts.map((so, i) => (
+                    <tr key={so.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                      <td className="px-4 py-3 text-sm text-gray-700">{so.date}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {so.destination === "BULK_CUSTOMER" ? "Bulk Customer" : so.destination === "RETAIL" ? "Retail" : so.destination === "AGENT" ? "Agent" : so.destination}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{so.customerRef || "—"}</td>
+                      <td className="px-4 py-3 text-sm font-mono text-gray-700">{so.batchRef}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {so.packSize === "HALF_DOZEN" ? "Half Dozen" : so.packSize === "DOZEN" ? "Dozen" : "Carton"}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-gray-900">{so.quantity.toLocaleString()}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {employees.find((e) => e.id === so.dispatchedBy)?.name ?? so.dispatchedBy}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
       </>)}
 
       <ReportCard title="Storage Report" subtitle="Download a PDF summary of stock and inventory data" onGenerate={handleGenerateReport} />

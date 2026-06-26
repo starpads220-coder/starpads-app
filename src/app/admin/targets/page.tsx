@@ -9,9 +9,10 @@ import {
   Timestamp,
   orderBy,
 } from "firebase/firestore";
+import { useQueryClient } from "@tanstack/react-query";
 import { db } from "@/lib/firebase";
 import { RouteGuard } from "@/components/auth/RouteGuard";
-import { STAGE_LABELS, StageId } from "@/types";
+import { STAGE_LABELS, StageId, MaterialType } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
 
 interface StageTarget {
@@ -20,7 +21,17 @@ interface StageTarget {
   defaultTarget: number;
   defaultWageRate: number;
   unit: string;
+  materialTargets?: Partial<Record<MaterialType, number>>;
 }
+
+const CUTTING_MATERIALS: MaterialType[] = ["FLEECE", "FLANNEL", "PUL"];
+
+const MATERIAL_LABELS: Record<MaterialType, string> = {
+  FLEECE: "Fleece [Inner]",
+  FLANNEL: "Flannel [Outer]",
+  PUL: "PUL",
+  COMBINED: "Combined",
+};
 
 interface WorkerTarget {
   id: string;
@@ -32,12 +43,13 @@ interface WorkerTarget {
 }
 
 export default function AdminTargetsPage() {
+  const queryClient = useQueryClient();
   const [editingStage, setEditingStage] = useState<string | null>(null);
+  const [editingMaterial, setEditingMaterial] = useState<MaterialType | null>(null);
   const [editValue, setEditValue] = useState(0);
   const [editWageRate, setEditWageRate] = useState(0);
   const [saving, setSaving] = useState(false);
 
-  // New worker target form
   const [showWorkerForm, setShowWorkerForm] = useState(false);
   const [workerForm, setWorkerForm] = useState({
     employeeId: "",
@@ -58,21 +70,51 @@ export default function AdminTargetsPage() {
     orderBy("effectiveDate", "desc"),
   ], { staleTime: 5 * 60 * 1000 });
 
-  const handleStageEdit = (stage: StageTarget) => {
-    setEditingStage(stage.id);
-    setEditValue(stage.defaultTarget);
-    setEditWageRate(stage.defaultWageRate || 0);
+  const cuttingStage = stages.find((s) => s.stageId === "STG-01");
+
+  const stageRows = stages.flatMap((stage) => {
+    if (stage.stageId !== "STG-01") return [{ ...stage, material: null as MaterialType | null }];
+    return CUTTING_MATERIALS.map((mat) => ({
+      ...stage,
+      material: mat,
+    }));
+  });
+
+  const handleEdit = (row: typeof stageRows[number]) => {
+    setEditingStage(row.stageId);
+    if (row.material) {
+      setEditingMaterial(row.material);
+      setEditValue(row.materialTargets?.[row.material] ?? 0);
+    } else {
+      setEditingMaterial(null);
+      setEditValue(row.defaultTarget);
+    }
+    setEditWageRate(row.defaultWageRate || 0);
   };
 
-  const handleStageSave = async (stageId: string) => {
+  const handleSave = async (stageId: string, material: MaterialType | null) => {
     setSaving(true);
     try {
-      await updateDoc(doc(db, "productionStages", stageId), {
-        defaultTarget: editValue,
-        defaultWageRate: editWageRate,
-        updatedAt: Timestamp.now(),
-      });
+      if (material) {
+        const existing = stages.find((s) => s.stageId === stageId);
+        await updateDoc(doc(db, "productionStages", stageId), {
+          materialTargets: {
+            ...existing?.materialTargets,
+            [material]: editValue,
+          },
+          defaultWageRate: editWageRate,
+          updatedAt: Timestamp.now(),
+        });
+      } else {
+        await updateDoc(doc(db, "productionStages", stageId), {
+          defaultTarget: editValue,
+          defaultWageRate: editWageRate,
+          updatedAt: Timestamp.now(),
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["productionStages"] });
       setEditingStage(null);
+      setEditingMaterial(null);
     } finally {
       setSaving(false);
     }
@@ -103,7 +145,6 @@ export default function AdminTargetsPage() {
     <div className="space-y-8">
       <h1 className="text-2xl font-bold text-gray-900">Target Configuration</h1>
 
-      {/* Per-Stage Default Targets */}
       <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">
           Stage Default Targets
@@ -120,73 +161,79 @@ export default function AdminTargetsPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {stages.map((stage, i) => (
-                <tr key={stage.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
-                  <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                    {stage.stageId} — {STAGE_LABELS[stage.stageId]}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">
-                    {editingStage === stage.id ? (
-                      <input
-                        type="number"
-                        value={editValue}
-                        onChange={(e) => setEditValue(parseInt(e.target.value) || 0)}
-                        min={0}
-                        className="w-24 px-2 py-1 border border-gray-300 rounded text-sm"
-                        autoFocus
-                      />
-                    ) : (
-                      stage.defaultTarget.toLocaleString()
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">
-                    {editingStage === stage.id ? (
-                      <input
-                        type="number"
-                        value={editWageRate}
-                        onChange={(e) => setEditWageRate(parseInt(e.target.value) || 0)}
-                        min={0}
-                        className="w-28 px-2 py-1 border border-gray-300 rounded text-sm"
-                      />
-                    ) : (
-                      stage.defaultWageRate ? `UGX ${stage.defaultWageRate.toLocaleString()}` : "—"
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{stage.unit}</td>
-                  <td className="px-4 py-3 text-right">
-                    {editingStage === stage.id ? (
-                      <span className="flex justify-end gap-2">
+              {stageRows.map((row, i) => {
+                const editKey = row.material ? `${row.stageId}-${row.material}` : row.stageId;
+                const isEditing = editingStage === row.stageId && editingMaterial === row.material;
+                return (
+                  <tr key={editKey} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                    <td className="px-4 py-3 text-sm font-medium text-gray-900">
+                      {row.stageId} — {STAGE_LABELS[row.stageId]}
+                      {row.material ? ` (${MATERIAL_LABELS[row.material]})` : ""}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          value={editValue}
+                          onChange={(e) => setEditValue(parseInt(e.target.value) || 0)}
+                          min={0}
+                          className="w-24 px-2 py-1 border border-gray-300 rounded text-sm"
+                          autoFocus
+                        />
+                      ) : row.material ? (
+                        row.materialTargets?.[row.material]?.toLocaleString() ?? "—"
+                      ) : (
+                        row.defaultTarget.toLocaleString()
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          value={editWageRate}
+                          onChange={(e) => setEditWageRate(parseInt(e.target.value) || 0)}
+                          min={0}
+                          className="w-28 px-2 py-1 border border-gray-300 rounded text-sm"
+                        />
+                      ) : (
+                        row.defaultWageRate ? `UGX ${row.defaultWageRate.toLocaleString()}` : "—"
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{row.unit}</td>
+                    <td className="px-4 py-3 text-right">
+                      {isEditing ? (
+                        <span className="flex justify-end gap-2">
+                          <button
+                            onClick={() => handleSave(row.stageId, row.material)}
+                            disabled={saving}
+                            className="text-sm text-stock-blue hover:underline"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={() => { setEditingStage(null); setEditingMaterial(null); }}
+                            className="text-sm text-gray-500 hover:underline"
+                          >
+                            Cancel
+                          </button>
+                        </span>
+                      ) : (
                         <button
-                          onClick={() => handleStageSave(stage.id)}
-                          disabled={saving}
+                          onClick={() => handleEdit(row)}
                           className="text-sm text-stock-blue hover:underline"
                         >
-                          Save
+                          Edit
                         </button>
-                        <button
-                          onClick={() => setEditingStage(null)}
-                          className="text-sm text-gray-500 hover:underline"
-                        >
-                          Cancel
-                        </button>
-                      </span>
-                    ) : (
-                      <button
-                        onClick={() => handleStageEdit(stage)}
-                        className="text-sm text-stock-blue hover:underline"
-                      >
-                        Edit
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </section>
 
-      {/* Per-Worker Override Targets */}
       <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">
           <h2 className="text-lg font-semibold text-gray-900">

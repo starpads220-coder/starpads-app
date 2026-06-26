@@ -159,9 +159,11 @@ export default function ProductionPage() {
     ? 120
     : activeOverride
       ? activeOverride.dailyTarget
-      : selectedStage
-        ? selectedStage.defaultTarget
-        : 0;
+      : form.stageId === "STG-01" && form.materialType && selectedStage?.materialTargets?.[form.materialType as MaterialType]
+        ? selectedStage.materialTargets[form.materialType as MaterialType]!
+        : selectedStage
+          ? selectedStage.defaultTarget
+          : 0;
 
   const dailyWageRate = selectedStage ? selectedStage.defaultWageRate : 0;
 
@@ -256,7 +258,7 @@ export default function ProductionPage() {
 
   const stageBarData = useMemo(() => {
     const labels: Record<string, string> = {
-      "STG-01": "Cut", "STG-02": "Sew M", "STG-03": "Sew I", "STG-04": "Overlock",
+      "STG-01": "Cut", "STG-02": "Sew-In", "STG-03": "Sew-Out", "STG-04": "Overlock",
       "STG-05": "Pouch", "STG-06": "Pin", "STG-07": "Pack",
     };
     return STAGE_ORDER.map((s) => ({ label: labels[s] || s, value: stageCounts[s] }));

@@ -15,6 +15,10 @@ interface WorkerPaymentRec {
   actualPieces: number;
   earningsUgx: number;
   status: string;
+  nssfEmployee: number;
+  nssfBusiness: number;
+  payeeTax: number;
+  netPay: number;
 }
 
 interface WorkerPDFProps {
@@ -26,6 +30,10 @@ interface WorkerPDFProps {
   totalTarget: number;
   performancePct: number;
   totalEarnings: number;
+  totalNssfEmployee: number;
+  totalNssfBusiness: number;
+  totalPayee: number;
+  totalNetPay: number;
   daysWorked: number;
   entriesCount: number;
   stageDistribution: WorkerStageData[];
@@ -34,7 +42,8 @@ interface WorkerPDFProps {
 
 export function WorkerPDF({
   title, period, employeeName, employeeRole, totalActual, totalTarget,
-  performancePct, totalEarnings, daysWorked, entriesCount,
+  performancePct, totalEarnings, totalNssfEmployee, totalNssfBusiness,
+  totalPayee, totalNetPay, daysWorked, entriesCount,
   stageDistribution, paymentHistory,
 }: WorkerPDFProps) {
   return (
@@ -73,6 +82,25 @@ export function WorkerPDF({
             <Text style={pdfStyles.summaryLabel}>Total Earnings</Text>
             <Text style={pdfStyles.summaryValue}>UGX {totalEarnings.toLocaleString()}</Text>
           </View>
+          <View style={{ borderTopWidth: 1, borderTopColor: "#d1d5db", marginVertical: 4, paddingTop: 4 }}>
+            <Text style={{ fontSize: 10, fontWeight: "bold", color: "#374151", marginBottom: 2 }}>Deductions</Text>
+            <View style={pdfStyles.summaryRow}>
+              <Text style={pdfStyles.summaryLabel}>NSSF Employee (5%)</Text>
+              <Text style={{ fontSize: 11, fontWeight: "bold", color: "#dc2626" }}>UGX {totalNssfEmployee.toLocaleString()}</Text>
+            </View>
+            <View style={pdfStyles.summaryRow}>
+              <Text style={pdfStyles.summaryLabel}>PAYEE Tax</Text>
+              <Text style={{ fontSize: 11, fontWeight: "bold", color: "#dc2626" }}>UGX {totalPayee.toLocaleString()}</Text>
+            </View>
+            <View style={pdfStyles.summaryRow}>
+              <Text style={pdfStyles.summaryLabel}>Net Pay</Text>
+              <Text style={{ fontSize: 11, fontWeight: "bold", color: "#059669" }}>UGX {totalNetPay.toLocaleString()}</Text>
+            </View>
+            <View style={pdfStyles.summaryRow}>
+              <Text style={pdfStyles.summaryLabel}>NSSF Business (10%)</Text>
+              <Text style={{ fontSize: 11, fontWeight: "bold", color: "#2563eb" }}>UGX {totalNssfBusiness.toLocaleString()}</Text>
+            </View>
+          </View>
           <View style={pdfStyles.summaryRow}>
             <Text style={pdfStyles.summaryLabel}>Days Worked</Text>
             <Text style={pdfStyles.summaryValue}>{daysWorked}</Text>
@@ -109,11 +137,13 @@ export function WorkerPDF({
           <Text style={pdfStyles.sectionTitle}>Payment History</Text>
           <View style={pdfStyles.table}>
             <View style={pdfStyles.tableRow}>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(18) }}><Text style={pdfStyles.tableCellHeader}>Date</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(28) }}><Text style={pdfStyles.tableCellHeader}>Stage</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(16) }}><Text style={pdfStyles.tableCellHeader}>Pieces</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(22) }}><Text style={pdfStyles.tableCellHeader}>Earnings</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(16) }}><Text style={pdfStyles.tableCellHeader}>Status</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(14) }}><Text style={pdfStyles.tableCellHeader}>Date</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(20) }}><Text style={pdfStyles.tableCellHeader}>Stage</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>Pieces</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(16) }}><Text style={pdfStyles.tableCellHeader}>Earnings</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>NSSF Emp</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>PAYEE</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(14) }}><Text style={pdfStyles.tableCellHeader}>Status</Text></View>
             </View>
             {paymentHistory.length === 0 ? (
               <View style={pdfStyles.tableRow}>
@@ -122,11 +152,13 @@ export function WorkerPDF({
             ) : (
               paymentHistory.map((p, i) => (
                 <View style={pdfStyles.tableRow} key={i}>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(18) }}><Text style={pdfStyles.tableCell}>{p.date}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(28) }}><Text style={pdfStyles.tableCell}>{STAGE_LABELS[p.stageId as StageId] || p.stageId}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(16) }}><Text style={pdfStyles.tableCell}>{p.actualPieces.toLocaleString()}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(22) }}><Text style={pdfStyles.tableCell}>UGX {p.earningsUgx.toLocaleString()}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(16) }}><Text style={pdfStyles.tableCell}>{p.status}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{p.date}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(20) }}><Text style={pdfStyles.tableCell}>{STAGE_LABELS[p.stageId as StageId] || p.stageId}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(12) }}><Text style={pdfStyles.tableCell}>{p.actualPieces.toLocaleString()}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(16) }}><Text style={pdfStyles.tableCell}>UGX {p.earningsUgx.toLocaleString()}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(12) }}><Text style={pdfStyles.tableCell}>{p.nssfEmployee.toLocaleString()}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(12) }}><Text style={pdfStyles.tableCell}>{p.payeeTax.toLocaleString()}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{p.status}</Text></View>
                 </View>
               ))
             )}

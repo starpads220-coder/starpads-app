@@ -41,6 +41,12 @@ export async function GET(request: NextRequest) {
       earningsUgx: d.data().earningsUgx || 0,
     }));
 
+    const gross = payment.grossAmount || payment.totalAmount || 0;
+    const nssfEmp = payment.nssfEmployeeDeduction || 0;
+    const nssfBus = payment.nssfBusinessContribution || 0;
+    const payee = payment.payeeTax || 0;
+    const netPay = payment.netPayAmount || (gross - nssfEmp - payee);
+
     const props: React.ComponentProps<typeof PaymentReceiptPDF> = {
       receiptNumber: payment.receiptNumber || paymentId,
       employeeName: employee.name || payment.employeeId,
@@ -49,7 +55,12 @@ export async function GET(request: NextRequest) {
       periodEnd: payment.periodEnd,
       paidDate: payment.paidDate || "",
       entries,
-      totalAmount: payment.totalAmount || 0,
+      grossAmount: gross,
+      nssfEmployeeDeduction: nssfEmp,
+      nssfBusinessContribution: nssfBus,
+      payeeTax: payee,
+      netPayAmount: netPay,
+      totalAmount: gross,
     };
     const el = React.createElement(PaymentReceiptPDF, props);
     const stream = await renderToStream(el as React.ReactElement<DocumentProps>);

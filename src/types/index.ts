@@ -51,6 +51,7 @@ export interface ProductionStage {
   defaultTarget: number;
   defaultWageRate: number;
   unit: string;
+  materialTargets?: Partial<Record<MaterialType, number>>;
 }
 
 export interface TargetConfig {
@@ -97,13 +98,33 @@ export interface Payment {
   employeeId: string;
   periodStart: string;
   periodEnd: string;
+  grossAmount: number;
   totalAmount: number;
+  nssfEmployeeDeduction: number;
+  nssfBusinessContribution: number;
+  payeeTax: number;
+  netPayAmount: number;
   status: PaymentStatus;
   paidDate: string | null;
   receiptNumber: string | null;
   notes: string;
   createdAt: string;
   createdBy: string;
+}
+
+export interface PayeeBracket {
+  label: string;
+  rate: number;
+  tax: number;
+}
+
+export interface DeductionBreakdown {
+  grossAmount: number;
+  nssfEmployeeDeduction: number;
+  nssfBusinessContribution: number;
+  payeeTax: number;
+  netPayAmount: number;
+  payeeBracket: PayeeBracket;
 }
 
 export interface StockIn {
@@ -181,8 +202,8 @@ export const PACK_SIZES: Record<PackSize, number> = {
 
 export const STAGE_LABELS: Record<StageId, string> = {
   "STG-01": "Cutting",
-  "STG-02": "Sewing - Middle + Outer",
-  "STG-03": "Sewing - Inner/Top Layer",
+  "STG-02": "Sewing Inner [Middle]",
+  "STG-03": "Sewing Outer [TopLayer]",
   "STG-04": "Overlocking",
   "STG-05": "Pouch Making",
   "STG-06": "Checking & Pinning",

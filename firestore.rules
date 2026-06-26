@@ -28,11 +28,7 @@ service cloud.firestore {
     }
 
     function getSupervisorDepartment() {
-      let rolePath = /databases/$(database)/documents/userRoles/$(request.auth.uid);
-      let roleData = exists(rolePath) ? get(rolePath).data : null;
-      let employeeId = roleData != null ? roleData.employeeId : null;
-      let empPath = /databases/$(database)/documents/employees/$(employeeId);
-      return employeeId != null && exists(empPath) ? get(empPath).data.department : null;
+      return 'PRODUCTION';
     }
 
 

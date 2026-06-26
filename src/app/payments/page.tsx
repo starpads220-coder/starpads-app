@@ -11,6 +11,8 @@ import {
   doc,
   Timestamp,
   limit,
+  where,
+  getDocs,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
@@ -20,6 +22,7 @@ import {
   ProductionStage,
   StageId,
   STAGE_LABELS,
+  Payment,
 } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { ChartCard } from "@/components/ui/ChartCard";
@@ -30,11 +33,19 @@ import { WorldPopulationAreaChart } from "@/components/charts/WorldPopulationAre
 import { palette } from "@/components/charts";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
+import {
+  computeAllDeductions,
+  computeNssfEmployee,
+  computeNssfBusiness,
+  computePayeeTax,
+} from "@/lib/deductions";
+import { NssfCard } from "@/components/payments/NssfCard";
+import { PayeeCard } from "@/components/payments/PayeeCard";
 
-type TimeWindow = "today" | "week" | "month";
+type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
 type ActiveTab = "employees" | "dates";
 
-function getDateBounds(window: TimeWindow) {
+function getDateBounds(window: TimeWindow, customStart?: string, customEnd?: string) {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
   if (window === "today") return { start: todayStr, end: todayStr };
@@ -43,7 +54,48 @@ function getDateBounds(window: TimeWindow) {
   const weekStartStr = weekStart.toISOString().split("T")[0];
   if (window === "week") return { start: weekStartStr, end: todayStr };
   const monthStartStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-  return { start: monthStartStr, end: todayStr };
+  if (window === "month") return { start: monthStartStr, end: todayStr };
+  if (window === "12months") {
+    const yearAgo = new Date(now);
+    yearAgo.setFullYear(now.getFullYear() - 1);
+    return { start: yearAgo.toISOString().split("T")[0], end: todayStr };
+  }
+  return { start: customStart || todayStr, end: customEnd || todayStr };
+}
+
+function getMonthBounds(dateStr: string) {
+  const d = new Date(dateStr);
+  const monthStart = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  const monthEnd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+  return { monthStart, monthEnd };
+}
+
+async function getCumulativePayeeForEmployee(
+  employeeId: string,
+  currentPaymentGross: number,
+  todayStr: string
+): Promise<number> {
+  const { monthStart, monthEnd } = getMonthBounds(todayStr);
+  const existingPaymentsSnap = await getDocs(
+    query(
+      collection(db, "payments"),
+      where("employeeId", "==", employeeId),
+      where("paidDate", ">=", monthStart),
+      where("paidDate", "<=", monthEnd)
+    )
+  );
+  const alreadyPaidPayee = existingPaymentsSnap.docs.reduce(
+    (sum, d) => sum + ((d.data().payeeTax as number) || 0),
+    0
+  );
+  const existingGross = existingPaymentsSnap.docs.reduce(
+    (sum, d) => sum + ((d.data().grossAmount as number) || 0),
+    0
+  );
+  const totalMonthlyGross = existingGross + currentPaymentGross;
+  const totalPayeeDue = computePayeeTax(totalMonthlyGross);
+  return totalPayeeDue - alreadyPaidPayee;
 }
 
 async function getNextReceiptNumber(): Promise<string> {
@@ -80,6 +132,8 @@ interface DateSummary {
 export default function PaymentsPage() {
   const { userRole } = useAuth();
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("today");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("employees");
   const [entries, setEntries] = useState<ProductionEntry[]>([]);
   const [entriesLoading, setEntriesLoading] = useState(true);
@@ -108,7 +162,7 @@ export default function PaymentsPage() {
     return () => unsub();
   }, []);
 
-  const { start, end } = getDateBounds(timeWindow);
+  const { start, end } = getDateBounds(timeWindow, customStart || undefined, customEnd || undefined);
   const filteredEntries = useMemo(() =>
     entries.filter((e) => e.date >= start && e.date <= end),
     [entries, start, end]
@@ -253,6 +307,7 @@ export default function PaymentsPage() {
   const handleWindowChange = (tw: TimeWindow) => {
     setTimeWindow(tw);
     setExpandedDate(null);
+    if (tw === "today") { setCustomStart(""); setCustomEnd(""); }
   };
 
   const payEmployee = employeePayments.find((e) => e.employeeId === payEmployeeId);
@@ -264,6 +319,16 @@ export default function PaymentsPage() {
       const receiptNumber = await getNextReceiptNumber();
       const todayStr = new Date().toISOString().split("T")[0];
 
+      const grossAmount = payEmployee.dueAmount;
+      const nssfEmployeeDeduction = computeNssfEmployee(grossAmount);
+      const nssfBusinessContribution = computeNssfBusiness(grossAmount);
+      const payeeTax = await getCumulativePayeeForEmployee(
+        payEmployee.employeeId,
+        grossAmount,
+        todayStr
+      );
+      const netPayAmount = grossAmount - nssfEmployeeDeduction - payeeTax;
+
       const batch = writeBatch(db);
       const paymentRef = doc(collection(db, "payments"));
 
@@ -271,7 +336,12 @@ export default function PaymentsPage() {
         employeeId: payEmployee.employeeId,
         periodStart: start,
         periodEnd: end,
-        totalAmount: payEmployee.dueAmount,
+        grossAmount,
+        totalAmount: grossAmount,
+        nssfEmployeeDeduction,
+        nssfBusinessContribution,
+        payeeTax,
+        netPayAmount,
         status: "paid",
         paidDate: todayStr,
         receiptNumber,
@@ -291,7 +361,7 @@ export default function PaymentsPage() {
       await batch.commit();
 
       showToast(
-        `Payment of UGX ${payEmployee.dueAmount.toLocaleString()} to ${payEmployee.employeeName} — Receipt: ${receiptNumber}`,
+        `Payment of UGX ${grossAmount.toLocaleString()} to ${payEmployee.employeeName} — Receipt: ${receiptNumber}`,
         "success"
       );
 
@@ -312,7 +382,12 @@ export default function PaymentsPage() {
               actualPieces: e.actualPieces,
               earningsUgx: e.earningsUgx,
             }))}
-            totalAmount={payEmployee.dueAmount}
+            grossAmount={grossAmount}
+            nssfEmployeeDeduction={nssfEmployeeDeduction}
+            nssfBusinessContribution={nssfBusinessContribution}
+            payeeTax={payeeTax}
+            netPayAmount={netPayAmount}
+            totalAmount={grossAmount}
           />
         ).toBlob();
 
@@ -328,8 +403,17 @@ export default function PaymentsPage() {
       }
 
       setPayEmployeeId(null);
-    } catch {
-      showToast("Payment failed. Please try again.", "error");
+    } catch (err: any) {
+      console.error("Payment error:", err);
+      const msg = err?.message || "";
+      if (msg.includes("index") || msg.includes("FAILED_PRECONDITION")) {
+        showToast(
+          `Payment failed — missing database index. Please create the required index and try again: ${msg}`,
+          "error"
+        );
+      } else {
+        showToast(`Payment failed: ${msg || "Unknown error. Please try again."}`, "error");
+      }
     } finally {
       setPayProcessing(false);
     }
@@ -366,6 +450,50 @@ export default function PaymentsPage() {
     URL.revokeObjectURL(url);
   }, []);
 
+  const handleGenerateNssfReport = useCallback(async (selection: PeriodSelection) => {
+    const params = new URLSearchParams({
+      screen: "nssf",
+      periodType: selection.type,
+      startDate: selection.startDate,
+      endDate: selection.endDate,
+      periodLabel: selection.periodLabel,
+    });
+    const res = await fetch(`/api/reports?${params}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`NSSF report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `nssf-report-${selection.startDate}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
+  const handleGeneratePayeeReport = useCallback(async (selection: PeriodSelection) => {
+    const params = new URLSearchParams({
+      screen: "payee",
+      periodType: selection.type,
+      startDate: selection.startDate,
+      endDate: selection.endDate,
+      periodLabel: selection.periodLabel,
+    });
+    const res = await fetch(`/api/reports?${params}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`PAYEE report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `payee-report-${selection.startDate}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, []);
+
   if (entriesLoading) {
     return <div className="text-center text-gray-400 py-12">Loading payments...</div>;
   }
@@ -376,7 +504,7 @@ export default function PaymentsPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          {(["today", "week", "month"] as const).map((tw) => (
+          {(["today", "week", "month", "12months", "custom"] as const).map((tw) => (
             <button
               key={tw}
               onClick={() => handleWindowChange(tw)}
@@ -384,10 +512,27 @@ export default function PaymentsPage() {
                 timeWindow === tw ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
               }`}
             >
-              {tw === "today" ? "Today" : tw === "week" ? "This Week" : "This Month"}
+              {tw === "today" ? "Today" : tw === "week" ? "This Week" : tw === "month" ? "This Month" : tw === "12months" ? "12 Months" : "Custom"}
             </button>
           ))}
         </div>
+        {timeWindow === "custom" && (
+          <div className="flex gap-2 items-center mt-2">
+            <input
+              type="date"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+            />
+            <span className="text-sm text-gray-500">to</span>
+            <input
+              type="date"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+            />
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -504,7 +649,16 @@ export default function PaymentsPage() {
         </ChartCard>
       </div>
 
-      <ReportCard title="Payments Report" subtitle="Download a PDF summary of payment data" onGenerate={handleGenerateReport} />
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <NssfCard employeePayments={employeePayments} />
+        <PayeeCard employeePayments={employeePayments} />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <ReportCard title="Payments Report" subtitle="Download a PDF summary of payment data" onGenerate={handleGenerateReport} />
+        <ReportCard title="NSSF Report" subtitle="Download NSSF deductions report" onGenerate={handleGenerateNssfReport} />
+        <ReportCard title="PAYEE Report" subtitle="Download PAYEE tax report" onGenerate={handleGeneratePayeeReport} />
+      </div>
 
       <div className="flex gap-4 border-b border-gray-200">
         <button
@@ -725,7 +879,7 @@ export default function PaymentsPage() {
                 </h2>
                 <p className="text-sm text-gray-500">
                   {payEmployee.employeeName} &mdash;{" "}
-                  {timeWindow === "today" ? "Today" : timeWindow === "week" ? "This Week" : "This Month"}
+                  {timeWindow === "today" ? "Today" : timeWindow === "week" ? "This Week" : timeWindow === "month" ? "This Month" : timeWindow === "12months" ? "12 Months" : `${start} to ${end}`}
                 </p>
               </div>
               <button
@@ -739,7 +893,7 @@ export default function PaymentsPage() {
             <div className="p-6">
               <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
                 <div className="flex justify-between items-center">
-                  <span className="text-sm font-semibold text-amber-800">Total Due Amount</span>
+                  <span className="text-sm font-semibold text-amber-800">Gross Earnings</span>
                   <span className="text-xl font-bold text-amber-800">
                     UGX {payEmployee.dueAmount.toLocaleString()}
                   </span>
@@ -747,6 +901,31 @@ export default function PaymentsPage() {
                 <p className="text-xs text-amber-600 mt-1">
                   {payEmployee.dueEntries.length} entry{payEmployee.dueEntries.length !== 1 ? "ies" : "y"} to be paid
                 </p>
+              </div>
+
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 space-y-2">
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">Gross Earnings</span>
+                  <span className="font-semibold text-gray-900">UGX {payEmployee.dueAmount.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">NSSF Employee Deduction (5%)</span>
+                  <span className="font-semibold text-red-600">- UGX {computeNssfEmployee(payEmployee.dueAmount).toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between items-center text-sm">
+                  <span className="text-gray-600">PAYEE Tax</span>
+                  <span className="font-semibold text-red-600">- UGX {computePayeeTax(payEmployee.dueAmount).toLocaleString()}</span>
+                </div>
+                <div className="border-t border-gray-200 pt-2 flex justify-between items-center text-sm">
+                  <span className="font-semibold text-gray-800">Net Pay to Employee</span>
+                  <span className="text-lg font-bold text-green-600">
+                    UGX {(payEmployee.dueAmount - computeNssfEmployee(payEmployee.dueAmount) - computePayeeTax(payEmployee.dueAmount)).toLocaleString()}
+                  </span>
+                </div>
+                <div className="border-t border-dashed border-gray-200 pt-2 flex justify-between items-center text-sm">
+                  <span className="text-gray-500 italic">NSSF Business Contribution (10% — paid by employer)</span>
+                  <span className="font-semibold text-blue-600">UGX {computeNssfBusiness(payEmployee.dueAmount).toLocaleString()}</span>
+                </div>
               </div>
 
               <table className="min-w-full text-sm">

@@ -38,11 +38,12 @@ import {
 } from "date-fns";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
+import { getPayeeBracket } from "@/lib/deductions";
 
-type TimeWindow = "today" | "week" | "month";
-type DetailTab = "calendar" | "breakdown" | "history";
+type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
+type DetailTab = "calendar" | "breakdown" | "history" | "nssf" | "payee";
 
-function getDateBounds(window: TimeWindow) {
+function getDateBounds(window: TimeWindow, customStart?: string, customEnd?: string) {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
   if (window === "today") return { start: todayStr, end: todayStr };
@@ -51,7 +52,13 @@ function getDateBounds(window: TimeWindow) {
   const weekStartStr = weekStart.toISOString().split("T")[0];
   if (window === "week") return { start: weekStartStr, end: todayStr };
   const monthStartStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
-  return { start: monthStartStr, end: todayStr };
+  if (window === "month") return { start: monthStartStr, end: todayStr };
+  if (window === "12months") {
+    const yearAgo = new Date(now);
+    yearAgo.setFullYear(now.getFullYear() - 1);
+    return { start: yearAgo.toISOString().split("T")[0], end: todayStr };
+  }
+  return { start: customStart || todayStr, end: customEnd || todayStr };
 }
 
 export default function EmployeePaymentDetailPage() {
@@ -65,6 +72,8 @@ export default function EmployeePaymentDetailPage() {
   const [loading, setLoading] = useState(true);
 
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("today");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
   const [activeTab, setActiveTab] = useState<DetailTab>("calendar");
   const [calendarDate, setCalendarDate] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
@@ -111,11 +120,19 @@ export default function EmployeePaymentDetailPage() {
     };
   }, [id]);
 
-  const { start, end } = useMemo(() => getDateBounds(timeWindow), [timeWindow]);
+  const { start, end } = useMemo(
+    () => getDateBounds(timeWindow, customStart || undefined, customEnd || undefined),
+    [timeWindow, customStart, customEnd]
+  );
 
   const filteredEntries = useMemo(() =>
     entries.filter((e) => e.date >= start && e.date <= end),
     [entries, start, end]
+  );
+
+  const filteredPayments = useMemo(() =>
+    payments.filter((p) => p.paidDate && p.paidDate >= start && p.paidDate <= end),
+    [payments, start, end]
   );
 
   const dueEntries = useMemo(() =>
@@ -220,6 +237,21 @@ export default function EmployeePaymentDetailPage() {
     return { monthStart: mStart, days: dayList, entryDates: eDates };
   }, [calendarDate, entries]);
 
+  const nssfSummary = useMemo(() => {
+    const totalEmpDed = filteredPayments.reduce((s, p) => s + (p.nssfEmployeeDeduction || 0), 0);
+    const totalBusCont = filteredPayments.reduce((s, p) => s + (p.nssfBusinessContribution || 0), 0);
+    const nssfPaymentCount = filteredPayments.filter((p) => (p.nssfEmployeeDeduction || 0) > 0).length;
+    return { totalEmployeeDeduction: totalEmpDed, totalBusinessContribution: totalBusCont, nssfPaymentCount, hasNssf: nssfPaymentCount > 0 };
+  }, [filteredPayments]);
+
+  const payeeSummary = useMemo(() => {
+    const totalPayee = filteredPayments.reduce((s, p) => s + (p.payeeTax || 0), 0);
+    const taxableCount = filteredPayments.filter((p) => (p.payeeTax || 0) > 0).length;
+    const latestPayee = filteredPayments.length > 0 ? (filteredPayments[0].payeeTax || 0) : 0;
+    const latestGross = filteredPayments.length > 0 ? (filteredPayments[0].grossAmount || filteredPayments[0].totalAmount || 0) : 0;
+    return { totalPayee, taxableCount, taxFreeCount: filteredPayments.length - taxableCount, latestPayee, latestGross, hasPayee: totalPayee > 0 };
+  }, [filteredPayments]);
+
   const handleDownloadReceipt = async (paymentId: string) => {
     try {
       const payment = payments.find((p) => p.id === paymentId);
@@ -234,6 +266,12 @@ export default function EmployeePaymentDetailPage() {
           earningsUgx: e.earningsUgx,
         }));
 
+      const gross = payment.grossAmount || payment.totalAmount || 0;
+      const nssfEmp = payment.nssfEmployeeDeduction || 0;
+      const nssfBus = payment.nssfBusinessContribution || 0;
+      const payee = payment.payeeTax || 0;
+      const netPay = payment.netPayAmount || (gross - nssfEmp - payee);
+
       const { pdf } = await import("@react-pdf/renderer");
       const { PaymentReceiptPDF } = await import("@/components/payments/PaymentReceiptPDF");
       const blob = await pdf(
@@ -245,7 +283,12 @@ export default function EmployeePaymentDetailPage() {
           periodEnd={payment.periodEnd}
           paidDate={payment.paidDate || ""}
           entries={receiptEntries}
-          totalAmount={payment.totalAmount}
+          grossAmount={gross}
+          nssfEmployeeDeduction={nssfEmp}
+          nssfBusinessContribution={nssfBus}
+          payeeTax={payee}
+          netPayAmount={netPay}
+          totalAmount={gross}
         />
       ).toBlob();
 
@@ -284,6 +327,52 @@ export default function EmployeePaymentDetailPage() {
     URL.revokeObjectURL(url);
   }, [id]);
 
+  const handleGenerateNssfReport = useCallback(async (selection: PeriodSelection) => {
+    const params = new URLSearchParams({
+      screen: "nssf",
+      periodType: selection.type,
+      startDate: selection.startDate,
+      endDate: selection.endDate,
+      periodLabel: selection.periodLabel,
+      employeeId: id,
+    });
+    const res = await fetch(`/api/reports?${params}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`NSSF report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `nssf-employee-report-${selection.startDate}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [id]);
+
+  const handleGeneratePayeeReport = useCallback(async (selection: PeriodSelection) => {
+    const params = new URLSearchParams({
+      screen: "payee",
+      periodType: selection.type,
+      startDate: selection.startDate,
+      endDate: selection.endDate,
+      periodLabel: selection.periodLabel,
+      employeeId: id,
+    });
+    const res = await fetch(`/api/reports?${params}`);
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`PAYEE report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
+    }
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `payee-employee-report-${selection.startDate}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [id]);
+
   if (loading) {
     return <div className="text-center text-gray-400 py-12">Loading employee details...</div>;
   }
@@ -309,22 +398,40 @@ export default function EmployeePaymentDetailPage() {
             </p>
           </div>
         </div>
-        <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-          {(["today", "week", "month"] as const).map((tw) => (
+        <div className="flex gap-1 bg-gray-100 rounded-lg p-1 flex-wrap">
+          {(["today", "week", "month", "12months", "custom"] as const).map((tw) => (
             <button
               key={tw}
               onClick={() => {
                 setTimeWindow(tw);
                 setSelectedDate(null);
+                if (tw === "today") { setCustomStart(""); setCustomEnd(""); }
               }}
               className={`px-3 py-1.5 text-sm font-medium rounded-md ${
                 timeWindow === tw ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
               }`}
             >
-              {tw === "today" ? "Today" : tw === "week" ? "This Week" : "This Month"}
+              {tw === "today" ? "Today" : tw === "week" ? "This Week" : tw === "month" ? "This Month" : tw === "12months" ? "12 Months" : "Custom"}
             </button>
           ))}
         </div>
+        {timeWindow === "custom" && (
+          <div className="flex gap-2 items-center mt-2">
+            <input
+              type="date"
+              value={customStart}
+              onChange={(e) => setCustomStart(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+            />
+            <span className="text-sm text-gray-500">to</span>
+            <input
+              type="date"
+              value={customEnd}
+              onChange={(e) => setCustomEnd(e.target.value)}
+              className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
+            />
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -424,13 +531,67 @@ export default function EmployeePaymentDetailPage() {
             <div className="flex items-center justify-center h-full text-gray-400 text-sm">All entries paid</div>
           </ChartCard>
         )}
+
+        <ChartCard title="NSSF" subtitle="National Social Security Fund" variant="gradient" accentColor={palette.blue}>
+          <div className="flex flex-col h-full justify-center">
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div className="text-center p-2 bg-red-50 rounded-lg">
+                <div className="text-xs text-red-600 font-medium">Employee (5%)</div>
+                <div className="text-lg font-bold text-red-700">
+                  UGX {nssfSummary.totalEmployeeDeduction.toLocaleString()}
+                </div>
+              </div>
+              <div className="text-center p-2 bg-blue-50 rounded-lg">
+                <div className="text-xs text-blue-600 font-medium">Business (10%)</div>
+                <div className="text-lg font-bold text-blue-700">
+                  UGX {nssfSummary.totalBusinessContribution.toLocaleString()}
+                </div>
+              </div>
+            </div>
+            <div className="text-center text-xs text-gray-500">
+              {nssfSummary.hasNssf
+                ? `${nssfSummary.nssfPaymentCount} payment${nssfSummary.nssfPaymentCount !== 1 ? "s" : ""} with NSSF deductions`
+                : "No NSSF payments recorded"}
+            </div>
+          </div>
+        </ChartCard>
+
+        <ChartCard title="PAYEE" subtitle="Pay As You Earn" variant="gradient" accentColor={palette.orange}>
+          <div className="flex flex-col h-full justify-center">
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <div className="text-center p-2 bg-orange-50 rounded-lg">
+                <div className="text-xs text-orange-600 font-medium">Total PAYEE</div>
+                <div className="text-lg font-bold text-orange-700">
+                  UGX {payeeSummary.totalPayee.toLocaleString()}
+                </div>
+              </div>
+              <div className="text-center p-2 bg-gray-50 rounded-lg">
+                <div className="text-xs text-gray-500 font-medium">Taxable</div>
+                <div className="text-lg font-bold text-gray-700">{payeeSummary.taxableCount}</div>
+              </div>
+              <div className="text-center p-2 bg-green-50 rounded-lg">
+                <div className="text-xs text-green-600 font-medium">Tax Free</div>
+                <div className="text-lg font-bold text-green-700">{payeeSummary.taxFreeCount}</div>
+              </div>
+            </div>
+            <div className="text-center text-xs text-gray-500">
+              {payeeSummary.hasPayee
+                ? `Latest PAYEE: UGX ${payeeSummary.latestPayee.toLocaleString()}`
+                : "No PAYEE recorded (Tax Free)"}
+            </div>
+          </div>
+        </ChartCard>
       </div>
 
-      <ReportCard title="Worker Report" subtitle="Download a PDF summary of worker payment data" onGenerate={handleGenerateReport} />
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <ReportCard title="Worker Report" subtitle="Download a PDF summary of worker payment data" onGenerate={handleGenerateReport} />
+        <ReportCard title="NSSF Report" subtitle="Download NSSF deductions report for this employee" onGenerate={handleGenerateNssfReport} />
+        <ReportCard title="PAYEE Report" subtitle="Download PAYEE tax report for this employee" onGenerate={handleGeneratePayeeReport} />
+      </div>
 
       {/* Tabs */}
       <div className="flex gap-4 border-b border-gray-200">
-        {(["calendar", "breakdown", "history"] as const).map((tab) => (
+        {(["calendar", "breakdown", "history", "nssf", "payee"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
@@ -440,7 +601,7 @@ export default function EmployeePaymentDetailPage() {
                 : "text-gray-500 border-transparent hover:text-gray-700"
             }`}
           >
-            {tab === "calendar" ? "Calendar View" : tab === "breakdown" ? "Daily Breakdown" : "Payment History"}
+            {tab === "calendar" ? "Calendar View" : tab === "breakdown" ? "Daily Breakdown" : tab === "history" ? "Payment History" : tab === "nssf" ? "NSSF" : "PAYEE"}
           </button>
         ))}
       </div>
@@ -740,6 +901,151 @@ export default function EmployeePaymentDetailPage() {
                 ))}
               </tbody>
             </table>
+          )}
+        </div>
+      )}
+
+      {/* Tab: NSSF History */}
+      {activeTab === "nssf" && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
+          {filteredPayments.length === 0 ? (
+            <div className="p-8 text-center text-gray-400">
+              No NSSF records found for this employee in the selected period.
+            </div>
+          ) : (
+            <>
+              <div className="p-4 bg-blue-50 border-b border-blue-200">
+                <div className="text-sm text-blue-800">
+                  <span className="font-semibold">Total NSSF Deducted (Employee 5%): </span>
+                  UGX {filteredPayments.reduce((s, p) => s + (p.nssfEmployeeDeduction || 0), 0).toLocaleString()}
+                  <span className="mx-4">|</span>
+                  <span className="font-semibold">Total NSSF Business (10%): </span>
+                  UGX {filteredPayments.reduce((s, p) => s + (p.nssfBusinessContribution || 0), 0).toLocaleString()}
+                </div>
+              </div>
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gross (UGX)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">NSSF Employee (5%)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">NSSF Business (10%)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cumulative Employee</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cumulative Business</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {(() => {
+                    let cumEmp = 0;
+                    let cumBus = 0;
+                    return filteredPayments.map((p, i) => {
+                      const gross = p.grossAmount || p.totalAmount || 0;
+                      const nssfEmp = p.nssfEmployeeDeduction || 0;
+                      const nssfBus = p.nssfBusinessContribution || 0;
+                      cumEmp += nssfEmp;
+                      cumBus += nssfBus;
+                      return (
+                        <tr key={p.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {p.periodStart} &mdash; {p.periodEnd}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            UGX {gross.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-sm font-medium text-red-600">
+                            UGX {nssfEmp.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-sm font-medium text-blue-600">
+                            UGX {nssfBus.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-sm font-medium text-red-700">
+                            UGX {cumEmp.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-sm font-medium text-blue-700">
+                            UGX {cumBus.toLocaleString()}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Tab: PAYEE History */}
+      {activeTab === "payee" && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
+          {filteredPayments.length === 0 ? (
+            <div className="p-8 text-center text-gray-400">
+              No PAYEE records found for this employee in the selected period.
+            </div>
+          ) : (
+            <>
+              <div className="p-4 bg-orange-50 border-b border-orange-200">
+                <div className="text-sm text-orange-800">
+                  <span className="font-semibold">Total PAYEE Paid: </span>
+                  UGX {filteredPayments.reduce((s, p) => s + (p.payeeTax || 0), 0).toLocaleString()}
+                  <span className="mx-4">|</span>
+                  <span className="font-semibold">Taxable Payments: </span>
+                  {filteredPayments.filter((p) => (p.payeeTax || 0) > 0).length}
+                  <span className="mx-4">|</span>
+                  <span className="font-semibold">Tax-Free Payments: </span>
+                  {filteredPayments.filter((p) => (p.payeeTax || 0) === 0).length}
+                </div>
+              </div>
+              <table className="min-w-full divide-y divide-gray-200">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gross (UGX)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tax Bracket</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">PAYEE (UGX)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cumulative PAYEE</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {(() => {
+                    let cumPayee = 0;
+                    return filteredPayments.map((p, i) => {
+                      const gross = p.grossAmount || p.totalAmount || 0;
+                      const payee = p.payeeTax || 0;
+                      cumPayee += payee;
+                      const bracket = getPayeeBracket(gross);
+                      return (
+                        <tr key={p.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            {p.periodStart} &mdash; {p.periodEnd}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-700">
+                            UGX {gross.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-3 text-sm text-gray-500">
+                            {bracket.label}
+                          </td>
+                          <td className="px-4 py-3 text-sm">
+                            {bracket.rate === 0 ? (
+                              <span className="text-green-600 font-medium">Tax Free</span>
+                            ) : (
+                              <span className="text-gray-700">{bracket.rate}%</span>
+                            )}
+                          </td>
+                          <td className={`px-4 py-3 text-sm font-medium ${payee > 0 ? "text-red-600" : "text-green-600"}`}>
+                            {payee > 0 ? `UGX ${payee.toLocaleString()}` : "0 (Tax Free)"}
+                          </td>
+                          <td className="px-4 py-3 text-sm font-medium text-red-700">
+                            UGX {cumPayee.toLocaleString()}
+                          </td>
+                        </tr>
+                      );
+                    });
+                  })()}
+                </tbody>
+              </table>
+            </>
           )}
         </div>
       )}
