@@ -75,7 +75,7 @@ service cloud.firestore {
     // ============================================================
     match /productionStages/{stageId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
     }
 
 
@@ -85,7 +85,7 @@ service cloud.firestore {
     // ============================================================
     match /targetConfigs/{configId} {
       allow read: if isAuthenticated();
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
     }
 
 
