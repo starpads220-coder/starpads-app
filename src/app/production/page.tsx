@@ -187,15 +187,13 @@ export default function ProductionPage() {
       .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0] ?? null;
   }, [targetConfigs, form.employeeId, form.stageId, form.date]);
 
-  const dailyTarget = form.stageId === "STG-07"
-    ? 120
-    : activeOverride
-      ? activeOverride.dailyTarget
-      : form.stageId === "STG-01" && form.materialTypes.length > 0 && selectedStage?.materialTargets?.[form.materialTypes[0]]
-        ? selectedStage.materialTargets[form.materialTypes[0]]!
-        : selectedStage
-          ? selectedStage.defaultTarget
-          : 0;
+  const dailyTarget = activeOverride
+    ? activeOverride.dailyTarget
+    : form.stageId === "STG-01" && form.materialTypes.length > 0 && selectedStage?.materialTargets?.[form.materialTypes[0]]
+      ? selectedStage.materialTargets[form.materialTypes[0]]!
+      : selectedStage
+        ? selectedStage.defaultTarget
+        : 0;
 
   const dailyWageRate = selectedStage ? selectedStage.defaultWageRate : 0;
 

@@ -309,7 +309,7 @@ export default function PaymentsPage() {
   const isAdmin = userRole?.role === "ADMIN";
   const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
   const canEdit = isAdmin || isSupervisor;
-  const canDelete = isAdmin;
+  const canDelete = isAdmin || isSupervisor;
 
   const windowDayCount = useMemo(() => {
     const s = new Date(start);

@@ -100,7 +100,7 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
       allow update: if isAdmin() || (hasRole('PRODUCTION_SUPERVISOR') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'paymentId']));
-      allow delete: if isAdmin();
+      allow delete: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
     }
 
 
