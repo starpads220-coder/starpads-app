@@ -24,13 +24,14 @@ interface StageTarget {
   materialTargets?: Partial<Record<MaterialType, number>>;
 }
 
-const CUTTING_MATERIALS: MaterialType[] = ["FLEECE", "FLANNEL", "PUL"];
+const CUTTING_MATERIALS: MaterialType[] = ["MICROFIBER", "FLANNEL", "PUL"];
 
 const MATERIAL_LABELS: Record<MaterialType, string> = {
   FLEECE: "Fleece [Inner]",
   FLANNEL: "Flannel [Outer]",
   PUL: "PUL",
   COMBINED: "Combined",
+  MICROFIBER: "Microfiber",
 };
 
 interface WorkerTarget {

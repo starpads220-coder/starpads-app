@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   collection,
   query,
@@ -9,6 +10,7 @@ import {
   onSnapshot,
   writeBatch,
   doc,
+  deleteDoc,
   Timestamp,
   limit,
   where,
@@ -118,6 +120,7 @@ interface EmployeePayment {
   daysWorked: number;
   avgPerformance: number;
   dueEntries: ProductionEntry[];
+  allEntries: ProductionEntry[];
 }
 
 interface DateSummary {
@@ -130,6 +133,7 @@ interface DateSummary {
 }
 
 export default function PaymentsPage() {
+  const router = useRouter();
   const { userRole } = useAuth();
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("today");
   const [customStart, setCustomStart] = useState("");
@@ -138,6 +142,8 @@ export default function PaymentsPage() {
   const [entries, setEntries] = useState<ProductionEntry[]>([]);
   const [entriesLoading, setEntriesLoading] = useState(true);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
+  const [expandedEmployee, setExpandedEmployee] = useState<string | null>(null);
+  const [deleteConfirmEntryId, setDeleteConfirmEntryId] = useState<string | null>(null);
 
   const [payEmployeeId, setPayEmployeeId] = useState<string | null>(null);
   const [payProcessing, setPayProcessing] = useState(false);
@@ -195,6 +201,7 @@ export default function PaymentsPage() {
         (e) => e.paymentStatus === "paid"
       );
 
+      const sortedAll = [...empEntries].sort((a, b) => b.date.localeCompare(a.date));
       map.set(emp.id, {
         employeeId: emp.id,
         employeeName: emp.name,
@@ -206,6 +213,7 @@ export default function PaymentsPage() {
           empEntries.reduce((s, e) => s + e.performancePct, 0) / empEntries.length
         ),
         dueEntries: [...dueEntries].sort((a, b) => b.date.localeCompare(a.date)),
+        allEntries: sortedAll,
       });
     });
     return Array.from(map.values()).sort((a, b) => b.dueAmount - a.dueAmount);
@@ -298,6 +306,11 @@ export default function PaymentsPage() {
     [dateSummaries]
   );
 
+  const isAdmin = userRole?.role === "ADMIN";
+  const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
+  const canEdit = isAdmin || isSupervisor;
+  const canDelete = isAdmin;
+
   const windowDayCount = useMemo(() => {
     const s = new Date(start);
     const e = new Date(end);
@@ -307,7 +320,18 @@ export default function PaymentsPage() {
   const handleWindowChange = (tw: TimeWindow) => {
     setTimeWindow(tw);
     setExpandedDate(null);
+    setExpandedEmployee(null);
     if (tw === "today") { setCustomStart(""); setCustomEnd(""); }
+  };
+
+  const handleDeleteEntry = async (entryId: string) => {
+    try {
+      await deleteDoc(doc(db, "productionEntries", entryId));
+      showToast("Entry deleted successfully.", "success");
+      setDeleteConfirmEntryId(null);
+    } catch (err: any) {
+      showToast(`Failed to delete entry: ${err?.message || "Unknown error"}`, "error");
+    }
   };
 
   const payEmployee = employeePayments.find((e) => e.employeeId === payEmployeeId);
@@ -426,6 +450,16 @@ export default function PaymentsPage() {
 
   const getStageLabel = (stageId: string) => {
     return STAGE_LABELS[stageId as StageId] ?? stageId;
+  };
+
+  const formatMaterialDisplay = (entry: ProductionEntry): string => {
+    if (entry.materialTypes && entry.materialTypes.length > 0) {
+      return entry.materialTypes.map(m => m === "MICROFIBER" ? "Microfiber" : m.charAt(0) + m.slice(1).toLowerCase()).join(", ");
+    }
+    if (entry.materialType) {
+      return entry.materialType === "MICROFIBER" ? "Microfiber" : entry.materialType.charAt(0) + entry.materialType.slice(1).toLowerCase();
+    }
+    return "—";
   };
 
   const handleGenerateReport = useCallback(async (selection: PeriodSelection) => {
@@ -705,47 +739,142 @@ export default function PaymentsPage() {
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {employeePayments.map((emp, i) => (
-                  <tr
-                    key={emp.employeeId}
-                    className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}
-                  >
-                    <td className="px-4 py-3">
-                      <Link
-                        href={`/payments/worker/${emp.employeeId}`}
-                        className="text-sm font-medium text-stock-blue hover:underline"
-                      >
-                        {emp.employeeName}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
-                      {emp.totalPieces.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-medium text-amber-600">
-                      {emp.dueAmount > 0 ? `UGX ${emp.dueAmount.toLocaleString()}` : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-sm font-medium text-ugx">
-                      {emp.paidAmount > 0 ? `UGX ${emp.paidAmount.toLocaleString()}` : "—"}
-                    </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">{emp.daysWorked}</td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
-                      UGX {Math.round((emp.dueAmount + emp.paidAmount) / emp.daysWorked).toLocaleString()}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusBadge value={emp.avgPerformance} />
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      {emp.dueAmount > 0 ? (
-                        <button
-                          onClick={() => setPayEmployeeId(emp.employeeId)}
-                          className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-md hover:bg-gray-800"
+                  <React.Fragment key={emp.employeeId}>
+                    <tr
+                      onClick={() => setExpandedEmployee(expandedEmployee === emp.employeeId ? null : emp.employeeId)}
+                      className={`cursor-pointer ${i % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-gray-100 transition-colors`}
+                    >
+                      <td className="px-4 py-3">
+                        <Link
+                          href={`/payments/worker/${emp.employeeId}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-sm font-medium text-stock-blue hover:underline"
                         >
-                          Pay Due
-                        </button>
-                      ) : (
-                        <span className="text-xs text-green-600 font-medium">✓ Paid</span>
-                      )}
-                    </td>
-                  </tr>
+                          {emp.employeeName}
+                        </Link>
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        {emp.totalPieces.toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-amber-600">
+                        {emp.dueAmount > 0 ? `UGX ${emp.dueAmount.toLocaleString()}` : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-sm font-medium text-ugx">
+                        {emp.paidAmount > 0 ? `UGX ${emp.paidAmount.toLocaleString()}` : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-sm text-gray-700">{emp.daysWorked}</td>
+                      <td className="px-4 py-3 text-sm text-gray-700">
+                        UGX {Math.round((emp.dueAmount + emp.paidAmount) / emp.daysWorked).toLocaleString()}
+                      </td>
+                      <td className="px-4 py-3">
+                        <StatusBadge value={emp.avgPerformance} />
+                      </td>
+                      <td className="px-4 py-3 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {emp.dueAmount > 0 ? (
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setPayEmployeeId(emp.employeeId); }}
+                              className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-md hover:bg-gray-800"
+                            >
+                              Pay Due
+                            </button>
+                          ) : (
+                            <span className="text-xs text-green-600 font-medium">✓ Paid</span>
+                          )}
+                          <span className="text-xs text-gray-400">{expandedEmployee === emp.employeeId ? "▲" : "▼"}</span>
+                        </div>
+                      </td>
+                    </tr>
+                    {expandedEmployee === emp.employeeId && (
+                      <tr key={`${emp.employeeId}-detail`}>
+                        <td colSpan={8} className="px-0 py-0">
+                          <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
+                            <h4 className="text-sm font-semibold text-gray-700 mb-3">
+                              Entries for {emp.employeeName}
+                            </h4>
+                            <table className="min-w-full text-sm">
+                              <thead>
+                                <tr className="text-xs text-gray-500 uppercase border-b border-gray-200">
+                                  <th className="text-left pb-2 pr-4">Date</th>
+                                  <th className="text-left pb-2 pr-4">Stage</th>
+                                  <th className="text-left pb-2 pr-4">Material</th>
+                                  <th className="text-left pb-2 pr-4">Pieces</th>
+                                  <th className="text-left pb-2 pr-4">Target</th>
+                                  <th className="text-left pb-2 pr-4">Earnings</th>
+                                  <th className="text-left pb-2 pr-4">Perf.</th>
+                                  <th className="text-left pb-2 pr-4">Status</th>
+                                  <th className="text-right pb-2 pr-4">Actions</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {emp.allEntries.map((entry) => (
+                                  <tr key={entry.id} className="border-b border-gray-200 last:border-0">
+                                    <td className="py-2 pr-4 text-gray-700">{entry.date}</td>
+                                    <td className="py-2 pr-4 text-gray-700">
+                                      {getStageLabel(entry.stageId)}
+                                    </td>
+                                    <td className="py-2 pr-4 text-gray-600 text-xs">
+                                      {formatMaterialDisplay(entry)}
+                                    </td>
+                                    <td className="py-2 pr-4 text-gray-900 font-medium">
+                                      {entry.actualPieces}
+                                    </td>
+                                    <td className="py-2 pr-4 text-gray-500">
+                                      {entry.targetPieces}
+                                    </td>
+                                    <td className="py-2 pr-4 text-ugx font-medium">
+                                      UGX {entry.earningsUgx.toLocaleString()}
+                                    </td>
+                                    <td className="py-2 pr-4">
+                                      <StatusBadge value={entry.performancePct} />
+                                    </td>
+                                    <td className="py-2 pr-4">
+                                      <span
+                                        className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${
+                                          entry.paymentStatus === "paid"
+                                            ? "bg-green-100 text-green-700"
+                                            : "bg-amber-100 text-amber-700"
+                                        }`}
+                                      >
+                                        {entry.paymentStatus === "paid" ? "Paid" : "Due"}
+                                      </span>
+                                    </td>
+                                    <td className="py-2 pr-4 text-right whitespace-nowrap">
+                                      {canEdit && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            const params = new URLSearchParams({
+                                              editEntryId: entry.id,
+                                            });
+                                            router.push(`/production?${params.toString()}`);
+                                          }}
+                                          className="text-xs text-stock-blue hover:underline mr-2"
+                                        >
+                                          Edit
+                                        </button>
+                                      )}
+                                      {canDelete && (
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setDeleteConfirmEntryId(entry.id);
+                                          }}
+                                          className="text-xs text-red-600 hover:underline"
+                                        >
+                                          Delete
+                                        </button>
+                                      )}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </React.Fragment>
                 ))}
               </tbody>
             </table>
@@ -813,6 +942,7 @@ export default function PaymentsPage() {
                                 <tr className="text-xs text-gray-500 uppercase border-b border-gray-200">
                                   <th className="text-left pb-2 pr-4">Employee</th>
                                   <th className="text-left pb-2 pr-4">Stage</th>
+                                  <th className="text-left pb-2 pr-4">Material</th>
                                   <th className="text-left pb-2 pr-4">Pieces</th>
                                   <th className="text-left pb-2 pr-4">Target</th>
                                   <th className="text-left pb-2 pr-4">Earnings</th>
@@ -828,6 +958,9 @@ export default function PaymentsPage() {
                                     </td>
                                     <td className="py-2 pr-4 text-gray-700">
                                       {getStageLabel(entry.stageId)}
+                                    </td>
+                                    <td className="py-2 pr-4 text-gray-600 text-xs">
+                                      {formatMaterialDisplay(entry)}
                                     </td>
                                     <td className="py-2 pr-4 text-gray-900 font-medium">
                                       {entry.actualPieces}
@@ -865,6 +998,32 @@ export default function PaymentsPage() {
               </tbody>
             </table>
           )}
+        </div>
+      )}
+
+      {/* Delete Confirmation Modal */}
+      {deleteConfirmEntryId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6">
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">Delete Entry</h3>
+            <p className="text-sm text-gray-600 mb-6">
+              Are you sure you want to delete this production entry? This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={() => setDeleteConfirmEntryId(null)}
+                className="py-2 px-4 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => handleDeleteEntry(deleteConfirmEntryId)}
+                className="py-2 px-4 text-sm font-medium text-white bg-red-600 rounded-md hover:bg-red-700"
+              >
+                Delete
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -933,6 +1092,7 @@ export default function PaymentsPage() {
                   <tr className="text-xs text-gray-500 uppercase border-b border-gray-200">
                     <th className="text-left pb-2 pr-4">Date</th>
                     <th className="text-left pb-2 pr-4">Stage</th>
+                    <th className="text-left pb-2 pr-4">Material</th>
                     <th className="text-left pb-2 pr-4">Pieces</th>
                     <th className="text-right pb-2 pr-4">Earnings</th>
                   </tr>
@@ -943,6 +1103,9 @@ export default function PaymentsPage() {
                       <td className="py-2 pr-4 text-gray-700">{entry.date}</td>
                       <td className="py-2 pr-4 text-gray-700">
                         {getStageLabel(entry.stageId)}
+                      </td>
+                      <td className="py-2 pr-4 text-gray-600 text-xs">
+                        {formatMaterialDisplay(entry)}
                       </td>
                       <td className="py-2 pr-4 text-gray-900 font-medium">
                         {entry.actualPieces}

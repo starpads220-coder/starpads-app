@@ -10,7 +10,9 @@ export type Department = "PRODUCTION" | "STORAGE" | "SALES";
 
 export type StageId = "STG-01" | "STG-02" | "STG-03" | "STG-04" | "STG-05" | "STG-06" | "STG-07";
 
-export type MaterialType = "FLANNEL" | "FLEECE" | "PUL" | "COMBINED";
+export type MaterialType = "FLANNEL" | "FLEECE" | "PUL" | "COMBINED" | "MICROFIBER";
+
+export type MaterialCategory = "SEWING_INNER" | "SEWING_OUTER" | "OVERLOCK";
 
 export type PackSize = "HALF_DOZEN" | "DOZEN" | "CARTON";
 
@@ -68,6 +70,8 @@ export interface ProductionEntry {
   date: string;
   stageId: StageId;
   materialType: MaterialType | null;
+  materialTypes?: MaterialType[];
+  materialCategory?: MaterialCategory | null;
   metersInput?: number;
   wastePct?: number;
   targetPieces: number;
@@ -213,3 +217,15 @@ export const STAGE_LABELS: Record<StageId, string> = {
 export const STAGE_ORDER: StageId[] = [
   "STG-01", "STG-02", "STG-03", "STG-04", "STG-05", "STG-06", "STG-07",
 ];
+
+export const MATERIAL_CATEGORY_OPTIONS: Record<MaterialCategory, MaterialType[]> = {
+  SEWING_INNER: ["MICROFIBER", "FLANNEL"],
+  SEWING_OUTER: ["MICROFIBER", "FLANNEL", "PUL"],
+  OVERLOCK: ["COMBINED"],
+};
+
+export const MATERIAL_CATEGORY_LABELS: Record<MaterialCategory, string> = {
+  SEWING_INNER: "Sewing-Inner",
+  SEWING_OUTER: "Sewing-Outer",
+  OVERLOCK: "Overlock",
+};

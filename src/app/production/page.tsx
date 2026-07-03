@@ -8,6 +8,9 @@ import {
   orderBy,
   onSnapshot,
   addDoc,
+  updateDoc,
+  doc,
+  getDoc,
   Timestamp,
   limit,
 } from "firebase/firestore";
@@ -17,17 +20,20 @@ import {
   ProductionEntry,
   StageId,
   MaterialType,
+  MaterialCategory,
   Employee,
   ProductionStage,
   TargetConfig,
   Batch,
   STAGE_LABELS,
   STAGE_ORDER,
+  MATERIAL_CATEGORY_OPTIONS,
+  MATERIAL_CATEGORY_LABELS,
 } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { ChartCard } from "@/components/ui/ChartCard";
-import { useCollectionQuery } from "@/hooks/use-firestore-query";
+import { useCollectionQuery, useRealtimeCollection } from "@/hooks/use-firestore-query";
 import { SingleDonutChart } from "@/components/charts/SingleDonutChart";
 import { SingleBarChart } from "@/components/charts/SingleBarChart";
 import { TransactionValueChart } from "@/components/charts/TransactionValueChart";
@@ -63,6 +69,7 @@ const CUTTING_RATIOS: Record<string, number> = {
   FLEECE: 4,
   PUL: 4,
   COMBINED: 4,
+  MICROFIBER: 4,
 };
 
 const stageUnit: Record<StageId, string> = {
@@ -80,6 +87,7 @@ const stagesWithMaterial: StageId[] = ["STG-01", "STG-02", "STG-03"];
 export default function ProductionPage() {
   const { userRole } = useAuth();
   const [saving, setSaving] = useState(false);
+  const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("today");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -89,7 +97,8 @@ export default function ProductionPage() {
     employeeId: "",
     date: new Date().toISOString().split("T")[0],
     stageId: "STG-01" as StageId,
-    materialType: "" as MaterialType | "",
+    materialCategory: "" as MaterialCategory | "",
+    materialTypes: [] as MaterialType[],
     metersInput: 0,
     actualPieces: 0,
     batchRef: "",
@@ -101,9 +110,7 @@ export default function ProductionPage() {
     orderBy("name"),
   ], { staleTime: 10 * 60 * 1000 });
 
-  const { data: stages = [] } = useCollectionQuery<ProductionStage>("productionStages", [], {
-    staleTime: 10 * 60 * 1000,
-  });
+  const { data: stages = [], loading: stagesLoading } = useRealtimeCollection<ProductionStage>("productionStages");
 
   const { data: targetConfigs = [] } = useCollectionQuery<TargetConfig>("targetConfigs", [], {
     staleTime: 10 * 60 * 1000,
@@ -135,6 +142,31 @@ export default function ProductionPage() {
     return () => unsub();
   }, []);
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const editId = params.get("editEntryId");
+    if (editId) {
+      setEditingEntryId(editId);
+      getDoc(doc(db, "productionEntries", editId)).then((snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as ProductionEntry;
+          const matCategory = data.materialCategory || "";
+          setForm({
+            employeeId: data.employeeId || "",
+            date: data.date || new Date().toISOString().split("T")[0],
+            stageId: data.stageId || "STG-01",
+            materialCategory: matCategory as MaterialCategory | "",
+            materialTypes: (data.materialTypes as MaterialType[]) || (data.materialType ? [data.materialType as MaterialType] : []),
+            metersInput: data.metersInput || 0,
+            actualPieces: data.actualPieces || 0,
+            batchRef: data.batchRef || "",
+            notes: data.notes || "",
+          });
+        }
+      });
+    }
+  }, []);
+
   const { start, end } = getDateBounds(timeWindow, customStart, customEnd);
   const filteredEntries = useMemo(() =>
     entries.filter((e) => e.date >= start && e.date <= end),
@@ -159,8 +191,8 @@ export default function ProductionPage() {
     ? 120
     : activeOverride
       ? activeOverride.dailyTarget
-      : form.stageId === "STG-01" && form.materialType && selectedStage?.materialTargets?.[form.materialType as MaterialType]
-        ? selectedStage.materialTargets[form.materialType as MaterialType]!
+      : form.stageId === "STG-01" && form.materialTypes.length > 0 && selectedStage?.materialTargets?.[form.materialTypes[0]]
+        ? selectedStage.materialTargets[form.materialTypes[0]]!
         : selectedStage
           ? selectedStage.defaultTarget
           : 0;
@@ -182,14 +214,26 @@ export default function ProductionPage() {
   );
 
   const expectedPieces =
-    form.stageId === "STG-01" && form.materialType && form.metersInput > 0
-      ? form.metersInput * (CUTTING_RATIOS[form.materialType] || 0)
+    form.stageId === "STG-01" && form.materialTypes.length > 0 && form.metersInput > 0
+      ? form.metersInput * (CUTTING_RATIOS[form.materialTypes[0]] || 0)
       : 0;
 
   const wastePct =
     expectedPieces > 0 && form.actualPieces > 0
       ? Math.max(0, Math.round(((expectedPieces - form.actualPieces) / expectedPieces) * 100))
       : 0;
+
+  const toggleMaterial = (mat: MaterialType) => {
+    setForm(prev => ({
+      ...prev,
+      materialTypes: prev.materialTypes.includes(mat)
+        ? prev.materialTypes.filter(m => m !== mat)
+        : [...prev.materialTypes, mat]
+    }));
+  };
+
+  const formatMaterialLabel = (mat: MaterialType) =>
+    mat === "MICROFIBER" ? "Microfiber" : mat.charAt(0) + mat.slice(1).toLowerCase();
 
   const getEmployeeName = (id: string) => {
     const emp = employees.find((e) => e.id === id);
@@ -207,11 +251,13 @@ export default function ProductionPage() {
     if (form.stageId === "STG-07" && !form.batchRef) return;
     setSaving(true);
     try {
-      await addDoc(collection(db, "productionEntries"), {
+      const entryData = {
         employeeId: form.employeeId,
         date: form.date,
         stageId: form.stageId,
-        materialType: stagesWithMaterial.includes(form.stageId) ? form.materialType : null,
+        materialType: stagesWithMaterial.includes(form.stageId) ? (form.materialTypes[0] || null) : null,
+        materialTypes: stagesWithMaterial.includes(form.stageId) ? form.materialTypes : [],
+        materialCategory: form.stageId === "STG-01" ? form.materialCategory : null,
         metersInput: form.stageId === "STG-01" ? form.metersInput : null,
         wastePct: form.stageId === "STG-01" ? wastePct : null,
         targetPieces: dailyTarget,
@@ -220,11 +266,25 @@ export default function ProductionPage() {
         performancePct: performance,
         earningsUgx: estimatedEarnings,
         notes: form.notes,
-        createdAt: Timestamp.now(),
-        createdBy: userRole?.uid ?? "",
-      });
+        updatedAt: Timestamp.now(),
+      };
+
+      if (editingEntryId) {
+        await updateDoc(doc(db, "productionEntries", editingEntryId), entryData);
+        setEditingEntryId(null);
+        window.history.replaceState({}, "", window.location.pathname);
+      } else {
+        await addDoc(collection(db, "productionEntries"), {
+          ...entryData,
+          createdAt: Timestamp.now(),
+          createdBy: userRole?.uid ?? "",
+        });
+      }
+
       setForm((prev) => ({
         ...prev,
+        materialCategory: "" as MaterialCategory | "",
+        materialTypes: [],
         metersInput: 0,
         actualPieces: 0,
         notes: "",
@@ -641,7 +701,7 @@ export default function ProductionPage() {
         onSubmit={handleSubmit}
         className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4"
       >
-        <h2 className="text-lg font-semibold text-gray-900">Daily Production Entry</h2>
+        <h2 className="text-lg font-semibold text-gray-900">{editingEntryId ? "Edit Production Entry" : "Daily Production Entry"}</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Worker</label>
@@ -673,7 +733,7 @@ export default function ProductionPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Stage</label>
             <select
               value={form.stageId}
-              onChange={(e) => setForm({ ...form, stageId: e.target.value as StageId })}
+              onChange={(e) => setForm({ ...form, stageId: e.target.value as StageId, materialCategory: "", materialTypes: [] })}
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
             >
               {(Object.entries(STAGE_LABELS) as [StageId, string][]).map(([id, label]) => (
@@ -684,25 +744,42 @@ export default function ProductionPage() {
             </select>
           </div>
           {stagesWithMaterial.includes(form.stageId) && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Material</label>
-              <select
-                value={form.materialType}
-                onChange={(e) =>
-                  setForm({ ...form, materialType: e.target.value as MaterialType })
-                }
-                required
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-              >
-                <option value="">Select material...</option>
-                <option value="FLANNEL">Flannel</option>
-                <option value="FLEECE">Fleece</option>
-                <option value="PUL">PUL</option>
-                <option value="COMBINED">Combined</option>
-              </select>
-            </div>
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Material Category</label>
+                <select
+                  value={form.materialCategory}
+                  onChange={(e) => setForm({ ...form, materialCategory: e.target.value as MaterialCategory, materialTypes: [] })}
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                >
+                  <option value="">Select category...</option>
+                  {(Object.entries(MATERIAL_CATEGORY_LABELS) as [MaterialCategory, string][]).map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
+                </select>
+              </div>
+              {form.materialCategory && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Material Types</label>
+                  <div className="flex flex-wrap gap-4">
+                    {MATERIAL_CATEGORY_OPTIONS[form.materialCategory as MaterialCategory].map((mat) => (
+                      <label key={mat} className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={form.materialTypes.includes(mat)}
+                          onChange={() => toggleMaterial(mat)}
+                          className="rounded border-gray-300"
+                        />
+                        {formatMaterialLabel(mat)}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </>
           )}
-          {form.stageId === "STG-01" && form.materialType && (
+          {form.stageId === "STG-01" && form.materialTypes.length > 0 && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Meters Input</label>
               <input
@@ -804,7 +881,7 @@ export default function ProductionPage() {
             disabled={saving || !form.employeeId || !form.actualPieces || (form.stageId === "STG-07" && !form.batchRef)}
             className="py-2 px-6 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 disabled:opacity-50"
           >
-            {saving ? "Saving..." : "Log Entry"}
+            {saving ? "Saving..." : editingEntryId ? "Update Entry" : "Log Entry"}
           </button>
         </div>
       </form>
