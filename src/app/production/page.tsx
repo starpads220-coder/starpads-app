@@ -79,7 +79,8 @@ const stageUnit: Record<StageId, string> = {
   "STG-04": "pieces",
   "STG-05": "pieces",
   "STG-06": "sets",
-  "STG-07": "packs",
+  "STG-07": "pieces",
+  "STG-08": "packs",
 };
 
 const stagesWithMaterial: StageId[] = ["STG-01", "STG-02", "STG-03"];
@@ -246,7 +247,7 @@ export default function ProductionPage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.employeeId) return;
-    if (form.stageId === "STG-07" && !form.batchRef) return;
+    if (form.stageId === "STG-08" && !form.batchRef) return;
     setSaving(true);
     try {
       const entryData = {
@@ -260,7 +261,7 @@ export default function ProductionPage() {
         wastePct: form.stageId === "STG-01" ? wastePct : null,
         targetPieces: dailyTarget,
         actualPieces: form.actualPieces,
-        batchRef: form.stageId === "STG-07" ? form.batchRef : "",
+        batchRef: form.stageId === "STG-08" ? form.batchRef : "",
         performancePct: performance,
         earningsUgx: estimatedEarnings,
         notes: form.notes,
@@ -317,7 +318,7 @@ export default function ProductionPage() {
   const stageBarData = useMemo(() => {
     const labels: Record<string, string> = {
       "STG-01": "Cut", "STG-02": "Sew-In", "STG-03": "Sew-Out", "STG-04": "Overlock",
-      "STG-05": "Pouch", "STG-06": "Pin", "STG-07": "Pack",
+      "STG-05": "Pouch", "STG-06": "Check", "STG-07": "Pin/Fold", "STG-08": "Pack",
     };
     return STAGE_ORDER.map((s) => ({ label: labels[s] || s, value: stageCounts[s] }));
   }, [stageCounts]);
@@ -345,7 +346,7 @@ export default function ProductionPage() {
   );
 
   const totalPackagedPads = useMemo(
-    () => stageCounts["STG-07"],
+    () => stageCounts["STG-08"],
     [stageCounts]
   );
 
@@ -462,7 +463,7 @@ export default function ProductionPage() {
   }, [filteredEntries]);
 
   const pendingPackaging = useMemo(
-    () => entries.filter((e) => e.stageId === "STG-07" && e.date === viewDate && !e.movedToStockAt),
+    () => entries.filter((e) => e.stageId === "STG-08" && e.date === viewDate && !e.movedToStockAt),
     [entries, viewDate]
   );
 
@@ -533,7 +534,7 @@ export default function ProductionPage() {
           </div>
         </ChartCard>
 
-        <ChartCard title="Finished Pads" subtitle="Packaging stage (STG-07)" variant="gradient" accentColor="#22c55e">
+        <ChartCard title="Finished Pads" subtitle="Packing stage (STG-08)" variant="gradient" accentColor="#22c55e">
           <div className="flex flex-col items-center justify-center h-full">
             <span className="text-3xl font-bold text-emerald-500">{totalPackagedPads.toLocaleString()}</span>
             <span className="text-xs text-gray-400 mt-1">completed pads packaged</span>
@@ -804,7 +805,7 @@ export default function ProductionPage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              {form.stageId === "STG-07" ? "Packs Produced" : "Pieces Produced"} ({stageUnit[form.stageId]})
+              {form.stageId === "STG-08" ? "Packs Produced" : "Pieces Produced"} ({stageUnit[form.stageId]})
             </label>
             <input
               type="number"
@@ -817,7 +818,7 @@ export default function ProductionPage() {
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
             />
           </div>
-          {form.stageId === "STG-07" && (
+          {form.stageId === "STG-08" && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Batch</label>
               <div className="flex gap-2">
@@ -876,7 +877,7 @@ export default function ProductionPage() {
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={saving || !form.employeeId || !form.actualPieces || (form.stageId === "STG-07" && !form.batchRef)}
+            disabled={saving || !form.employeeId || !form.actualPieces || (form.stageId === "STG-08" && !form.batchRef)}
             className="py-2 px-6 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 disabled:opacity-50"
           >
             {saving ? "Saving..." : editingEntryId ? "Update Entry" : "Log Entry"}
@@ -951,7 +952,7 @@ export default function ProductionPage() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Move Packaged Goods to Stock</h2>
-            <p className="text-sm text-gray-500 mt-1">Today's packaging (STG-07) entries ready to move into storage inventory.</p>
+            <p className="text-sm text-gray-500 mt-1">Today's packing (STG-08) entries ready to move into storage inventory.</p>
           </div>
         </div>
         {entriesLoading ? (

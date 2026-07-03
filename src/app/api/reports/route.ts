@@ -151,7 +151,7 @@ export async function GET(request: NextRequest) {
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
         const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0];
-        const recentSalesPads = allEntries.filter((e) => e.date >= sevenDaysAgoStr && e.stageId === "STG-07").reduce((s, e) => s + e.actualPieces, 0);
+        const recentSalesPads = allEntries.filter((e) => e.date >= sevenDaysAgoStr && e.stageId === "STG-08").reduce((s, e) => s + e.actualPieces, 0);
         const avgDailySales = recentSalesPads / 7;
         const daysOfStock = avgDailySales > 0 ? Math.round(totalPads / avgDailySales) : 999;
 

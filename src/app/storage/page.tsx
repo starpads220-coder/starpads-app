@@ -244,19 +244,20 @@ export default function StoragePage() {
     const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
     const filtered = productionEntries.filter((e) => e.date >= wipBounds.start && e.date <= wipBounds.end);
     const counts: Record<StageId, number> = {
-      "STG-01": 0, "STG-02": 0, "STG-03": 0, "STG-04": 0, "STG-05": 0, "STG-06": 0, "STG-07": 0,
+      "STG-01": 0, "STG-02": 0, "STG-03": 0, "STG-04": 0, "STG-05": 0, "STG-06": 0, "STG-07": 0, "STG-08": 0,
     };
     filtered.forEach((e) => { counts[e.stageId] += e.actualPieces; });
     return counts;
   }, [productionEntries, wipPeriod, wipCustomStart, wipCustomEnd]);
 
-  const totalPackagedPads = stageCounts["STG-07"];
+  const totalPackagedPads = stageCounts["STG-08"];
 
   const wipCut = Math.max(0, stageCounts["STG-01"] - stageCounts["STG-02"]);
   const wipSewn = Math.max(0, (stageCounts["STG-02"] + stageCounts["STG-03"]) - stageCounts["STG-04"]);
   const wipOverlocked = Math.max(0, stageCounts["STG-04"] - stageCounts["STG-05"]);
   const wipPouches = Math.max(0, stageCounts["STG-05"] - stageCounts["STG-06"]);
-  const wipPinned = Math.max(0, stageCounts["STG-06"] - totalPackagedPads);
+  const wipPinned = Math.max(0, stageCounts["STG-06"] - stageCounts["STG-07"]);
+  const wipPacked = Math.max(0, stageCounts["STG-07"] - totalPackagedPads);
 
   const wipEntries = useMemo(() => {
     const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
@@ -603,19 +604,25 @@ export default function StoragePage() {
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
               </div>
             </ChartCard>
-            <ChartCard title="Pinned" subtitle="STG-06 awaiting packaging" variant="gradient" accentColor={wipPinned > 500 ? palette.orange : palette.blue}>
+            <ChartCard title="Checked & Held" subtitle="STG-06 awaiting pinning & folding" variant="gradient" accentColor={wipPinned > 500 ? palette.orange : palette.blue}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold" style={{ color: wipPinned > 500 ? palette.orange : palette.blue }}>{wipPinned.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
               </div>
             </ChartCard>
+            <ChartCard title="Pinned & Folded" subtitle="STG-07 awaiting packing" variant="gradient" accentColor={wipPacked > 500 ? palette.orange : palette.blue}>
+              <div className="flex flex-col items-center justify-center h-full">
+                <span className="text-2xl font-bold" style={{ color: wipPacked > 500 ? palette.orange : palette.blue }}>{wipPacked.toLocaleString()}</span>
+                <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
+              </div>
+            </ChartCard>
             <ChartCard title="Total WIP" subtitle="All stages combined" variant="gradient" accentColor={palette.violet}>
               <div className="flex flex-col items-center justify-center h-full">
-                <span className="text-2xl font-bold text-violet-500">{(wipCut + wipSewn + wipOverlocked + wipPouches + wipPinned).toLocaleString()}</span>
+                <span className="text-2xl font-bold text-violet-500">{(wipCut + wipSewn + wipOverlocked + wipPouches + wipPinned + wipPacked).toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pieces in progress</span>
               </div>
             </ChartCard>
-            <ChartCard title="Packaged" subtitle="STG-07 complete" variant="gradient" accentColor={palette.emerald}>
+            <ChartCard title="Packed" subtitle="STG-08 complete" variant="gradient" accentColor={palette.emerald}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold text-emerald-500">{totalPackagedPads.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pads packaged</span>

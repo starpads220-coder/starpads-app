@@ -8,7 +8,7 @@ export type EmployeeRole =
 
 export type Department = "PRODUCTION" | "STORAGE" | "SALES";
 
-export type StageId = "STG-01" | "STG-02" | "STG-03" | "STG-04" | "STG-05" | "STG-06" | "STG-07";
+export type StageId = "STG-01" | "STG-02" | "STG-03" | "STG-04" | "STG-05" | "STG-06" | "STG-07" | "STG-08";
 
 export type MaterialType = "FLANNEL" | "FLEECE" | "PUL" | "COMBINED" | "MICROFIBER";
 
@@ -210,12 +210,13 @@ export const STAGE_LABELS: Record<StageId, string> = {
   "STG-03": "Sewing Outer [TopLayer]",
   "STG-04": "Overlocking",
   "STG-05": "Pouch Making",
-  "STG-06": "Checking & Pinning",
-  "STG-07": "Packaging",
+  "STG-06": "Checking and Holding",
+  "STG-07": "Pinning and Folding",
+  "STG-08": "Packing",
 };
 
 export const STAGE_ORDER: StageId[] = [
-  "STG-01", "STG-02", "STG-03", "STG-04", "STG-05", "STG-06", "STG-07",
+  "STG-01", "STG-02", "STG-03", "STG-04", "STG-05", "STG-06", "STG-07", "STG-08",
 ];
 
 export const MATERIAL_CATEGORY_OPTIONS: Record<MaterialCategory, MaterialType[]> = {
