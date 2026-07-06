@@ -39,7 +39,9 @@ export default function SignupPage() {
       try {
         data = await res.json();
       } catch {
-        setError(`Server error (${res.status}). Please check server configuration and try again.`);
+        let bodyText = "";
+        try { bodyText = await res.text(); } catch {}
+        setError(`Server error (${res.status}): ${bodyText || "No response body"}`);
         return;
       }
 
