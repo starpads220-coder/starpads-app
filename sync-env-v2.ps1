@@ -8,7 +8,8 @@ if (!$Token) {
 $proj = Get-Content ".vercel\repo.json" | ConvertFrom-Json
 $projectId = $proj.projects[0].id
 $orgId = $proj.projects[0].orgId
-$baseUrl = "https://api.vercel.com/v10/projects/$projectId/env?teamId=$orgId"
+$query = "teamId=$orgId"
+$baseUrl = "https://api.vercel.com/v10/projects/$projectId/env"
 $headers = @{ Authorization = "Bearer $Token"; "Content-Type" = "application/json" }
 
 Get-Content ".env.local" | ForEach-Object {
@@ -24,29 +25,31 @@ Get-Content ".env.local" | ForEach-Object {
             target = @("production")
         } | ConvertTo-Json
 
+        $url = $baseUrl + "?$query"
         try {
-            Invoke-RestMethod -Uri $baseUrl -Method Post -Headers $headers -Body $body | Out-Null
+            Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body | Out-Null
             Write-Host "Created" -ForegroundColor Green
         } catch {
             $statusCode = [int]$_.Exception.Response.StatusCode
-            if ($statusCode -eq 400 -or $statusCode -eq 409) {
-                # Try updating - first get the env ID
-                $envs = (Invoke-RestMethod -Uri $baseUrl -Method Get -Headers $headers).envs
+            if ($statusCode -eq 400) {
+                # Already exists - delete and recreate
+                $envs = (Invoke-RestMethod -Uri $url -Method Get -Headers $headers).envs
                 $match = $envs | Where-Object { $_.key -eq $k }
                 if ($match) {
                     $envId = $match[0].id
-                    $updateUrl = "https://api.vercel.com/v10/projects/$projectId/env/$envId?teamId=$orgId"
-                    Invoke-RestMethod -Uri $updateUrl -Method Patch -Headers $headers -Body $body | Out-Null
-                    Write-Host "Updated" -ForegroundColor Yellow
+                    $delUrl = $baseUrl + "/$envId" + "?$query"
+                    Invoke-RestMethod -Uri $delUrl -Method Delete -Headers $headers -ErrorAction Stop | Out-Null
+                    Invoke-RestMethod -Uri $url -Method Post -Headers $headers -Body $body | Out-Null
+                    Write-Host "Recreated" -ForegroundColor Green
                 } else {
-                    Write-Host "FAILED: Cannot find existing env var" -ForegroundColor Red
+                    Write-Host "Not found" -ForegroundColor Red
                 }
             } else {
                 if ($_.ErrorDetails) {
                     $errMsg = ($_.ErrorDetails | ConvertFrom-Json)
-                    Write-Host "FAILED: $($errMsg.error.message)" -ForegroundColor Red
+                    Write-Host "FAILED (${statusCode}): $($errMsg.error.message)" -ForegroundColor Red
                 } else {
-                    Write-Host "FAILED: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host "FAILED (${statusCode}): $($_.Exception.Message)" -ForegroundColor Red
                 }
             }
         }
