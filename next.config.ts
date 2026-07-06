@@ -10,7 +10,7 @@ const pwaConfig = withPWA({
 } as Parameters<typeof withPWA>[0]);
 
 const nextConfig: NextConfig = {
-  serverExternalPackages: ["@react-pdf/renderer", "firebase-admin"],
+  serverExternalPackages: ["@react-pdf/renderer", "firebase-admin", "jose"],
   turbopack: {},
 };
 

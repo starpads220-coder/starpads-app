@@ -1,19 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebase-admin";
-import { EmployeeRole } from "@/types";
 
-const VALID_ROLES: EmployeeRole[] = [
+const VALID_ROLES = [
   "ADMIN",
   "PRODUCTION_SUPERVISOR",
   "WORKER",
   "STORE_MANAGER",
   "SALES_STAFF",
   "FINANCE",
-];
+] as const;
 
 export async function POST(request: NextRequest) {
-  const auth = getAdminAuth();
-  const db = getAdminDb();
+  let auth: import("firebase-admin/auth").Auth | null = null;
+  let db: import("firebase-admin/firestore").Firestore | null = null;
+  try {
+    const admin = await import("@/lib/firebase-admin");
+    auth = admin.getAdminAuth();
+    db = admin.getAdminDb();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    console.error("Firebase Admin SDK init error:", e);
+    return NextResponse.json(
+      { error: "Firebase Admin SDK init failed", details: msg },
+      { status: 500 }
+    );
+  }
+
   if (!auth || !db) {
     return NextResponse.json(
       { error: "Firebase Admin SDK is not configured" },
@@ -37,7 +48,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (!VALID_ROLES.includes(role as EmployeeRole)) {
+  if (!VALID_ROLES.includes(role as typeof VALID_ROLES[number])) {
     return NextResponse.json(
       { error: `Invalid role. Must be one of: ${VALID_ROLES.join(", ")}` },
       { status: 400 }
