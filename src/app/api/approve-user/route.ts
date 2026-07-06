@@ -27,9 +27,9 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (action !== "approve" && action !== "reject") {
+  if (action !== "approve" && action !== "reject" && action !== "suspend") {
     return NextResponse.json(
-      { error: "action must be 'approve' or 'reject'" },
+      { error: "action must be 'approve', 'reject', or 'suspend'" },
       { status: 400 }
     );
   }
@@ -46,6 +46,12 @@ export async function POST(request: NextRequest) {
       });
 
       return NextResponse.json({ success: true, action: "approved" });
+    } else if (action === "suspend") {
+      await db.collection("userRoles").doc(uid).update({
+        status: "pending",
+      });
+
+      return NextResponse.json({ success: true, action: "suspended" });
     } else {
       await auth.deleteUser(uid);
       await db.collection("userRoles").doc(uid).delete();

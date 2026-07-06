@@ -20,6 +20,7 @@ export default function AdminUsersPage() {
   const [actionSuccess, setActionSuccess] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
+  const [suspendTarget, setSuspendTarget] = useState<string | null>(null);
 
   const { data: users = [], isLoading: usersLoading } = useQuery<UserRole[]>({
     queryKey: ["users"],
@@ -92,6 +93,32 @@ export default function AdminUsersPage() {
     } finally {
       setActionLoading(null);
       setRejectTarget(null);
+    }
+  };
+
+  const handleSuspend = async () => {
+    if (!suspendTarget) return;
+    setActionLoading(suspendTarget);
+    setActionError("");
+    setActionSuccess("");
+    try {
+      const res = await fetch("/api/approve-user", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid: suspendTarget, action: "suspend", adminUid: userRole?.uid }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setActionError(data.error || "Failed to suspend user");
+        return;
+      }
+      setActionSuccess("User access revoked. They will need re-approval.");
+      invalidateUsers();
+    } catch {
+      setActionError("Network error. Please try again.");
+    } finally {
+      setActionLoading(null);
+      setSuspendTarget(null);
     }
   };
 
@@ -225,10 +252,19 @@ export default function AdminUsersPage() {
                         </>
                       ) : (
                         u.uid !== userRole?.uid && (
-                          <button onClick={() => setDeleteTarget(u.uid)}
-                            className="text-sm text-red-500 hover:underline">
-                            Delete
-                          </button>
+                          <>
+                            <button
+                              onClick={() => setSuspendTarget(u.uid)}
+                              disabled={actionLoading !== null}
+                              className="py-1.5 px-3 bg-yellow-500 text-white text-xs font-medium rounded-md hover:bg-yellow-600 disabled:opacity-50"
+                            >
+                              {actionLoading === u.uid ? "..." : "Revoke"}
+                            </button>
+                            <button onClick={() => setDeleteTarget(u.uid)}
+                              className="py-1.5 px-3 text-xs font-medium text-red-600 border border-red-300 rounded-md hover:bg-red-50">
+                              Delete
+                            </button>
+                          </>
                         )
                       )}
                     </td>
@@ -246,6 +282,16 @@ export default function AdminUsersPage() {
           confirmLabel="Reject"
           onConfirm={handleReject}
           onCancel={() => setRejectTarget(null)}
+          variant="danger"
+        />
+
+        <ConfirmDialog
+          open={suspendTarget !== null}
+          title="Revoke Access"
+          message="Are you sure you want to revoke this user's access? Their status will be set back to pending and they will need to be approved again to access the platform."
+          confirmLabel="Revoke Access"
+          onConfirm={handleSuspend}
+          onCancel={() => setSuspendTarget(null)}
           variant="danger"
         />
 
