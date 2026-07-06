@@ -12,7 +12,6 @@ export default function SignupPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
-  const [pendingRole, setPendingRole] = useState("");
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -49,7 +48,6 @@ export default function SignupPage() {
         return;
       }
 
-      setPendingRole(role);
       setSuccess(true);
     } catch {
       setError("Network error. Please check your connection and try again.");
@@ -72,28 +70,18 @@ export default function SignupPage() {
           <div className="w-full md:w-1/2 flex flex-col bg-[#fdfaf6] p-8 md:p-12 justify-center">
             <div className="w-full max-w-sm mx-auto flex flex-col text-center">
               <h1 className="text-3xl font-bold text-gray-900 tracking-tight mb-3">
-                {pendingRole === "ADMIN" ? "Account Created" : "Registration Submitted"}
+                Registration Submitted
               </h1>
               <p className="text-sm text-gray-500 mb-8 leading-relaxed">
-                {pendingRole === "ADMIN"
-                  ? "Your admin account is ready. Please log in."
-                  : "Your account has been created and is pending admin approval. You will be able to log in once an admin approves your account."}
+                Your account has been created and is pending admin approval.
+                You will be able to log in once an administrator approves your account.
               </p>
-              {pendingRole === "ADMIN" ? (
-                <Link
-                  href="/login"
-                  className="w-full py-3.5 px-6 bg-black text-white text-sm font-semibold rounded-full hover:bg-gray-800 shadow-md text-center transition-colors animate-pulse"
-                >
-                  Go to Login
-                </Link>
-              ) : (
-                <Link
-                  href="/pending-approval"
-                  className="w-full py-3.5 px-6 bg-black text-white text-sm font-semibold rounded-full hover:bg-gray-800 shadow-md text-center transition-colors"
-                >
-                  View Status
-                </Link>
-              )}
+              <Link
+                href="/login"
+                className="w-full py-3.5 px-6 bg-black text-white text-sm font-semibold rounded-full hover:bg-gray-800 shadow-md text-center transition-colors"
+              >
+                Go to Login
+              </Link>
             </div>
           </div>
         </div>

@@ -29,6 +29,7 @@ export const ROLE_ROUTES: Record<EmployeeRole, string[]> = {
 export function isRouteAllowed(role: EmployeeRole | null | undefined, pathname: string): boolean {
   if (!role) return false;
   if (pathname === "/profile" || pathname.startsWith("/profile/")) return true;
+  if (pathname === "/no-access") return true;
   const routes = ROLE_ROUTES[role];
   if (!routes) return false;
   return routes.some((route) => pathname === route || pathname.startsWith(route + "/"));

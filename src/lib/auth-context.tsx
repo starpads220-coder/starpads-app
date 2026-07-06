@@ -6,6 +6,7 @@ import {
   onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
+  sendPasswordResetEmail,
 } from "firebase/auth";
 import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
 import { UserRole } from "@/types";
@@ -21,6 +22,7 @@ interface AuthState {
 interface AuthMethods {
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
 }
 
 const AuthStateContext = createContext<AuthState | null>(null);
@@ -67,6 +69,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       logout: async () => {
         if (!auth) return;
         await signOut(auth);
+      },
+      resetPassword: async (email: string) => {
+        if (!auth) throw new Error("Firebase is not configured");
+        const actionCodeSettings = {
+          url: `${typeof window !== "undefined" ? window.location.origin : ""}/login`,
+          handleCodeInApp: false,
+        };
+        await sendPasswordResetEmail(auth, email, actionCodeSettings);
       },
     }),
     []

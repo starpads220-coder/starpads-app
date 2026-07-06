@@ -58,7 +58,7 @@ export async function POST(request: NextRequest) {
       emailVerified: false,
     });
 
-    const status = role === "ADMIN" ? "active" : "pending";
+    const status = "pending";
 
     await db.collection("userRoles").doc(userRecord.uid).set({
       uid: userRecord.uid,

@@ -31,6 +31,8 @@ export default function LoginPage() {
         setError("Incorrect password");
       } else if (msg.includes("auth/too-many-requests")) {
         setError("Too many attempts. Please try again later.");
+      } else if (msg.includes("pending-approval")) {
+        setError("Your account is pending approval from an administrator. Please wait for approval.");
       } else {
         setError(msg);
       }
@@ -93,13 +95,19 @@ export default function LoginPage() {
                 />
               </div>
 
-              <div className="text-center pt-2">
+              <div className="flex items-center justify-between pt-2">
                 <span className="text-xs text-gray-500">
                   First time here?{" "}
                   <Link href="/signup" className="text-blue-600 font-semibold hover:underline">
                     Sign Up
                   </Link>
                 </span>
+                <Link
+                  href="/reset-password"
+                  className="text-xs text-blue-600 font-semibold hover:underline"
+                >
+                  Forgot Password?
+                </Link>
               </div>
 
               <button
