@@ -11,14 +11,6 @@ $orgId = $proj.projects[0].orgId
 $baseUrl = "https://api.vercel.com/v10/projects/$projectId/env?teamId=$orgId"
 $headers = @{ Authorization = "Bearer $Token"; "Content-Type" = "application/json" }
 
-# Get existing env vars
-Write-Host "Fetching existing env vars..." -ForegroundColor Cyan
-$existing = (Invoke-RestMethod -Uri $baseUrl -Method Get -Headers $headers).envs
-
-# Create lookup: key -> env object
-$existingMap = @{}
-foreach ($e in $existing) { $existingMap[$e.key] = $e }
-
 Get-Content ".env.local" | ForEach-Object {
     if ($_ -match "^(NEXT_PUBLIC_.*|FIREBASE_SERVICE_ACCOUNT_B64)=") {
         $k, $v = $_ -split "=", 2
@@ -32,32 +24,29 @@ Get-Content ".env.local" | ForEach-Object {
             target = @("production")
         } | ConvertTo-Json
 
-        if ($existingMap.ContainsKey($k)) {
-            # Update existing
-            $envId = $existingMap[$k].id
-            $updateUrl = "https://api.vercel.com/v10/projects/$projectId/env/$envId?teamId=$orgId"
-            try {
-                Invoke-RestMethod -Uri $updateUrl -Method Patch -Headers $headers -Body $body | Out-Null
-                Write-Host "Updated" -ForegroundColor Yellow
-            } catch {
-                if ($_.ErrorDetails) {
-                    $errMsg = ($_.ErrorDetails | ConvertFrom-Json)
-                    Write-Host "Update FAILED: $($errMsg.error.message)" -ForegroundColor Red
+        try {
+            Invoke-RestMethod -Uri $baseUrl -Method Post -Headers $headers -Body $body | Out-Null
+            Write-Host "Created" -ForegroundColor Green
+        } catch {
+            $statusCode = [int]$_.Exception.Response.StatusCode
+            if ($statusCode -eq 400 -or $statusCode -eq 409) {
+                # Try updating - first get the env ID
+                $envs = (Invoke-RestMethod -Uri $baseUrl -Method Get -Headers $headers).envs
+                $match = $envs | Where-Object { $_.key -eq $k }
+                if ($match) {
+                    $envId = $match[0].id
+                    $updateUrl = "https://api.vercel.com/v10/projects/$projectId/env/$envId?teamId=$orgId"
+                    Invoke-RestMethod -Uri $updateUrl -Method Patch -Headers $headers -Body $body | Out-Null
+                    Write-Host "Updated" -ForegroundColor Yellow
                 } else {
-                    Write-Host "Update FAILED: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host "FAILED: Cannot find existing env var" -ForegroundColor Red
                 }
-            }
-        } else {
-            # Create new
-            try {
-                Invoke-RestMethod -Uri $baseUrl -Method Post -Headers $headers -Body $body | Out-Null
-                Write-Host "Created" -ForegroundColor Green
-            } catch {
+            } else {
                 if ($_.ErrorDetails) {
                     $errMsg = ($_.ErrorDetails | ConvertFrom-Json)
-                    Write-Host "Create FAILED: $($errMsg.error.message)" -ForegroundColor Red
+                    Write-Host "FAILED: $($errMsg.error.message)" -ForegroundColor Red
                 } else {
-                    Write-Host "Create FAILED: $($_.Exception.Message)" -ForegroundColor Red
+                    Write-Host "FAILED: $($_.Exception.Message)" -ForegroundColor Red
                 }
             }
         }
