@@ -556,7 +556,7 @@ export default function ProductionPage() {
           </div>
         </ChartCard>
 
-        <ChartCard title="Material Input" subtitle="Cutting stage (STG-01)" variant="gradient" accentColor="#f59e0b">
+        <ChartCard title="Material Input" subtitle="Cutting & Measuring stage (STG-01)" variant="gradient" accentColor="#f59e0b">
           <div className="flex flex-col items-center justify-center h-full">
             <span className="text-3xl font-bold text-amber-500">{totalMetersInput.toFixed(1)}</span>
             <span className="text-xs text-gray-400 mt-1">meters of fabric cut</span>
@@ -685,7 +685,7 @@ export default function ProductionPage() {
           </div>
         </ChartCard>
 
-        <ChartCard title="Waste Analysis" subtitle="Avg waste % by material (cutting)" variant="gradient">
+        <ChartCard title="Waste Analysis" subtitle="Avg waste % by material (cutting & measuring)" variant="gradient">
           {wasteData.length > 0 ? (
             <div className="space-y-3">
               {wasteData.map((w) => {
@@ -760,7 +760,7 @@ export default function ProductionPage() {
           {form.stageId === "STG-01" ? (
             <>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Cutting Material</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Material</label>
                 <select
                   value={form.materialTypes[0] || ""}
                   onChange={(e) =>
@@ -785,8 +785,8 @@ export default function ProductionPage() {
                     }
                     className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
                   >
-                    <option value="manual">Manual (count pieces)</option>
-                    <option value="measure">Measure (input meters)</option>
+                    <option value="manual">Cutting (count pieces)</option>
+                    <option value="measure">Measuring (input meters)</option>
                   </select>
                 </div>
               )}

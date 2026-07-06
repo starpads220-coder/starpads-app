@@ -207,7 +207,7 @@ export const PACK_SIZES: Record<PackSize, number> = {
 };
 
 export const STAGE_LABELS: Record<StageId, string> = {
-  "STG-01": "Cutting",
+  "STG-01": "Cutting & Measuring",
   "STG-02": "Sewing Inner [Middle]",
   "STG-03": "Sewing Outer [TopLayer]",
   "STG-04": "Overlocking",
