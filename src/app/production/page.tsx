@@ -27,6 +27,10 @@ import {
   Batch,
   STAGE_LABELS,
   STAGE_ORDER,
+  CUTTING_MATERIALS,
+  CUTTING_LABELS,
+  CUTTING_RATIOS,
+  ROLL_LENGTHS,
   MATERIAL_CATEGORY_OPTIONS,
   MATERIAL_CATEGORY_LABELS,
 } from "@/types";
@@ -64,13 +68,7 @@ function getDateBounds(window: TimeWindow, customStart?: string, customEnd?: str
   return { start: customStart || todayStr, end: customEnd || todayStr };
 }
 
-const CUTTING_RATIOS: Record<string, number> = {
-  FLANNEL: 5,
-  FLEECE: 4,
-  PUL: 4,
-  COMBINED: 4,
-  MICROFIBER: 4,
-};
+
 
 const stageUnit: Record<StageId, string> = {
   "STG-01": "pieces",
@@ -104,6 +102,7 @@ export default function ProductionPage() {
     actualPieces: 0,
     batchRef: "",
     notes: "",
+    inputMode: "manual" as "manual" | "measure",
   });
 
   const { data: employees = [] } = useCollectionQuery<Employee>("employees", [
@@ -162,6 +161,7 @@ export default function ProductionPage() {
             actualPieces: data.actualPieces || 0,
             batchRef: data.batchRef || "",
             notes: data.notes || "",
+            inputMode: (data.inputMode as "manual" | "measure") || "manual",
           });
         }
       });
@@ -198,29 +198,26 @@ export default function ProductionPage() {
 
   const dailyWageRate = selectedStage ? selectedStage.defaultWageRate : 0;
 
+  const effectiveActualPieces = useMemo(
+    () => form.stageId === "STG-01" && form.inputMode === "measure" && form.materialTypes.length > 0 && form.metersInput > 0
+      ? form.metersInput * (CUTTING_RATIOS[form.materialTypes[0]] || 0)
+      : form.actualPieces,
+    [form.stageId, form.inputMode, form.materialTypes, form.metersInput, form.actualPieces]
+  );
+
   const performance = useMemo(
-    () => (dailyTarget > 0 && form.actualPieces > 0
-      ? Math.round((form.actualPieces / dailyTarget) * 100)
+    () => (dailyTarget > 0 && effectiveActualPieces > 0
+      ? Math.round((effectiveActualPieces / dailyTarget) * 100)
       : 0),
-    [dailyTarget, form.actualPieces]
+    [dailyTarget, effectiveActualPieces]
   );
 
   const estimatedEarnings = useMemo(
-    () => (dailyTarget > 0 && form.actualPieces > 0
-      ? Math.round((form.actualPieces / dailyTarget) * dailyWageRate)
+    () => (dailyTarget > 0 && effectiveActualPieces > 0
+      ? Math.round((effectiveActualPieces / dailyTarget) * dailyWageRate)
       : 0),
-    [dailyTarget, form.actualPieces, dailyWageRate]
+    [dailyTarget, effectiveActualPieces, dailyWageRate]
   );
-
-  const expectedPieces =
-    form.stageId === "STG-01" && form.materialTypes.length > 0 && form.metersInput > 0
-      ? form.metersInput * (CUTTING_RATIOS[form.materialTypes[0]] || 0)
-      : 0;
-
-  const wastePct =
-    expectedPieces > 0 && form.actualPieces > 0
-      ? Math.max(0, Math.round(((expectedPieces - form.actualPieces) / expectedPieces) * 100))
-      : 0;
 
   const toggleMaterial = (mat: MaterialType) => {
     setForm(prev => ({
@@ -248,19 +245,37 @@ export default function ProductionPage() {
     e.preventDefault();
     if (!form.employeeId) return;
     if (form.stageId === "STG-08" && !form.batchRef) return;
+    if (form.stageId === "STG-01") {
+      if (form.inputMode === "manual" && !form.actualPieces) return;
+      if (form.inputMode === "measure" && !form.metersInput) return;
+    }
     setSaving(true);
     try {
+      const isMeasureCutting = form.stageId === "STG-01" && form.inputMode === "measure";
+      const calculatedCuttingPieces = isMeasureCutting && form.materialTypes.length > 0 && form.metersInput > 0
+        ? form.metersInput * (CUTTING_RATIOS[form.materialTypes[0]] || 0)
+        : 0;
+
       const entryData = {
         employeeId: form.employeeId,
         date: form.date,
         stageId: form.stageId,
-        materialType: stagesWithMaterial.includes(form.stageId) ? (form.materialTypes[0] || null) : null,
-        materialTypes: stagesWithMaterial.includes(form.stageId) ? form.materialTypes : [],
-        materialCategory: form.stageId === "STG-01" ? form.materialCategory : null,
-        metersInput: form.stageId === "STG-01" ? form.metersInput : null,
-        wastePct: form.stageId === "STG-01" ? wastePct : null,
+        materialType: form.stageId === "STG-01"
+          ? (form.materialTypes[0] || null)
+          : stagesWithMaterial.includes(form.stageId)
+            ? (form.materialTypes[0] || null)
+            : null,
+        materialTypes: form.stageId === "STG-01"
+          ? form.materialTypes
+          : stagesWithMaterial.includes(form.stageId)
+            ? form.materialTypes
+            : [],
+        materialCategory: null,
+        inputMode: form.stageId === "STG-01" ? form.inputMode : null,
+        metersInput: isMeasureCutting ? form.metersInput : null,
+        wastePct: null,
         targetPieces: dailyTarget,
-        actualPieces: form.actualPieces,
+        actualPieces: isMeasureCutting ? calculatedCuttingPieces : form.actualPieces,
         batchRef: form.stageId === "STG-08" ? form.batchRef : "",
         performancePct: performance,
         earningsUgx: estimatedEarnings,
@@ -742,7 +757,41 @@ export default function ProductionPage() {
               ))}
             </select>
           </div>
-          {stagesWithMaterial.includes(form.stageId) && (
+          {form.stageId === "STG-01" ? (
+            <>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Cutting Material</label>
+                <select
+                  value={form.materialTypes[0] || ""}
+                  onChange={(e) =>
+                    setForm({ ...form, materialTypes: e.target.value ? [e.target.value as MaterialType] : [] })
+                  }
+                  required
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                >
+                  <option value="">Select material...</option>
+                  {CUTTING_MATERIALS.map((mat) => (
+                    <option key={mat} value={mat}>{CUTTING_LABELS[mat]}</option>
+                  ))}
+                </select>
+              </div>
+              {form.materialTypes.length > 0 && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Input Mode</label>
+                  <select
+                    value={form.inputMode}
+                    onChange={(e) =>
+                      setForm({ ...form, inputMode: e.target.value as "manual" | "measure" })
+                    }
+                    className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                  >
+                    <option value="manual">Manual (count pieces)</option>
+                    <option value="measure">Measure (input meters)</option>
+                  </select>
+                </div>
+              )}
+            </>
+          ) : stagesWithMaterial.includes(form.stageId) ? (
             <>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Material Category</label>
@@ -777,10 +826,15 @@ export default function ProductionPage() {
                 </div>
               )}
             </>
-          )}
-          {form.stageId === "STG-01" && form.materialTypes.length > 0 && (
+          ) : null}
+          {form.stageId === "STG-01" && form.inputMode === "measure" && form.materialTypes.length > 0 && (
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Meters Input</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Meters Measured
+                <span className="text-xs text-gray-400 ml-1">
+                  (roll: {ROLL_LENGTHS[form.materialTypes[0]]}m max)
+                </span>
+              </label>
               <input
                 type="number"
                 value={form.metersInput || ""}
@@ -803,21 +857,37 @@ export default function ProductionPage() {
               className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm bg-gray-50 text-gray-500"
             />
           </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              {form.stageId === "STG-08" ? "Packs Produced" : "Pieces Produced"} ({stageUnit[form.stageId]})
-            </label>
-            <input
-              type="number"
-              value={form.actualPieces || ""}
-              onChange={(e) =>
-                setForm({ ...form, actualPieces: parseInt(e.target.value) || 0 })
-              }
-              required
-              min={0}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
-            />
-          </div>
+          {form.stageId === "STG-01" && form.inputMode === "measure" ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Est. Pieces ({stageUnit[form.stageId]})
+              </label>
+              <input
+                type="number"
+                value={form.materialTypes.length > 0 && form.metersInput > 0
+                  ? form.metersInput * (CUTTING_RATIOS[form.materialTypes[0]] || 0)
+                  : 0}
+                readOnly
+                className="w-full px-3 py-2 border border-gray-200 rounded-md text-sm bg-gray-50 text-gray-500"
+              />
+            </div>
+          ) : (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                {form.stageId === "STG-08" ? "Packs Produced" : "Pieces Produced"} ({stageUnit[form.stageId]})
+              </label>
+              <input
+                type="number"
+                value={form.actualPieces || ""}
+                onChange={(e) =>
+                  setForm({ ...form, actualPieces: parseInt(e.target.value) || 0 })
+                }
+                required
+                min={0}
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+              />
+            </div>
+          )}
           {form.stageId === "STG-08" && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Batch</label>
@@ -857,7 +927,7 @@ export default function ProductionPage() {
           </div>
         </div>
 
-        {form.actualPieces > 0 && (
+        {(form.actualPieces > 0 || (form.stageId === "STG-01" && form.inputMode === "measure" && form.metersInput > 0 && form.materialTypes.length > 0)) && (
           <div className="bg-gray-50 rounded-lg p-4 flex flex-wrap items-center gap-6">
             <span className="text-sm">
               Performance: <StatusBadge value={performance} />
@@ -865,19 +935,13 @@ export default function ProductionPage() {
             <span className="text-sm text-gray-700">
               Est. Earnings: <strong className="text-ugx">UGX {estimatedEarnings.toLocaleString()}</strong>
             </span>
-            {form.stageId === "STG-01" && expectedPieces > 0 && (
-              <span className="text-sm text-gray-700">
-                Waste: <strong className={wastePct > 10 ? "text-red-500" : "text-green-500"}>{wastePct}%</strong>
-                <span className="text-gray-400 text-xs ml-1">(Expected: {Math.round(expectedPieces)})</span>
-              </span>
-            )}
           </div>
         )}
 
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={saving || !form.employeeId || !form.actualPieces || (form.stageId === "STG-08" && !form.batchRef)}
+            disabled={saving || !form.employeeId || (form.stageId === "STG-08" && !form.batchRef) || (form.stageId === "STG-01" && form.inputMode === "manual" && !form.actualPieces) || (form.stageId === "STG-01" && form.inputMode === "measure" && !form.metersInput) || (form.stageId !== "STG-01" && !form.actualPieces)}
             className="py-2 px-6 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 disabled:opacity-50"
           >
             {saving ? "Saving..." : editingEntryId ? "Update Entry" : "Log Entry"}

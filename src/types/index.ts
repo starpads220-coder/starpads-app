@@ -15,6 +15,7 @@ export type MaterialType = "FLANNEL" | "FLEECE" | "PUL" | "COMBINED" | "MICROFIB
 export type MaterialCategory = "SEWING_INNER" | "SEWING_OUTER" | "OVERLOCK";
 
 export type PackSize = "HALF_DOZEN" | "DOZEN" | "CARTON";
+export type CuttingInputMode = "manual" | "measure";
 
 export type CustomerType = "BULK" | "RETAIL" | "AGENT";
 export type CustomerCategory = "B2B" | "B2C";
@@ -72,6 +73,7 @@ export interface ProductionEntry {
   materialType: MaterialType | null;
   materialTypes?: MaterialType[];
   materialCategory?: MaterialCategory | null;
+  inputMode?: CuttingInputMode;
   metersInput?: number;
   wastePct?: number;
   targetPieces: number;
@@ -229,4 +231,26 @@ export const MATERIAL_CATEGORY_LABELS: Record<MaterialCategory, string> = {
   SEWING_INNER: "Sewing-Inner",
   SEWING_OUTER: "Sewing-Outer",
   OVERLOCK: "Overlock",
+};
+
+export const CUTTING_MATERIALS: MaterialType[] = ["FLEECE", "FLANNEL", "PUL"];
+
+export const CUTTING_LABELS: Record<MaterialType, string> = {
+  FLEECE: "Fleece (Microfiber)",
+  FLANNEL: "Flannel",
+  PUL: "PUL",
+  MICROFIBER: "Microfiber",
+  COMBINED: "Combined",
+};
+
+export const CUTTING_RATIOS: Record<string, number> = {
+  FLEECE: 56,
+  FLANNEL: 15,
+  PUL: 15,
+};
+
+export const ROLL_LENGTHS: Record<string, number> = {
+  FLEECE: 84,
+  FLANNEL: 88,
+  PUL: 86,
 };
