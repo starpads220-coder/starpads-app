@@ -45,3 +45,6 @@ starpads-automation-firebase-adminsdk-*.json
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+.vercel
+.env*
