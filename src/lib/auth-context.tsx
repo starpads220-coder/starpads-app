@@ -10,7 +10,7 @@ import {
 } from "firebase/auth";
 import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
 import { UserRole } from "@/types";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, onSnapshot } from "firebase/firestore";
 
 interface AuthState {
   user: User | null;
@@ -39,26 +39,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!fbReady) return;
     const _auth = auth!;
     const _db = db!;
-    const unsubscribe = onAuthStateChanged(_auth, async (firebaseUser) => {
+
+    const unsubAuth = onAuthStateChanged(_auth, (firebaseUser) => {
       setUser(firebaseUser);
-      if (firebaseUser) {
-        try {
-          const roleDoc = await getDoc(doc(_db, "userRoles", firebaseUser.uid));
-          if (roleDoc.exists()) {
-            setUserRole(roleDoc.data() as UserRole);
-          } else {
-            setUserRole(null);
-          }
-        } catch {
-          setUserRole(null);
-        }
+      if (!firebaseUser) {
+        setUserRole(null);
+        setLoading(false);
+      }
+    });
+
+    return () => {
+      unsubAuth();
+    };
+  }, [fbReady]);
+
+  useEffect(() => {
+    if (!user || !db) {
+      if (!user) setLoading(false);
+      return;
+    }
+    const _db = db;
+    const roleRef = doc(_db, "userRoles", user.uid);
+    const unsubRole = onSnapshot(roleRef, (snap) => {
+      if (snap.exists()) {
+        setUserRole(snap.data() as UserRole);
       } else {
         setUserRole(null);
       }
       setLoading(false);
     });
-    return unsubscribe;
-  }, [fbReady]);
+    return () => {
+      unsubRole();
+    };
+  }, [user]);
 
   const methods = useMemo(
     () => ({
