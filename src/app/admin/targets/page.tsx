@@ -6,22 +6,33 @@ import {
   addDoc,
   updateDoc,
   doc,
+  setDoc,
   Timestamp,
   orderBy,
 } from "firebase/firestore";
 import { useQueryClient } from "@tanstack/react-query";
 import { db } from "@/lib/firebase";
 import { RouteGuard } from "@/components/auth/RouteGuard";
-import { STAGE_LABELS, StageId, MaterialType } from "@/types";
+import { STAGE_LABELS, STAGE_ORDER, StageId, MaterialType } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
 
 interface StageTarget {
-  id: string;
+  id?: string;
   stageId: StageId;
   defaultTarget: number;
   defaultWageRate: number;
   unit: string;
   materialTargets?: Partial<Record<MaterialType, number>>;
+}
+
+interface StageRow {
+  stageId: StageId;
+  defaultTarget: number;
+  defaultWageRate: number;
+  unit: string;
+  materialTargets?: Partial<Record<MaterialType, number>>;
+  material: MaterialType | null;
+  exists: boolean;
 }
 
 const CUTTING_MATERIALS: MaterialType[] = ["FLEECE", "FLANNEL", "PUL"];
@@ -73,13 +84,77 @@ export default function AdminTargetsPage() {
 
   const cuttingStage = stages.find((s) => s.stageId === "STG-01");
 
-  const stageRows = stages.flatMap((stage) => {
-    if (stage.stageId !== "STG-01") return [{ ...stage, material: null as MaterialType | null }];
-    return CUTTING_MATERIALS.map((mat) => ({
-      ...stage,
-      material: mat,
-    }));
-  });
+  const stageRows: StageRow[] = [];
+  for (const stageId of STAGE_ORDER) {
+    const stage = stages.find((s) => s.stageId === stageId);
+    if (!stage) {
+      stageRows.push({ stageId, defaultTarget: 0, defaultWageRate: 0, unit: "", materialTargets: undefined, material: null, exists: false });
+    } else if (stage.stageId !== "STG-01") {
+      stageRows.push({ stageId: stage.stageId, defaultTarget: stage.defaultTarget, defaultWageRate: stage.defaultWageRate, unit: stage.unit, materialTargets: stage.materialTargets, material: null, exists: true });
+    } else {
+      for (const mat of CUTTING_MATERIALS) {
+        stageRows.push({ stageId: stage.stageId, defaultTarget: stage.defaultTarget, defaultWageRate: stage.defaultWageRate, unit: stage.unit, materialTargets: stage.materialTargets, material: mat, exists: true });
+      }
+    }
+  }
+
+  const handleCreateStage = async (stageId: string) => {
+    setSaving(true);
+    try {
+      const defaults: Record<string, { defaultTarget: number; defaultWageRate: number; unit: string }> = {
+        "STG-01": { defaultTarget: 700, defaultWageRate: 10000, unit: "pieces" },
+        "STG-02": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
+        "STG-03": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
+        "STG-04": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
+        "STG-05": { defaultTarget: 200, defaultWageRate: 10000, unit: "pieces" },
+        "STG-06": { defaultTarget: 400, defaultWageRate: 8000, unit: "pieces" },
+        "STG-07": { defaultTarget: 360, defaultWageRate: 10000, unit: "pieces" },
+        "STG-08": { defaultTarget: 120, defaultWageRate: 12000, unit: "packs" },
+      };
+      const config = defaults[stageId] || { defaultTarget: 0, defaultWageRate: 0, unit: "pieces" };
+      await setDoc(doc(db, "productionStages", stageId), {
+        stageId,
+        name: STAGE_LABELS[stageId as StageId],
+        ...config,
+        materialTargets: stageId === "STG-01" ? { FLEECE: 700, FLANNEL: 350, PUL: 350 } : null,
+        updatedAt: Timestamp.now(),
+      });
+      queryClient.invalidateQueries({ queryKey: ["productionStages"] });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleCreateAllMissing = async () => {
+    setSaving(true);
+    try {
+      for (const stageId of STAGE_ORDER) {
+        const exists = stages.some((s) => s.stageId === stageId);
+        if (exists) continue;
+        const defaults: Record<string, { defaultTarget: number; defaultWageRate: number; unit: string }> = {
+          "STG-01": { defaultTarget: 700, defaultWageRate: 10000, unit: "pieces" },
+          "STG-02": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
+          "STG-03": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
+          "STG-04": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
+          "STG-05": { defaultTarget: 200, defaultWageRate: 10000, unit: "pieces" },
+          "STG-06": { defaultTarget: 400, defaultWageRate: 8000, unit: "pieces" },
+          "STG-07": { defaultTarget: 360, defaultWageRate: 10000, unit: "pieces" },
+          "STG-08": { defaultTarget: 120, defaultWageRate: 12000, unit: "packs" },
+        };
+        const config = defaults[stageId] || { defaultTarget: 0, defaultWageRate: 0, unit: "pieces" };
+        await setDoc(doc(db, "productionStages", stageId), {
+          stageId,
+          name: STAGE_LABELS[stageId as StageId],
+          ...config,
+          materialTargets: stageId === "STG-01" ? { FLEECE: 700, FLANNEL: 350, PUL: 350 } : null,
+          updatedAt: Timestamp.now(),
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["productionStages"] });
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleEdit = (row: typeof stageRows[number]) => {
     setEditingStage(row.stageId);
@@ -172,7 +247,9 @@ export default function AdminTargetsPage() {
                       {row.material ? ` (${MATERIAL_LABELS[row.material]})` : ""}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">
-                      {isEditing ? (
+                      {!row.exists ? (
+                        <span className="text-gray-400 italic">Not configured</span>
+                      ) : isEditing ? (
                         <input
                           type="number"
                           value={editValue}
@@ -188,7 +265,9 @@ export default function AdminTargetsPage() {
                       )}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">
-                      {isEditing ? (
+                      {!row.exists ? (
+                        <span className="text-gray-400 italic">—</span>
+                      ) : isEditing ? (
                         <input
                           type="number"
                           value={editWageRate}
@@ -200,9 +279,17 @@ export default function AdminTargetsPage() {
                         row.defaultWageRate ? `UGX ${row.defaultWageRate.toLocaleString()}` : "—"
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{row.unit}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{row.exists ? row.unit : <span className="text-gray-400 italic">—</span>}</td>
                     <td className="px-4 py-3 text-right">
-                      {isEditing ? (
+                      {!row.exists ? (
+                        <button
+                          onClick={() => handleCreateStage(row.stageId)}
+                          disabled={saving}
+                          className="text-sm font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+                        >
+                          Create
+                        </button>
+                      ) : isEditing ? (
                         <span className="flex justify-end gap-2">
                           <button
                             onClick={() => handleSave(row.stageId, row.material)}
@@ -218,7 +305,7 @@ export default function AdminTargetsPage() {
                             Cancel
                           </button>
                         </span>
-                      ) : (
+                      ) : row.material ? null : (
                         <button
                           onClick={() => handleEdit(row)}
                           className="text-sm text-stock-blue hover:underline"
@@ -233,6 +320,21 @@ export default function AdminTargetsPage() {
             </tbody>
           </table>
         </div>
+        {stageRows.some((r) => !r.exists) && (
+          <div className="mt-4 flex items-center justify-between bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
+            <p className="text-sm text-amber-800">
+              Some stages are missing from the database. Click <strong>Create</strong> to add them, or{" "}
+              <button
+                onClick={handleCreateAllMissing}
+                disabled={saving}
+                className="font-medium text-amber-900 underline hover:no-underline"
+              >
+                create all missing
+              </button>
+              .
+            </p>
+          </div>
+        )}
       </section>
 
       <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
