@@ -20,12 +20,14 @@ const ALL_NAV_ITEMS = [
   { href: "/admin/users", label: "Users" },
 ];
 
+const AUTH_PAGES = ["/login", "/signup", "/reset-password", "/no-access"];
+
 export function NavBar() {
   const pathname = usePathname();
   const { user, userRole, logout } = useAuth();
   const [loggingOut, setLoggingOut] = useState(false);
 
-  if (!user || loggingOut) return null;
+  if (!user || loggingOut || AUTH_PAGES.includes(pathname)) return null;
 
   const allowedRoutes = ROLE_ROUTES[(userRole?.role ?? "") as EmployeeRole] ?? [];
   const navItems = ALL_NAV_ITEMS.filter((item) => allowedRoutes.includes(item.href));
