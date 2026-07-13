@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, FormEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   collection,
   query,
@@ -11,6 +12,7 @@ import {
   updateDoc,
   doc,
   getDoc,
+  getDocs,
   Timestamp,
   limit,
 } from "firebase/firestore";
@@ -91,6 +93,16 @@ export default function ProductionPage() {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [viewDate, setViewDate] = useState(new Date().toISOString().split("T")[0]);
+  const queryClient = useQueryClient();
+
+  const recalculateBatchPacks = useCallback(async (batchId: string) => {
+    const entriesSnap = await getDocs(
+      query(collection(db, "productionEntries"), where("batchRef", "==", batchId), where("stageId", "==", "STG-08"))
+    );
+    const totalPacks = entriesSnap.docs.reduce((sum, d) => sum + ((d.data().actualPieces as number) || 0), 0);
+    await updateDoc(doc(db, "batches", batchId), { packsProduced: totalPacks });
+    queryClient.invalidateQueries({ queryKey: ["batches"] });
+  }, [queryClient]);
 
   const [form, setForm] = useState({
     employeeId: "",
@@ -295,6 +307,10 @@ export default function ProductionPage() {
         });
       }
 
+      if (form.stageId === "STG-08" && form.batchRef) {
+        await recalculateBatchPacks(form.batchRef);
+      }
+
       setForm((prev) => ({
         ...prev,
         materialCategory: "" as MaterialCategory | "",
@@ -333,7 +349,7 @@ export default function ProductionPage() {
   const stageBarData = useMemo(() => {
     const labels: Record<string, string> = {
       "STG-01": "Cut", "STG-02": "Sew-In", "STG-03": "Sew-Out", "STG-04": "Overlock",
-      "STG-05": "Pouch", "STG-06": "Check", "STG-07": "Pin/Fold", "STG-08": "Pack",
+      "STG-05": "Pouch", "STG-06": "Check", "STG-07": "Pin/Fold", "STG-08": "Packaging",
     };
     return STAGE_ORDER.map((s) => ({ label: labels[s] || s, value: stageCounts[s] }));
   }, [stageCounts]);
@@ -549,7 +565,7 @@ export default function ProductionPage() {
           </div>
         </ChartCard>
 
-        <ChartCard title="Finished Pads" subtitle="Packing stage (STG-08)" variant="gradient" accentColor="#22c55e">
+        <ChartCard title="Finished Pads" subtitle="Packaging stage (STG-08)" variant="gradient" accentColor="#22c55e">
           <div className="flex flex-col items-center justify-center h-full">
             <span className="text-3xl font-bold text-emerald-500">{totalPackagedPads.toLocaleString()}</span>
             <span className="text-xs text-gray-400 mt-1">completed pads packaged</span>
@@ -1016,7 +1032,7 @@ export default function ProductionPage() {
         <div className="flex items-center justify-between">
           <div>
             <h2 className="text-lg font-semibold text-gray-900">Move Packaged Goods to Stock</h2>
-            <p className="text-sm text-gray-500 mt-1">Today's packing (STG-08) entries ready to move into storage inventory.</p>
+            <p className="text-sm text-gray-500 mt-1">Today's packaging (STG-08) entries ready to move into storage inventory.</p>
           </div>
         </div>
         {entriesLoading ? (
@@ -1051,6 +1067,7 @@ export default function ProductionPage() {
                             quantity: String(entry.actualPieces),
                             batchRef: entry.batchRef,
                             entryId: entry.id,
+                            packSize: "HALF_DOZEN",
                           });
                           window.location.href = `/storage?${params.toString()}`;
                         }}

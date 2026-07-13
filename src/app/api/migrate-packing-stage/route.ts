@@ -16,7 +16,7 @@ export async function POST() {
 
     if (snap.exists) {
       await docRef.update({
-        name: "Packing",
+        name: "Packaging",
         defaultTarget: 120,
         defaultWageRate: 12000,
         unit: "packs",
@@ -28,7 +28,7 @@ export async function POST() {
         message: "Packing stage (STG-08) updated successfully",
         data: {
           stageId: "STG-08",
-          name: "Packing",
+          name: "Packaging",
           defaultTarget: 120,
           defaultWageRate: 12000,
           unit: "packs",
@@ -38,7 +38,7 @@ export async function POST() {
 
     await docRef.set({
       stageId: "STG-08",
-      name: "Packing",
+      name: "Packaging",
       defaultTarget: 120,
       defaultWageRate: 12000,
       unit: "packs",
@@ -51,7 +51,7 @@ export async function POST() {
       message: "Packing stage (STG-08) created successfully",
       data: {
         stageId: "STG-08",
-        name: "Packing",
+        name: "Packaging",
         defaultTarget: 120,
         defaultWageRate: 12000,
         unit: "packs",

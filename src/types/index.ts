@@ -214,7 +214,7 @@ export const STAGE_LABELS: Record<StageId, string> = {
   "STG-05": "Pouch Making",
   "STG-06": "Checking and Holding",
   "STG-07": "Pinning and Folding",
-  "STG-08": "Packing",
+  "STG-08": "Packaging",
 };
 
 export const STAGE_ORDER: StageId[] = [

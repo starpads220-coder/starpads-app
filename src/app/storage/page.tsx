@@ -111,12 +111,13 @@ export default function StoragePage() {
     if (tabParam === "stock-out") {
       setActiveTab("stock-out");
     }
-    if (dateParam || quantityParam || batchRefParam) {
+    if (dateParam || quantityParam || batchRefParam || packSizeParam) {
       setStockInForm((prev) => ({
         ...prev,
         date: dateParam || prev.date,
         quantity: quantityParam ? parseInt(quantityParam, 10) || 0 : prev.quantity,
         batchRef: batchRefParam || prev.batchRef,
+        packSize: (packSizeParam as PackSize) || prev.packSize,
       }));
     }
     if (customerRefParam || destinationParam || packSizeParam || dispatchedByParam || dateParam) {
@@ -610,7 +611,7 @@ export default function StoragePage() {
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
               </div>
             </ChartCard>
-            <ChartCard title="Pinned & Folded" subtitle="STG-07 awaiting packing" variant="gradient" accentColor={wipPacked > 500 ? palette.orange : palette.blue}>
+            <ChartCard title="Pinned & Folded" subtitle="STG-07 awaiting packaging" variant="gradient" accentColor={wipPacked > 500 ? palette.orange : palette.blue}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold" style={{ color: wipPacked > 500 ? palette.orange : palette.blue }}>{wipPacked.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
@@ -622,7 +623,7 @@ export default function StoragePage() {
                 <span className="text-xs text-gray-400 mt-1">pieces in progress</span>
               </div>
             </ChartCard>
-            <ChartCard title="Packed" subtitle="STG-08 complete" variant="gradient" accentColor={palette.emerald}>
+            <ChartCard title="Packaged" subtitle="STG-08 complete" variant="gradient" accentColor={palette.emerald}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold text-emerald-500">{totalPackagedPads.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pads packaged</span>
@@ -704,7 +705,7 @@ export default function StoragePage() {
                 <select value={stockInForm.batchRef} onChange={(e) => setStockInForm({ ...stockInForm, batchRef: e.target.value })}
                   required className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
                   <option value="">Select batch...</option>
-                  {batches.filter((b) => b.status === "ACTIVE").map((b) => (
+                  {(moveEntryId ? batches : batches.filter((b) => b.status === "ACTIVE")).map((b) => (
                     <option key={b.id} value={b.id}>{b.batchNumber} — {b.packsProduced.toLocaleString()} / {b.maxPacks.toLocaleString()} packs</option>
                   ))}
                 </select>

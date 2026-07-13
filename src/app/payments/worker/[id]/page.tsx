@@ -38,7 +38,7 @@ import {
 } from "date-fns";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
-import { getPayeeBracket } from "@/lib/deductions";
+import { getPayeeBracket, computeNssfEmployee, computeNssfBusiness, computePayeeTax } from "@/lib/deductions";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
 type DetailTab = "calendar" | "breakdown" | "history" | "nssf" | "payee";
@@ -238,19 +238,22 @@ export default function EmployeePaymentDetailPage() {
   }, [calendarDate, entries]);
 
   const nssfSummary = useMemo(() => {
-    const totalEmpDed = filteredPayments.reduce((s, p) => s + (p.nssfEmployeeDeduction || 0), 0);
-    const totalBusCont = filteredPayments.reduce((s, p) => s + (p.nssfBusinessContribution || 0), 0);
-    const nssfPaymentCount = filteredPayments.filter((p) => (p.nssfEmployeeDeduction || 0) > 0).length;
-    return { totalEmployeeDeduction: totalEmpDed, totalBusinessContribution: totalBusCont, nssfPaymentCount, hasNssf: nssfPaymentCount > 0 };
-  }, [filteredPayments]);
+    const gross = dueAmount + paidAmount;
+    const totalEmployeeDeduction = computeNssfEmployee(gross);
+    const totalBusinessContribution = computeNssfBusiness(gross);
+    const hasNssf = gross > 0;
+    return { totalEmployeeDeduction, totalBusinessContribution, gross, hasNssf };
+  }, [dueAmount, paidAmount]);
 
   const payeeSummary = useMemo(() => {
-    const totalPayee = filteredPayments.reduce((s, p) => s + (p.payeeTax || 0), 0);
-    const taxableCount = filteredPayments.filter((p) => (p.payeeTax || 0) > 0).length;
-    const latestPayee = filteredPayments.length > 0 ? (filteredPayments[0].payeeTax || 0) : 0;
-    const latestGross = filteredPayments.length > 0 ? (filteredPayments[0].grossAmount || filteredPayments[0].totalAmount || 0) : 0;
-    return { totalPayee, taxableCount, taxFreeCount: filteredPayments.length - taxableCount, latestPayee, latestGross, hasPayee: totalPayee > 0 };
-  }, [filteredPayments]);
+    const gross = dueAmount + paidAmount;
+    const totalPayee = computePayeeTax(gross);
+    const bracket = getPayeeBracket(gross);
+    const isTaxFree = bracket.rate === 0;
+    const taxableCount = isTaxFree ? 0 : 1;
+    const taxFreeCount = isTaxFree ? 1 : 0;
+    return { totalPayee, taxableCount, taxFreeCount, gross, hasPayee: totalPayee > 0, bracketLabel: bracket.label, bracketRate: bracket.rate };
+  }, [dueAmount, paidAmount]);
 
   const handleDownloadReceipt = async (paymentId: string) => {
     try {
@@ -550,8 +553,8 @@ export default function EmployeePaymentDetailPage() {
             </div>
             <div className="text-center text-xs text-gray-500">
               {nssfSummary.hasNssf
-                ? `${nssfSummary.nssfPaymentCount} payment${nssfSummary.nssfPaymentCount !== 1 ? "s" : ""} with NSSF deductions`
-                : "No NSSF payments recorded"}
+                ? `Based on gross earnings of UGX ${nssfSummary.gross.toLocaleString()}`
+                : "No earnings recorded for this period"}
             </div>
           </div>
         </ChartCard>
@@ -576,8 +579,8 @@ export default function EmployeePaymentDetailPage() {
             </div>
             <div className="text-center text-xs text-gray-500">
               {payeeSummary.hasPayee
-                ? `Latest PAYEE: UGX ${payeeSummary.latestPayee.toLocaleString()}`
-                : "No PAYEE recorded (Tax Free)"}
+                ? `Based on gross earnings of UGX ${payeeSummary.gross.toLocaleString()} — ${payeeSummary.bracketLabel} bracket`
+                : `No PAYEE — ${payeeSummary.bracketLabel} bracket (${payeeSummary.gross.toLocaleString()} UGX)`}
             </div>
           </div>
         </ChartCard>
@@ -908,7 +911,7 @@ export default function EmployeePaymentDetailPage() {
       {/* Tab: NSSF History */}
       {activeTab === "nssf" && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
-          {filteredPayments.length === 0 ? (
+          {nssfSummary.gross === 0 ? (
             <div className="p-8 text-center text-gray-400">
               No NSSF records found for this employee in the selected period.
             </div>
@@ -917,57 +920,32 @@ export default function EmployeePaymentDetailPage() {
               <div className="p-4 bg-blue-50 border-b border-blue-200">
                 <div className="text-sm text-blue-800">
                   <span className="font-semibold">Total NSSF Deducted (Employee 5%): </span>
-                  UGX {filteredPayments.reduce((s, p) => s + (p.nssfEmployeeDeduction || 0), 0).toLocaleString()}
+                  UGX {nssfSummary.totalEmployeeDeduction.toLocaleString()}
                   <span className="mx-4">|</span>
                   <span className="font-semibold">Total NSSF Business (10%): </span>
-                  UGX {filteredPayments.reduce((s, p) => s + (p.nssfBusinessContribution || 0), 0).toLocaleString()}
+                  UGX {nssfSummary.totalBusinessContribution.toLocaleString()}
                 </div>
               </div>
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gross (UGX)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period Gross (UGX)</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">NSSF Employee (5%)</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">NSSF Business (10%)</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cumulative Employee</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cumulative Business</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {(() => {
-                    let cumEmp = 0;
-                    let cumBus = 0;
-                    return filteredPayments.map((p, i) => {
-                      const gross = p.grossAmount || p.totalAmount || 0;
-                      const nssfEmp = p.nssfEmployeeDeduction || 0;
-                      const nssfBus = p.nssfBusinessContribution || 0;
-                      cumEmp += nssfEmp;
-                      cumBus += nssfBus;
-                      return (
-                        <tr key={p.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
-                          <td className="px-4 py-3 text-sm text-gray-700">
-                            {p.periodStart} &mdash; {p.periodEnd}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-700">
-                            UGX {gross.toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 text-sm font-medium text-red-600">
-                            UGX {nssfEmp.toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 text-sm font-medium text-blue-600">
-                            UGX {nssfBus.toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 text-sm font-medium text-red-700">
-                            UGX {cumEmp.toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 text-sm font-medium text-blue-700">
-                            UGX {cumBus.toLocaleString()}
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })()}
+                  <tr className="bg-white">
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      UGX {nssfSummary.gross.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-sm font-medium text-red-600">
+                      UGX {nssfSummary.totalEmployeeDeduction.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-sm font-medium text-blue-600">
+                      UGX {nssfSummary.totalBusinessContribution.toLocaleString()}
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </>
@@ -978,7 +956,7 @@ export default function EmployeePaymentDetailPage() {
       {/* Tab: PAYEE History */}
       {activeTab === "payee" && (
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
-          {filteredPayments.length === 0 ? (
+          {payeeSummary.gross === 0 ? (
             <div className="p-8 text-center text-gray-400">
               No PAYEE records found for this employee in the selected period.
             </div>
@@ -986,63 +964,44 @@ export default function EmployeePaymentDetailPage() {
             <>
               <div className="p-4 bg-orange-50 border-b border-orange-200">
                 <div className="text-sm text-orange-800">
-                  <span className="font-semibold">Total PAYEE Paid: </span>
-                  UGX {filteredPayments.reduce((s, p) => s + (p.payeeTax || 0), 0).toLocaleString()}
+                  <span className="font-semibold">Total PAYEE: </span>
+                  UGX {payeeSummary.totalPayee.toLocaleString()}
                   <span className="mx-4">|</span>
-                  <span className="font-semibold">Taxable Payments: </span>
-                  {filteredPayments.filter((p) => (p.payeeTax || 0) > 0).length}
+                  <span className="font-semibold">Bracket: </span>
+                  {payeeSummary.bracketLabel} ({payeeSummary.bracketRate}%)
                   <span className="mx-4">|</span>
-                  <span className="font-semibold">Tax-Free Payments: </span>
-                  {filteredPayments.filter((p) => (p.payeeTax || 0) === 0).length}
+                  <span className="font-semibold">Gross: </span>
+                  UGX {payeeSummary.gross.toLocaleString()}
                 </div>
               </div>
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gross (UGX)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period Gross (UGX)</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tax Bracket</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">PAYEE (UGX)</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Cumulative PAYEE</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {(() => {
-                    let cumPayee = 0;
-                    return filteredPayments.map((p, i) => {
-                      const gross = p.grossAmount || p.totalAmount || 0;
-                      const payee = p.payeeTax || 0;
-                      cumPayee += payee;
-                      const bracket = getPayeeBracket(gross);
-                      return (
-                        <tr key={p.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
-                          <td className="px-4 py-3 text-sm text-gray-700">
-                            {p.periodStart} &mdash; {p.periodEnd}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-700">
-                            UGX {gross.toLocaleString()}
-                          </td>
-                          <td className="px-4 py-3 text-sm text-gray-500">
-                            {bracket.label}
-                          </td>
-                          <td className="px-4 py-3 text-sm">
-                            {bracket.rate === 0 ? (
-                              <span className="text-green-600 font-medium">Tax Free</span>
-                            ) : (
-                              <span className="text-gray-700">{bracket.rate}%</span>
-                            )}
-                          </td>
-                          <td className={`px-4 py-3 text-sm font-medium ${payee > 0 ? "text-red-600" : "text-green-600"}`}>
-                            {payee > 0 ? `UGX ${payee.toLocaleString()}` : "0 (Tax Free)"}
-                          </td>
-                          <td className="px-4 py-3 text-sm font-medium text-red-700">
-                            UGX {cumPayee.toLocaleString()}
-                          </td>
-                        </tr>
-                      );
-                    });
-                  })()}
+                  <tr className="bg-white">
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      UGX {payeeSummary.gross.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-500">
+                      {payeeSummary.bracketLabel}
+                    </td>
+                    <td className="px-4 py-3 text-sm">
+                      {payeeSummary.bracketRate === 0 ? (
+                        <span className="text-green-600 font-medium">Tax Free</span>
+                      ) : (
+                        <span className="text-gray-700">{payeeSummary.bracketRate}%</span>
+                      )}
+                    </td>
+                    <td className={`px-4 py-3 text-sm font-medium ${payeeSummary.totalPayee > 0 ? "text-red-600" : "text-green-600"}`}>
+                      {payeeSummary.totalPayee > 0 ? `UGX ${payeeSummary.totalPayee.toLocaleString()}` : "0 (Tax Free)"}
+                    </td>
+                  </tr>
                 </tbody>
               </table>
             </>
