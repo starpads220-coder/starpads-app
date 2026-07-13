@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, FormEvent } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import {
   collection,
   query,
@@ -93,7 +92,6 @@ export default function ProductionPage() {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [viewDate, setViewDate] = useState(new Date().toISOString().split("T")[0]);
-  const queryClient = useQueryClient();
 
   const recalculateBatchPacks = useCallback(async (batchId: string) => {
     const entriesSnap = await getDocs(
@@ -101,8 +99,7 @@ export default function ProductionPage() {
     );
     const totalPacks = entriesSnap.docs.reduce((sum, d) => sum + ((d.data().actualPieces as number) || 0), 0);
     await updateDoc(doc(db, "batches", batchId), { packsProduced: totalPacks });
-    queryClient.invalidateQueries({ queryKey: ["batches"] });
-  }, [queryClient]);
+  }, []);
 
   const [form, setForm] = useState({
     employeeId: "",
@@ -128,9 +125,7 @@ export default function ProductionPage() {
     staleTime: 10 * 60 * 1000,
   });
 
-  const { data: batches = [] } = useCollectionQuery<Batch>("batches", [
-    where("status", "==", "ACTIVE"),
-  ], { staleTime: 2 * 60 * 1000 });
+  const { data: batches = [] } = useRealtimeCollection<Batch>("batches");
 
   const [entries, setEntries] = useState<ProductionEntry[]>([]);
   const [entriesLoading, setEntriesLoading] = useState(true);
@@ -296,9 +291,13 @@ export default function ProductionPage() {
       };
 
       if (editingEntryId) {
+        const oldEntry = entries.find((e) => e.id === editingEntryId);
         await updateDoc(doc(db, "productionEntries", editingEntryId), entryData);
         setEditingEntryId(null);
         window.history.replaceState({}, "", window.location.pathname);
+        if (oldEntry?.stageId === "STG-08" && oldEntry.batchRef && oldEntry.batchRef !== form.batchRef) {
+          try { await recalculateBatchPacks(oldEntry.batchRef); } catch {}
+        }
       } else {
         await addDoc(collection(db, "productionEntries"), {
           ...entryData,
@@ -658,29 +657,46 @@ export default function ProductionPage() {
           showLegend={true}
         />
 
-        <ChartCard title="Batch Progress" subtitle="Active batch completion" variant="gradient">
-          {batches.filter(b => b.status === "ACTIVE").length > 0 ? (
-            <div className="space-y-3">
-              {batches.filter(b => b.status === "ACTIVE").slice(0, 5).map((b) => {
-                const pct = b.maxPacks > 0 ? Math.round((b.packsProduced / b.maxPacks) * 100) : 0;
-                return (
-                  <div key={b.id}>
-                    <div className="flex justify-between text-xs mb-1">
-                      <span className="font-semibold text-gray-700">{b.batchNumber}</span>
-                      <span className="text-gray-500">{b.packsProduced}/{b.maxPacks}</span>
+        <ChartCard title="Batch Progress" subtitle="Batch completion status" variant="gradient">
+          {batches.length > 0 ? (
+            <div className="space-y-3 overflow-y-auto max-h-[260px]">
+              {batches
+                .sort((a, b) => {
+                  if (a.status === "ACTIVE" && b.status !== "ACTIVE") return -1;
+                  if (a.status !== "ACTIVE" && b.status === "ACTIVE") return 1;
+                  return b.startDate.localeCompare(a.startDate);
+                })
+                .slice(0, 8)
+                .map((b) => {
+                  const pct = b.maxPacks > 0 ? Math.min(100, Math.round((b.packsProduced / b.maxPacks) * 100)) : 0;
+                  const isActive = b.status === "ACTIVE";
+                  return (
+                    <div key={b.id}>
+                      <div className="flex justify-between text-xs mb-1">
+                        <span className="font-semibold text-gray-700 flex items-center gap-1.5">
+                          {b.batchNumber}
+                          {!isActive && (
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">DONE</span>
+                          )}
+                        </span>
+                        <span className="text-gray-500">{b.packsProduced.toLocaleString()}/{b.maxPacks.toLocaleString()}</span>
+                      </div>
+                      <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${pct}%`,
+                            backgroundColor: pct >= 100 ? palette.emerald : pct >= 50 ? palette.blue : palette.orange,
+                          }}
+                        />
+                      </div>
+                      <div className="text-[10px] text-gray-400 mt-0.5 text-right">{pct}%</div>
                     </div>
-                    <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full transition-all"
-                        style={{ width: `${pct}%`, backgroundColor: pct >= 100 ? palette.emerald : pct >= 50 ? palette.blue : palette.orange }}
-                      />
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           ) : (
-            <div className="flex items-center justify-center h-full text-gray-400 text-sm">No active batches</div>
+            <div className="flex items-center justify-center h-full text-gray-400 text-sm">No batches created yet</div>
           )}
         </ChartCard>
 
@@ -919,7 +935,7 @@ export default function ProductionPage() {
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
                 >
                   <option value="">Select batch...</option>
-                  {batches.map((b) => (
+                  {batches.filter((b) => b.status === "ACTIVE").map((b) => (
                     <option key={b.id} value={b.id}>
                       {b.batchNumber} — {b.packsProduced.toLocaleString()} / {b.maxPacks.toLocaleString()} packs
                     </option>
