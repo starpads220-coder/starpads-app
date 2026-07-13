@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, FormEvent } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, FormEvent } from "react";
 import {
   collection,
   query,
@@ -501,6 +501,28 @@ export default function ProductionPage() {
     [entries]
   );
 
+  const batchPackCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    entries
+      .filter((e) => e.stageId === "STG-08" && e.batchRef)
+      .forEach((e) => {
+        counts[e.batchRef] = (counts[e.batchRef] || 0) + e.actualPieces;
+      });
+    return counts;
+  }, [entries]);
+
+  const backfilledRef = useRef(false);
+  useEffect(() => {
+    if (backfilledRef.current || batches.length === 0) return;
+    backfilledRef.current = true;
+    for (const b of batches) {
+      const computed = batchPackCounts[b.id] ?? 0;
+      if (computed !== b.packsProduced) {
+        updateDoc(doc(db, "batches", b.id), { packsProduced: computed }).catch(() => {});
+      }
+    }
+  }, [batches, batchPackCounts]);
+
   const handleWindowChange = (tw: TimeWindow) => {
     setTimeWindow(tw);
     if (tw !== "custom") {
@@ -668,7 +690,8 @@ export default function ProductionPage() {
                 })
                 .slice(0, 8)
                 .map((b) => {
-                  const pct = b.maxPacks > 0 ? Math.min(100, Math.round((b.packsProduced / b.maxPacks) * 100)) : 0;
+                  const packsProduced = batchPackCounts[b.id] ?? b.packsProduced;
+                  const pct = b.maxPacks > 0 ? Math.min(100, Math.round((packsProduced / b.maxPacks) * 100)) : 0;
                   const isActive = b.status === "ACTIVE";
                   return (
                     <div key={b.id}>
@@ -679,7 +702,7 @@ export default function ProductionPage() {
                             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-100 text-emerald-700 font-medium">DONE</span>
                           )}
                         </span>
-                        <span className="text-gray-500">{b.packsProduced.toLocaleString()}/{b.maxPacks.toLocaleString()}</span>
+                        <span className="text-gray-500">{packsProduced.toLocaleString()}/{b.maxPacks.toLocaleString()}</span>
                       </div>
                       <div className="h-2.5 bg-gray-100 rounded-full overflow-hidden">
                         <div
