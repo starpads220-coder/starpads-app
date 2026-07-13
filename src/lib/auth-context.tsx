@@ -17,6 +17,7 @@ interface AuthState {
   userRole: UserRole | null;
   loading: boolean;
   roleLoaded: boolean;
+  authResolved: boolean;
   configured: boolean;
 }
 
@@ -36,6 +37,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const fbReady = configured && !!auth && !!db;
   const [loading, setLoading] = useState(fbReady);
   const [roleLoaded, setRoleLoaded] = useState(false);
+  const [authResolved, setAuthResolved] = useState(false);
 
   useEffect(() => {
     if (!fbReady) return;
@@ -44,6 +46,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const unsubAuth = onAuthStateChanged(_auth, (firebaseUser) => {
       setUser(firebaseUser);
+      setAuthResolved(true);
       if (!firebaseUser) {
         setUserRole(null);
         setRoleLoaded(false);
@@ -100,8 +103,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const state = useMemo(
-    () => ({ user, userRole, loading, roleLoaded, configured }),
-    [user, userRole, loading, roleLoaded, configured]
+    () => ({ user, userRole, loading, roleLoaded, authResolved, configured }),
+    [user, userRole, loading, roleLoaded, authResolved, configured]
   );
 
   return (

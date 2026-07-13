@@ -6,12 +6,13 @@ import { useAuth } from "@/lib/auth-context";
 import { isRouteAllowed, ROLE_ROUTES } from "@/lib/permissions";
 
 export function RouteGuard({ children }: { children: React.ReactNode }) {
-  const { user, userRole, loading, roleLoaded } = useAuth();
+  const { user, userRole, loading, roleLoaded, authResolved } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
 
   useEffect(() => {
     if (loading) return;
+    if (!authResolved) return;
     if (!user) {
       router.replace("/login");
       return;
@@ -26,7 +27,7 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
       const hasAccessibleRoutes = role && ROLE_ROUTES[role]?.length > 0;
       router.replace(hasAccessibleRoutes ? "/production" : "/no-access");
     }
-  }, [user, userRole, loading, roleLoaded, router, pathname]);
+  }, [user, userRole, loading, roleLoaded, authResolved, router, pathname]);
 
   if (user && !loading && !roleLoaded) {
     return (
