@@ -308,7 +308,11 @@ export default function ProductionPage() {
       }
 
       if (form.stageId === "STG-08" && form.batchRef) {
-        await recalculateBatchPacks(form.batchRef);
+        try {
+          await recalculateBatchPacks(form.batchRef);
+        } catch (err) {
+          console.error("Failed to recalculate batch packs:", err);
+        }
       }
 
       setForm((prev) => ({

@@ -31,6 +31,14 @@
         { "fieldPath": "employeeId", "order": "ASCENDING" },
         { "fieldPath": "date", "order": "DESCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "productionEntries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "batchRef", "order": "ASCENDING" },
+        { "fieldPath": "stageId", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": []
