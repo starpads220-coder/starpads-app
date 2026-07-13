@@ -498,8 +498,8 @@ export default function ProductionPage() {
   }, [filteredEntries]);
 
   const pendingPackaging = useMemo(
-    () => entries.filter((e) => e.stageId === "STG-08" && e.date === viewDate && !e.movedToStockAt),
-    [entries, viewDate]
+    () => entries.filter((e) => e.stageId === "STG-08" && !e.movedToStockAt),
+    [entries]
   );
 
   const handleWindowChange = (tw: TimeWindow) => {
@@ -1032,17 +1032,28 @@ export default function ProductionPage() {
       </div>
 
       {/* Move to Stock Card */}
-      <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
+      <div className={`rounded-lg shadow-sm border p-6 space-y-4 ${pendingPackaging.length > 0 ? 'bg-white border-amber-300' : 'bg-white border-gray-200'}`}>
         <div className="flex items-center justify-between">
           <div>
-            <h2 className="text-lg font-semibold text-gray-900">Move Packaged Goods to Stock</h2>
-            <p className="text-sm text-gray-500 mt-1">Today's packaging (STG-08) entries ready to move into storage inventory.</p>
+            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+              Move Packaged Goods to Stock
+              {pendingPackaging.length > 0 && (
+                <span className="inline-flex items-center justify-center px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-800">
+                  {pendingPackaging.length}
+                </span>
+              )}
+            </h2>
+            <p className="text-sm text-gray-500 mt-1">
+              {pendingPackaging.length > 0
+                ? `${pendingPackaging.length} packaging (STG-08) ${pendingPackaging.length === 1 ? 'entry has' : 'entries have'} not yet been moved to stock.`
+                : "All packaged goods have been transferred to stock."}
+            </p>
           </div>
         </div>
         {entriesLoading ? (
           <div className="text-center text-gray-400 py-4">Loading...</div>
         ) : pendingPackaging.length === 0 ? (
-          <div className="text-center text-gray-400 py-4">No packaging entries to move to stock. All packaged goods have been transferred.</div>
+          <div className="text-center text-gray-400 py-4">All packaged goods have been transferred to stock. No pending entries.</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
