@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useState } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { ROLE_ROUTES } from "@/lib/permissions";
 import { EmployeeRole } from "@/types";
@@ -22,8 +23,9 @@ const ALL_NAV_ITEMS = [
 export function NavBar() {
   const pathname = usePathname();
   const { user, userRole, logout } = useAuth();
+  const [loggingOut, setLoggingOut] = useState(false);
 
-  if (!user) return null;
+  if (!user || loggingOut) return null;
 
   const allowedRoutes = ROLE_ROUTES[(userRole?.role ?? "") as EmployeeRole] ?? [];
   const navItems = ALL_NAV_ITEMS.filter((item) => allowedRoutes.includes(item.href));
@@ -52,7 +54,10 @@ export function NavBar() {
               Profile Settings
             </Link>
             <button
-              onClick={logout}
+              onClick={async () => {
+                setLoggingOut(true);
+                await logout();
+              }}
               className="text-sm font-semibold px-5 py-1.5 rounded-full text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 transition-colors"
             >
               Logout
