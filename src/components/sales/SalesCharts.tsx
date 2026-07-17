@@ -533,7 +533,7 @@ export default function SalesCharts({ transactions, expenses, salesTargets = [] 
   }, [transactions]);
 
   const packSizeData = useMemo(() => {
-    const points: Array<{ label: string; HALF_DOZEN: number; DOZEN: number; CARTON: number }> =
+    const points: Array<{ label: string; HALF_DOZEN: number; DOZEN: number; CARTON: number; ONE_PACK: number }> =
       [];
     for (let i = 29; i >= 0; i -= 1) {
       const day = new Date();
@@ -550,6 +550,9 @@ export default function SalesCharts({ transactions, expenses, salesTargets = [] 
           .reduce((s, t) => s + t.quantitySold, 0),
         CARTON: dayTxs
           .filter((t) => t.packSize === "CARTON")
+          .reduce((s, t) => s + t.quantitySold, 0),
+        ONE_PACK: dayTxs
+          .filter((t) => t.packSize === "ONE_PACK")
           .reduce((s, t) => s + t.quantitySold, 0),
       });
     }
@@ -792,6 +795,7 @@ export default function SalesCharts({ transactions, expenses, salesTargets = [] 
                 { dataKey: "HALF_DOZEN", name: "Half Dozen", color: "#EF4444", stackId: "a" },
                 { dataKey: "DOZEN", name: "Dozen", color: "#FBBF24", stackId: "a" },
                 { dataKey: "CARTON", name: "Carton", color: "#84CC16", stackId: "a" },
+                { dataKey: "ONE_PACK", name: "1 Pack", color: "#A855F7", stackId: "a" },
               ]}
             title="Pack Size Volume"
             subtitle="Daily units sold by pack size"

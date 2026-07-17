@@ -196,7 +196,7 @@ export default function StoragePage() {
   );
 
   const cumulativeStock = useMemo(() => {
-    const stock: Record<PackSize, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0 };
+    const stock: Record<PackSize, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0, ONE_PACK: 0 };
     stockIns.forEach((si) => { stock[si.packSize as PackSize] += si.quantity; });
     stockOuts.forEach((so) => { stock[so.packSize as PackSize] -= so.quantity; });
     return stock;
@@ -208,7 +208,7 @@ export default function StoragePage() {
   );
 
   const currentStock = useMemo(() => {
-    const stock: Record<PackSize, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0 };
+    const stock: Record<PackSize, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0, ONE_PACK: 0 };
     periodStockIns.forEach((si) => { stock[si.packSize as PackSize] += si.quantity; });
     periodStockOuts.forEach((so) => { stock[so.packSize as PackSize] -= so.quantity; });
     return stock;

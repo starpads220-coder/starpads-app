@@ -25,6 +25,7 @@ import {
   CustomerType,
   Expense,
   PackSize,
+  PackVariant,
   PACK_SIZES,
   PaymentMethod,
   SaleTransaction,
@@ -102,7 +103,23 @@ const EXPECTED_PRICES: Record<PackSize, number> = {
   HALF_DOZEN: 72000,
   DOZEN: 144000,
   CARTON: 1440000,
+  ONE_PACK: 12000,
 };
+
+const ONE_PACK_VARIANT_PRICES: Record<Exclude<PackVariant, "">, number> = {
+  MAX: 13000,
+  STANDARD: 12000,
+};
+
+function getExpectedPrice(packSize: PackSize, packVariant?: PackVariant): number {
+  if (packSize === "ONE_PACK" && packVariant === "MAX") {
+    return ONE_PACK_VARIANT_PRICES.MAX;
+  }
+  if (packSize === "ONE_PACK" && packVariant === "STANDARD") {
+    return ONE_PACK_VARIANT_PRICES.STANDARD;
+  }
+  return EXPECTED_PRICES[packSize];
+}
 
 
 
@@ -137,6 +154,7 @@ export default function SalesPage() {
     customerCategory: "" as CustomerCategory | "",
     customerSubType: "" as CustomerSubType | "",
     packSize: "HALF_DOZEN" as PackSize,
+    packVariant: "" as PackVariant,
     quantitySold: 0,
     unitPrice: 0,
     paymentMethod: "CASH" as PaymentMethod,
@@ -152,6 +170,7 @@ export default function SalesPage() {
     batchRef: string;
     batchNumber: string;
     packSize: PackSize;
+    packVariant: PackVariant;
     quantitySold: number;
     salespersonId: string;
     salespersonName: string;
@@ -247,7 +266,7 @@ export default function SalesPage() {
 
   const discountedPacksCount = useMemo(
     () => filteredTransactions
-      .filter((t) => t.unitPrice < EXPECTED_PRICES[t.packSize])
+      .filter((t) => t.unitPrice < getExpectedPrice(t.packSize, t.packVariant))
       .reduce((sum, t) => sum + t.quantitySold, 0),
     [filteredTransactions]
   );
@@ -260,7 +279,7 @@ export default function SalesPage() {
   const averageDiscountPercent = useMemo(() => {
     if (filteredTransactions.length === 0) return 0;
     const total = filteredTransactions.reduce((sum, t) => {
-      const expected = EXPECTED_PRICES[t.packSize];
+      const expected = getExpectedPrice(t.packSize, t.packVariant);
       if (t.unitPrice >= expected) return sum;
       return sum + ((expected - t.unitPrice) / expected) * 100;
     }, 0);
@@ -293,11 +312,13 @@ export default function SalesPage() {
     const hd = filteredTransactions.filter((t) => t.packSize === "HALF_DOZEN").reduce((s, t) => s + t.quantitySold, 0);
     const dz = filteredTransactions.filter((t) => t.packSize === "DOZEN").reduce((s, t) => s + t.quantitySold, 0);
     const ct = filteredTransactions.filter((t) => t.packSize === "CARTON").reduce((s, t) => s + t.quantitySold, 0);
-    const total = hd + dz + ct || 1;
+    const op = filteredTransactions.filter((t) => t.packSize === "ONE_PACK").reduce((s, t) => s + t.quantitySold, 0);
+    const total = hd + dz + ct + op || 1;
     return [
       { name: "½ Doz", value: hd, pct: (hd / total) * 100, color: "#EF4444" },
       { name: "Doz", value: dz, pct: (dz / total) * 100, color: "#3B82F6" },
       { name: "Carton", value: ct, pct: (ct / total) * 100, color: "#84CC16" },
+      { name: "1 Pack", value: op, pct: (op / total) * 100, color: "#A855F7" },
     ];
   }, [filteredTransactions]);
 
@@ -323,16 +344,16 @@ export default function SalesPage() {
   type DiscountByPack = Record<PackSize, number> & { topPack: string };
 
   const discountByPack = useMemo((): DiscountByPack => {
-    const discounts: Record<string, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0 };
+    const discounts: Record<string, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0, ONE_PACK: 0 };
     filteredTransactions.forEach((t) => {
-      const expected = EXPECTED_PRICES[t.packSize];
+      const expected = getExpectedPrice(t.packSize, t.packVariant);
       if (t.unitPrice < expected) {
         discounts[t.packSize] += (expected - t.unitPrice) * t.quantitySold;
       }
     });
     const entries = Object.entries(discounts).filter(([, v]) => v > 0);
     const topPack = entries.length === 0 ? "None" : entries.sort((a, b) => b[1] - a[1])[0][0];
-    return { HALF_DOZEN: discounts.HALF_DOZEN, DOZEN: discounts.DOZEN, CARTON: discounts.CARTON, topPack };
+    return { HALF_DOZEN: discounts.HALF_DOZEN, DOZEN: discounts.DOZEN, CARTON: discounts.CARTON, ONE_PACK: discounts.ONE_PACK, topPack };
   }, [filteredTransactions]);
 
   const { data: salesTargets = [] } = useCollectionQuery<SalesTarget>("salesTargets", [
@@ -340,7 +361,7 @@ export default function SalesPage() {
   ], { staleTime: 30 * 1000 });
 
   const totalAmount = form.quantitySold * form.unitPrice;
-  const expectedPrice = EXPECTED_PRICES[form.packSize];
+  const expectedPrice = getExpectedPrice(form.packSize, form.packVariant);
   const expectedTotal = form.quantitySold * expectedPrice;
   const formDiscountAmount = Math.max(0, expectedTotal - totalAmount);
   const formDiscountPercent = expectedTotal > 0 ? (formDiscountAmount / expectedTotal) * 100 : 0;
@@ -370,6 +391,7 @@ export default function SalesPage() {
         batchRef: form.batchRef,
         batchNumber: batch?.batchNumber || "",
         packSize: form.packSize,
+        packVariant: form.packVariant,
         quantitySold: form.quantitySold,
         salespersonId: form.salespersonId,
         salespersonName: salesperson?.name || form.salespersonId,
@@ -382,6 +404,7 @@ export default function SalesPage() {
         customerCategory: "",
         customerSubType: "",
         packSize: "HALF_DOZEN",
+        packVariant: "",
         quantitySold: 0,
         unitPrice: 0,
         paymentMethod: "CASH",
@@ -781,9 +804,10 @@ export default function SalesPage() {
                   { key: "HALF_DOZEN" as const, label: "Half Dozen", color: "#F97316" },
                   { key: "DOZEN" as const, label: "Dozen", color: "#3B82F6" },
                   { key: "CARTON" as const, label: "Carton", color: "#FBBF24" },
+                  { key: "ONE_PACK" as const, label: "1 Pack", color: "#A855F7" },
                 ]).map((p) => {
                   const val = discountByPack[p.key];
-                  const maxVal = Math.max(discountByPack.HALF_DOZEN, discountByPack.DOZEN, discountByPack.CARTON, 1);
+                  const maxVal = Math.max(discountByPack.HALF_DOZEN, discountByPack.DOZEN, discountByPack.CARTON, discountByPack.ONE_PACK, 1);
                   const barPct = (val / maxVal) * 100;
                   const isTop = discountByPack.topPack === p.key;
                   return (
@@ -823,7 +847,7 @@ export default function SalesPage() {
                   <div className="text-gray-900 text-xs font-semibold">{recentSale.batchNumber || "—"}</div>
                   <div className="text-gray-500 text-xs">Pack</div>
                   <div className="text-gray-900 text-xs font-semibold">
-                    {recentSale.packSize === "HALF_DOZEN" ? "Half Dozen" : recentSale.packSize === "DOZEN" ? "Dozen" : "Carton"}
+                    {recentSale.packSize === "HALF_DOZEN" ? "Half Dozen" : recentSale.packSize === "DOZEN" ? "Dozen" : recentSale.packSize === "CARTON" ? "Carton" : recentSale.packVariant === "MAX" ? "1 Pack Max" : "1 Pack Standard"}
                   </div>
                   <div className="text-gray-500 text-xs">Qty</div>
                   <div className="text-gray-900 text-xs font-semibold">{recentSale.quantitySold}</div>
@@ -995,7 +1019,7 @@ export default function SalesPage() {
                         <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{t.date}</td>
                         <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{t.customerName}</td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                          {t.packSize === "HALF_DOZEN" ? "Half Dozen" : t.packSize === "DOZEN" ? "Dozen" : "Carton"}
+                          {t.packSize === "HALF_DOZEN" ? "Half Dozen" : t.packSize === "DOZEN" ? "Dozen" : t.packSize === "CARTON" ? "Carton" : t.packVariant === "MAX" ? "1 Pack Max" : "1 Pack Std"}
                         </td>
                         <td className="px-4 py-3 text-right text-gray-700 whitespace-nowrap">{t.quantitySold}</td>
                         <td className="px-4 py-3 text-right font-medium text-gray-900 whitespace-nowrap">UGX {t.totalAmount.toLocaleString()}</td>
@@ -1105,18 +1129,38 @@ export default function SalesPage() {
                 value={form.packSize}
                 onChange={(event) => {
                   const newPackSize = event.target.value as PackSize;
-                  setForm({ ...form, packSize: newPackSize, quantitySold: padsInput / PACK_SIZES[newPackSize] });
+                  const newVariant: PackVariant = newPackSize === "ONE_PACK" ? "STANDARD" : "";
+                  const newExpected = getExpectedPrice(newPackSize, newVariant);
+                  setForm({ ...form, packSize: newPackSize, packVariant: newVariant, quantitySold: padsInput / PACK_SIZES[newPackSize], unitPrice: newPackSize === "ONE_PACK" ? newExpected : form.unitPrice });
                 }}
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
               >
                 <option value="HALF_DOZEN">Half Dozen (6 pads/pack)</option>
                 <option value="DOZEN">Dozen (12 pads/pack)</option>
                 <option value="CARTON">Carton (120 pads/pack)</option>
+                <option value="ONE_PACK">1 Pack (3 pads/pack)</option>
               </select>
               <p className="mt-1 text-xs text-gray-500">
                 Expected price: UGX {expectedPrice.toLocaleString()} per pack
               </p>
             </div>
+            {form.packSize === "ONE_PACK" && (
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Pack Variant</label>
+                <select
+                  value={form.packVariant}
+                  onChange={(event) => {
+                    const newVariant = event.target.value as PackVariant;
+                    const newExpected = getExpectedPrice(form.packSize, newVariant);
+                    setForm({ ...form, packVariant: newVariant, unitPrice: newExpected });
+                  }}
+                  className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
+                >
+                  <option value="STANDARD">Standard 3 pads — UGX 12,000</option>
+                  <option value="MAX">Max 3 pads — UGX 13,000</option>
+                </select>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Number of Pads</label>
               <input
@@ -1146,7 +1190,7 @@ export default function SalesPage() {
                 const packSize = PACK_SIZES[form.packSize];
                 const fullPacks = Math.floor(padsInput / packSize);
                 const remainingPads = padsInput % packSize;
-                const packLabel = form.packSize === "HALF_DOZEN" ? "half-dozen" : form.packSize === "DOZEN" ? "dozen" : "carton";
+                const packLabel = form.packSize === "HALF_DOZEN" ? "half-dozen" : form.packSize === "DOZEN" ? "dozen" : form.packSize === "CARTON" ? "carton" : "1-pack";
                 return (
                   <p className="mt-1 text-xs text-gray-500">
                     {fullPacks > 0 && `${fullPacks} full ${packLabel} pack${fullPacks > 1 ? "s" : ""} (${fullPacks * packSize} pads)`}

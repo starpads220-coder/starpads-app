@@ -16,7 +16,9 @@ export type MaterialType = "FLANNEL" | "FLEECE" | "PUL" | "COMBINED" | "MICROFIB
 
 export type MaterialCategory = "SEWING_INNER" | "SEWING_OUTER" | "OVERLOCK";
 
-export type PackSize = "HALF_DOZEN" | "DOZEN" | "CARTON";
+export type PackSize = "HALF_DOZEN" | "DOZEN" | "CARTON" | "ONE_PACK";
+
+export type PackVariant = "MAX" | "STANDARD" | "";
 export type CuttingInputMode = "manual" | "measure";
 
 export type CustomerType = "BULK" | "RETAIL" | "AGENT";
@@ -164,6 +166,7 @@ export interface SaleTransaction {
   customerCategory?: CustomerCategory;
   customerSubType?: CustomerSubType;
   packSize: PackSize;
+  packVariant?: PackVariant;
   quantitySold: number;
   unitPrice: number;
   totalAmount: number;
@@ -206,6 +209,7 @@ export const PACK_SIZES: Record<PackSize, number> = {
   HALF_DOZEN: 6,
   DOZEN: 12,
   CARTON: 120,
+  ONE_PACK: 3,
 };
 
 export const STAGE_LABELS: Record<StageId, string> = {
