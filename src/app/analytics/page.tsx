@@ -72,14 +72,18 @@ const colorWheel = [
 function filterDate(
   dateStr: string,
   field: string,
-  timeWindow: "today" | "week" | "month",
+  timeWindow: "today" | "week" | "month" | "custom",
   todayStr: string,
   weekStart: string,
   monthStartStr: string,
+  customStart?: string,
+  customEnd?: string,
 ) {
   if (timeWindow === "today") return field === todayStr;
   if (timeWindow === "week") return field >= weekStart;
-  return field >= monthStartStr;
+  if (timeWindow === "month") return field >= monthStartStr;
+  if (timeWindow === "custom") return field >= (customStart || todayStr) && field <= (customEnd || todayStr);
+  return true;
 }
 
 function DailyProductionMini({
@@ -212,7 +216,9 @@ function AnalyticsKPIOverview({
 }
 
 export default function AnalyticsPage() {
-  const [timeWindow, setTimeWindow] = useState<"today" | "week" | "month">("today");
+  const [timeWindow, setTimeWindow] = useState<"today" | "week" | "month" | "custom">("today");
+  const [customStart, setCustomStart] = useState("");
+  const [customEnd, setCustomEnd] = useState("");
 
   const todayStr = new Date().toISOString().split("T")[0];
 
@@ -258,18 +264,18 @@ export default function AnalyticsPage() {
   const loading = empLoading;
 
   const filteredEntries = useMemo(
-    () => entries.filter((e) => filterDate(e.date, e.date, timeWindow, todayStr, weekStart, monthStartStr)),
-    [entries, timeWindow, todayStr, weekStart, monthStartStr],
+    () => entries.filter((e) => filterDate(e.date, e.date, timeWindow, todayStr, weekStart, monthStartStr, customStart, customEnd)),
+    [entries, timeWindow, todayStr, weekStart, monthStartStr, customStart, customEnd],
   );
 
   const filteredSales = useMemo(
-    () => sales.filter((s) => filterDate(s.date, s.date, timeWindow, todayStr, weekStart, monthStartStr)),
-    [sales, timeWindow, todayStr, weekStart, monthStartStr],
+    () => sales.filter((s) => filterDate(s.date, s.date, timeWindow, todayStr, weekStart, monthStartStr, customStart, customEnd)),
+    [sales, timeWindow, todayStr, weekStart, monthStartStr, customStart, customEnd],
   );
 
   const filteredExpenses = useMemo(
-    () => expenses.filter((ex) => filterDate(ex.date, ex.date, timeWindow, todayStr, weekStart, monthStartStr)),
-    [expenses, timeWindow, todayStr, weekStart, monthStartStr],
+    () => expenses.filter((ex) => filterDate(ex.date, ex.date, timeWindow, todayStr, weekStart, monthStartStr, customStart, customEnd)),
+    [expenses, timeWindow, todayStr, weekStart, monthStartStr, customStart, customEnd],
   );
 
   const totalPiecesProduced = useMemo(
@@ -398,16 +404,16 @@ export default function AnalyticsPage() {
       const d = new Date();
       d.setDate(d.getDate() - i);
       const key = d.toISOString().split("T")[0];
-      cumRevenue += sales
+      cumRevenue += filteredSales
         .filter((s) => s.date === key)
         .reduce((sum, s) => sum + s.totalAmount, 0);
-      cumExpenses += expenses
+      cumExpenses += filteredExpenses
         .filter((e) => e.date === key)
         .reduce((sum, e) => sum + e.amountUgx, 0);
       points.push({ label: key.slice(5), revenue: cumRevenue, expenses: cumExpenses });
     }
     return points;
-  }, [sales, expenses]);
+  }, [filteredSales, filteredExpenses]);
 
   const expenseCategoryData = useMemo(() => {
     const cats: Record<string, number> = {};
@@ -491,6 +497,16 @@ export default function AnalyticsPage() {
       value: activeWorkersToday,
       color: "default" as const,
     },
+    {
+      label: "Total Revenue",
+      value: `UGX ${totalRevenue.toLocaleString()}`,
+      color: "green" as const,
+    },
+    {
+      label: "Total Expenses",
+      value: `UGX ${totalExpenses.toLocaleString()}`,
+      color: "red" as const,
+    },
   ];
 
   return (
@@ -498,24 +514,43 @@ export default function AnalyticsPage() {
       <div className="space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Analytics & Reports</h1>
-          <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
-            {(["today", "week", "month"] as const).map((tw) => (
-              <button
-                key={tw}
-                onClick={() => setTimeWindow(tw)}
-                className={`rounded-md px-3 py-1.5 text-sm font-medium ${
-                  timeWindow === tw
-                    ? "bg-white text-gray-900 shadow-sm"
-                    : "text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                {tw === "today" ? "Today" : tw === "week" ? "This Week" : "This Month"}
-              </button>
-            ))}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="flex gap-1 rounded-lg bg-gray-100 p-1">
+              {(["today", "week", "month", "custom"] as const).map((tw) => (
+                <button
+                  key={tw}
+                  onClick={() => setTimeWindow(tw)}
+                  className={`rounded-md px-3 py-1.5 text-sm font-medium ${
+                    timeWindow === tw
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {tw === "today" ? "Today" : tw === "week" ? "This Week" : tw === "month" ? "This Month" : "Custom"}
+                </button>
+              ))}
+            </div>
+            {timeWindow === "custom" && (
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={customStart}
+                  onChange={(e) => setCustomStart(e.target.value)}
+                  className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-36"
+                />
+                <span className="text-xs text-gray-400">to</span>
+                <input
+                  type="date"
+                  value={customEnd}
+                  onChange={(e) => setCustomEnd(e.target.value)}
+                  className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-36"
+                />
+              </div>
+            )}
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           {kpiMetrics.map((m) => (
             <KpiCard key={m.label} label={m.label} value={m.value} color={m.color} />
           ))}

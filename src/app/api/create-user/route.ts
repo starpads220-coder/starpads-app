@@ -7,6 +7,8 @@ const VALID_ROLES = [
   "STORE_MANAGER",
   "SALES_STAFF",
   "FINANCE",
+  "FINANCIAL_MANAGER",
+  "SALES_MANAGER",
 ] as const;
 
 export async function POST(request: NextRequest) {

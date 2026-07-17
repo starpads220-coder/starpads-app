@@ -7,6 +7,7 @@ import {
   orderBy,
   Timestamp,
 } from "firebase/firestore";
+import { useQueryClient } from "@tanstack/react-query";
 import { db } from "@/lib/firebase";
 import { Expense, ExpenseCategory } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
@@ -20,13 +21,16 @@ import { palette } from "@/components/charts";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 
-type AnalyticsPeriod = "week" | "month" | "12months" | "custom";
+type AnalyticsPeriod = "day" | "week" | "month" | "12months" | "custom";
 
 function getPeriodBounds(period: AnalyticsPeriod, customStart?: string, customEnd?: string) {
   const now = new Date();
   const todayStr = now.toISOString().split("T")[0];
 
   switch (period) {
+    case "day": {
+      return { start: todayStr, end: todayStr };
+    }
     case "week": {
       const weekStart = new Date(now);
       weekStart.setDate(now.getDate() - 6);
@@ -75,7 +79,10 @@ const COLORS = [
 ];
 
 export default function ExpensesPage() {
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [formSuccess, setFormSuccess] = useState(false);
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>("month");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -214,6 +221,8 @@ export default function ExpensesPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    setFormError("");
+    setFormSuccess(false);
     try {
       await addDoc(collection(db, "expenses"), {
         ...form,
@@ -224,6 +233,13 @@ export default function ExpensesPage() {
         category: "RAW_MATERIALS", description: "",
         amountUgx: 0, paidBy: "", receiptRef: "",
       });
+      setFormSuccess(true);
+      queryClient.invalidateQueries({ queryKey: ["expenses"] });
+      setTimeout(() => setFormSuccess(false), 5000);
+    } catch (err) {
+      console.error("Failed to save expense:", err);
+      const msg = err instanceof Error ? err.message : "Failed to save expense. Please check your permissions and try again.";
+      setFormError(msg);
     } finally {
       setSaving(false);
     }
@@ -256,9 +272,9 @@ export default function ExpensesPage() {
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
-        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
           <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
-            {(["week", "month", "12months", "custom"] as const).map((p) => (
+            {(["day", "week", "month", "12months", "custom"] as const).map((p) => (
               <button
                 key={p}
                 onClick={() => setAnalyticsPeriod(p)}
@@ -266,7 +282,7 @@ export default function ExpensesPage() {
                   analyticsPeriod === p ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
                 }`}
               >
-                {p === "week" ? "Last Week" : p === "month" ? "Last Month" : p === "12months" ? "12 Months" : "Custom"}
+                {p === "day" ? "Day" : p === "week" ? "Last Week" : p === "month" ? "Last Month" : p === "12months" ? "12 Months" : "Custom"}
               </button>
             ))}
           </div>
@@ -388,6 +404,16 @@ export default function ExpensesPage() {
 
       <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
         <h2 className="text-lg font-semibold">Expense Entry</h2>
+        {formError && (
+          <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-4 rounded-xl">
+            {formError}
+          </div>
+        )}
+        {formSuccess && (
+          <div className="bg-green-50 border border-green-200 text-green-700 text-sm p-4 rounded-xl">
+            Expense recorded successfully.
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Date</label>

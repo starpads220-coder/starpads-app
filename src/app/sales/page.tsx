@@ -111,6 +111,8 @@ export default function SalesPage() {
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState("");
+  const [formSuccess, setFormSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>("month");
   const [customStart, setCustomStart] = useState("");
@@ -351,6 +353,8 @@ export default function SalesPage() {
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
+    setFormError("");
+    setFormSuccess(false);
     try {
       await addDoc(collection(db, "saleTransactions"), {
         ...form,
@@ -385,6 +389,12 @@ export default function SalesPage() {
         notes: "",
         batchRef: "",
       });
+      setFormSuccess(true);
+      setTimeout(() => setFormSuccess(false), 5000);
+    } catch (err) {
+      console.error("Failed to save sale:", err);
+      const msg = err instanceof Error ? err.message : "Failed to save sale. Please check your permissions and try again.";
+      setFormError(msg);
     } finally {
       setSaving(false);
     }
@@ -1018,6 +1028,17 @@ export default function SalesPage() {
               <p className="text-sm text-gray-500 mt-1">Record a new transaction into the sales ledger.</p>
             </div>
           </div>
+
+          {formError && (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-4 rounded-xl">
+              {formError}
+            </div>
+          )}
+          {formSuccess && (
+            <div className="bg-green-50 border border-green-200 text-green-700 text-sm p-4 rounded-xl">
+              Sale recorded successfully.
+            </div>
+          )}
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div>

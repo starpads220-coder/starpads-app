@@ -8,7 +8,7 @@ export default function SignupPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [role, setRole] = useState<"ADMIN" | "PRODUCTION_SUPERVISOR">("PRODUCTION_SUPERVISOR");
+  const [role, setRole] = useState<"ADMIN" | "PRODUCTION_SUPERVISOR" | "FINANCIAL_MANAGER" | "SALES_MANAGER">("PRODUCTION_SUPERVISOR");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -161,11 +161,13 @@ export default function SignupPage() {
               <div className="space-y-1">
                 <select
                   value={role}
-                  onChange={(e) => setRole(e.target.value as "ADMIN" | "PRODUCTION_SUPERVISOR")}
+                  onChange={(e) => setRole(e.target.value as "ADMIN" | "PRODUCTION_SUPERVISOR" | "FINANCIAL_MANAGER" | "SALES_MANAGER")}
                   className="w-full px-5 py-3 bg-black border border-transparent rounded-full text-sm text-white focus:outline-none focus:bg-[#111] focus:border-gray-500 transition-all shadow-sm cursor-pointer"
                 >
                   <option value="PRODUCTION_SUPERVISOR">Production Supervisor</option>
                   <option value="ADMIN">Admin</option>
+                  <option value="FINANCIAL_MANAGER">Financial Manager</option>
+                  <option value="SALES_MANAGER">Sales Manager</option>
                 </select>
               </div>
 

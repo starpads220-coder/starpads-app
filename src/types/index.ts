@@ -4,7 +4,9 @@ export type EmployeeRole =
   | "WORKER"
   | "STORE_MANAGER"
   | "SALES_STAFF"
-  | "FINANCE";
+  | "FINANCE"
+  | "FINANCIAL_MANAGER"
+  | "SALES_MANAGER";
 
 export type Department = "PRODUCTION" | "STORAGE" | "SALES";
 

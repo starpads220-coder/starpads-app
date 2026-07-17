@@ -175,7 +175,7 @@ service cloud.firestore {
     // ============================================================
     match /saleTransactions/{transactionId} {
       allow read: if isAuthenticated();
-      allow create: if hasAnyRole(['ADMIN', 'SALES_STAFF']);
+      allow create: if hasAnyRole(['ADMIN', 'SALES_STAFF', 'FINANCIAL_MANAGER', 'SALES_MANAGER']);
       allow update, delete: if isAdmin();
     }
 
@@ -188,7 +188,7 @@ service cloud.firestore {
     // ============================================================
     match /salesTargets/{targetId} {
       allow read: if isAuthenticated();
-      allow create: if hasAnyRole(['ADMIN', 'SALES_STAFF']);
+      allow create: if hasAnyRole(['ADMIN', 'SALES_STAFF', 'FINANCIAL_MANAGER', 'SALES_MANAGER']);
       allow update, delete: if isAdmin();
     }
 
@@ -201,7 +201,7 @@ service cloud.firestore {
     // ============================================================
     match /expenses/{expenseId} {
       allow read: if isAuthenticated();
-      allow create: if hasAnyRole(['ADMIN', 'FINANCE']);
+      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
       allow update, delete: if isAdmin();
     }
   }

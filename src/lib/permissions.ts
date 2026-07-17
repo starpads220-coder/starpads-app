@@ -24,6 +24,24 @@ export const ROLE_ROUTES: Record<EmployeeRole, string[]> = {
   STORE_MANAGER: ["/storage"],
   SALES_STAFF: ["/sales", "/production"],
   FINANCE: ["/payments", "/analytics"],
+  FINANCIAL_MANAGER: [
+    "/production",
+    "/storage",
+    "/payments",
+    "/admin/employees",
+    "/admin/targets",
+    "/sales",
+    "/expenses",
+    "/analytics",
+  ],
+  SALES_MANAGER: [
+    "/production",
+    "/storage",
+    "/payments",
+    "/admin/employees",
+    "/admin/targets",
+    "/sales",
+  ],
 };
 
 export function isRouteAllowed(role: EmployeeRole | null | undefined, pathname: string): boolean {
