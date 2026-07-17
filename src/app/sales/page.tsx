@@ -130,6 +130,7 @@ export default function SalesPage() {
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>("month");
   const [customStart, setCustomStart] = useState("");
@@ -377,26 +378,36 @@ export default function SalesPage() {
     setFormError("");
     setFormSuccess(false);
     try {
-      await addDoc(collection(db, "saleTransactions"), {
-        ...form,
-        totalAmount,
-        createdAt: Timestamp.now(),
-      });
-      const salesperson = employees.find((e) => e.id === form.salespersonId);
-      const batch = batches.find((b) => b.id === form.batchRef);
-      setRecentSale({
-        date: form.date,
-        customerName: form.customerName,
-        customerType: form.customerType,
-        batchRef: form.batchRef,
-        batchNumber: batch?.batchNumber || "",
-        packSize: form.packSize,
-        packVariant: form.packVariant,
-        quantitySold: form.quantitySold,
-        salespersonId: form.salespersonId,
-        salespersonName: salesperson?.name || form.salespersonId,
-      });
+      if (editingId) {
+        await updateDoc(doc(db, "saleTransactions", editingId), {
+          ...form,
+          totalAmount,
+        });
+      } else {
+        await addDoc(collection(db, "saleTransactions"), {
+          ...form,
+          totalAmount,
+          createdAt: Timestamp.now(),
+        });
+      }
+      if (!editingId) {
+        const salesperson = employees.find((e) => e.id === form.salespersonId);
+        const batch = batches.find((b) => b.id === form.batchRef);
+        setRecentSale({
+          date: form.date,
+          customerName: form.customerName,
+          customerType: form.customerType,
+          batchRef: form.batchRef,
+          batchNumber: batch?.batchNumber || "",
+          packSize: form.packSize,
+          packVariant: form.packVariant,
+          quantitySold: form.quantitySold,
+          salespersonId: form.salespersonId,
+          salespersonName: salesperson?.name || form.salespersonId,
+        });
+      }
       setPadsInput(0);
+      setEditingId(null);
       setForm({
         date: getDateKey(),
         customerName: "",
@@ -420,6 +431,38 @@ export default function SalesPage() {
       setFormError(msg);
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleEditSale = (t: SaleTransaction) => {
+    setEditingId(t.id);
+    setForm({
+      date: t.date,
+      customerName: t.customerName,
+      customerType: t.customerType,
+      customerCategory: t.customerCategory || "",
+      customerSubType: t.customerSubType || "",
+      packSize: t.packSize,
+      packVariant: t.packVariant || "",
+      quantitySold: t.quantitySold,
+      unitPrice: t.unitPrice,
+      paymentMethod: t.paymentMethod,
+      salespersonId: t.salespersonId,
+      notes: t.notes || "",
+      batchRef: t.batchRef || "",
+    });
+    setPadsInput(t.quantitySold * PACK_SIZES[t.packSize]);
+    setActiveTab("entry");
+    setFormError("");
+    setFormSuccess(false);
+  };
+
+  const handleDeleteSale = async (id: string) => {
+    if (!confirm("Delete this sale entry? This action cannot be undone.")) return;
+    try {
+      await deleteDoc(doc(db, "saleTransactions", id));
+    } catch (err) {
+      console.error("Failed to delete sale:", err);
     }
   };
 
@@ -1006,12 +1049,13 @@ export default function SalesPage() {
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payment</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Salesperson</th>
+                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
                   {filteredTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="px-4 py-8 text-center text-sm text-gray-400">No transactions in this period.</td>
+                      <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-400">No transactions in this period.</td>
                     </tr>
                   ) : (
                     filteredTransactions.map((t) => (
@@ -1027,6 +1071,10 @@ export default function SalesPage() {
                           {t.paymentMethod === "CASH" ? "Cash" : t.paymentMethod === "MOBILE_MONEY" ? "M.Money" : "Bank Transfer"}
                         </td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{employees.find((e) => e.id === t.salespersonId)?.name || t.salespersonId}</td>
+                        <td className="px-4 py-3 text-right whitespace-nowrap">
+                          <button onClick={() => handleEditSale(t)} className="text-xs font-medium text-blue-600 hover:text-blue-800 mr-3">Edit</button>
+                          <button onClick={() => handleDeleteSale(t.id)} className="text-xs font-medium text-red-600 hover:text-red-800">Delete</button>
+                        </td>
                       </tr>
                     ))
                   )}
@@ -1048,9 +1096,37 @@ export default function SalesPage() {
         >
           <div className="flex items-start justify-between gap-4 border-b border-gray-200 pb-4">
             <div>
-              <h2 className="text-lg font-semibold text-gray-900">Sales Entry</h2>
-              <p className="text-sm text-gray-500 mt-1">Record a new transaction into the sales ledger.</p>
+              <h2 className="text-lg font-semibold text-gray-900">{editingId ? "Edit Sale" : "Sales Entry"}</h2>
+              <p className="text-sm text-gray-500 mt-1">{editingId ? "Update the details of this transaction." : "Record a new transaction into the sales ledger."}</p>
             </div>
+            {editingId && (
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingId(null);
+                  setPadsInput(0);
+                  setForm({
+                    date: getDateKey(),
+                    customerName: "",
+                    customerType: "RETAIL",
+                    customerCategory: "",
+                    customerSubType: "",
+                    packSize: "HALF_DOZEN",
+                    packVariant: "",
+                    quantitySold: 0,
+                    unitPrice: 0,
+                    paymentMethod: "CASH",
+                    salespersonId: "",
+                    notes: "",
+                    batchRef: "",
+                  });
+                  setFormError("");
+                }}
+                className="text-sm font-medium text-gray-500 hover:text-gray-700 border border-gray-300 rounded-md px-3 py-1.5"
+              >
+                Cancel Edit
+              </button>
+            )}
           </div>
 
           {formError && (
@@ -1287,7 +1363,7 @@ export default function SalesPage() {
               disabled={saving}
               className="rounded-md bg-gray-900 px-6 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {saving ? "Saving..." : "Record Sale"}
+              {saving ? "Saving..." : editingId ? "Update Sale" : "Record Sale"}
             </button>
           </div>
         </form>
