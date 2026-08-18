@@ -77,9 +77,12 @@ const stageUnit: Record<StageId, string> = {
   "STG-03": "pieces",
   "STG-04": "pieces",
   "STG-05": "pieces",
-  "STG-06": "sets",
+  "STG-06-Checking": "pieces",
+  "STG-06-Rolling": "pieces",
   "STG-07": "pieces",
   "STG-08": "packs",
+  "STG-09": "pieces",
+  "STG-10": "pieces",
 };
 
 const stagesWithMaterial: StageId[] = ["STG-01", "STG-02", "STG-03"];
@@ -256,6 +259,20 @@ export default function ProductionPage() {
       if (form.inputMode === "manual" && !form.actualPieces) return;
       if (form.inputMode === "measure" && !form.metersInput) return;
     }
+    if (form.stageId === "STG-08" && form.batchRef && batchValidationError) {
+      // Already has a validation error from onChange revert, prevent submit
+      return;
+    }
+    if (form.stageId === "STG-08" && form.batchRef) {
+      const selectedBatch = batches.find((b) => b.id === form.batchRef);
+      const isActive = activeBatch ? selectedBatch?.id === activeBatch.id : false;
+      if (!isActive) {
+        setBatchValidationError(
+          `Batch ${selectedBatch?.batchNumber || form.batchRef} is not the current active batch. Please select ${activeBatch?.batchNumber}.`
+        );
+        return;
+      }
+    }
     setSaving(true);
     try {
       const isMeasureCutting = form.stageId === "STG-01" && form.inputMode === "measure";
@@ -352,7 +369,8 @@ export default function ProductionPage() {
   const stageBarData = useMemo(() => {
     const labels: Record<string, string> = {
       "STG-01": "Cut", "STG-02": "Sew-In", "STG-03": "Sew-Out", "STG-04": "Overlock",
-      "STG-05": "Pouch", "STG-06": "Check", "STG-07": "Pin/Fold", "STG-08": "Packaging",
+      "STG-05": "Pouch", "STG-06-Checking": "Checking", "STG-06-Rolling": "Rolling",
+      "STG-07": "Pin/Fold", "STG-08": "Packaging", "STG-09": "Pouching & Cutting", "STG-10": "Holling",
     };
     return STAGE_ORDER.map((s) => ({ label: labels[s] || s, value: stageCounts[s] }));
   }, [stageCounts]);
@@ -368,6 +386,15 @@ export default function ProductionPage() {
     }
     return trend;
   }, [filteredEntries]);
+
+  const [batchValidationError, setBatchValidationError] = useState<string | null>(null);
+
+  const activeBatch = useMemo(() => {
+    const notFull = batches.filter((b) => (b.packsProduced ?? 0) < (b.maxPacks ?? 10000));
+    if (notFull.length === 0) return null;
+    notFull.sort((a, b) => a.startDate.localeCompare(b.startDate));
+    return notFull[0];
+  }, [batches]);
 
   const maxStageValue = useMemo(
     () => Math.max(...STAGE_ORDER.map((s) => stageCounts[s]), 1),
@@ -816,7 +843,7 @@ export default function ProductionPage() {
               ))}
             </select>
           </div>
-          {form.stageId === "STG-01" ? (
+          {(form.stageId === "STG-01" || form.stageId === "STG-09") ? (
             <>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Material</label>
@@ -886,7 +913,7 @@ export default function ProductionPage() {
               )}
             </>
           ) : null}
-          {form.stageId === "STG-01" && form.inputMode === "measure" && form.materialTypes.length > 0 && (
+          {(form.stageId === "STG-01" || form.stageId === "STG-09") && form.inputMode === "measure" && form.materialTypes.length > 0 && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Meters Measured
@@ -953,17 +980,34 @@ export default function ProductionPage() {
               <div className="flex gap-2">
                 <select
                   value={form.batchRef}
-                  onChange={(e) => setForm({ ...form, batchRef: e.target.value })}
+                  onChange={(e) => {
+                    const selectedBatchId = e.target.value;
+                    const selectedBatch = batches.find((b) => b.id === selectedBatchId);
+                    if (selectedBatch && activeBatch && selectedBatch.id !== activeBatch.id) {
+                      setBatchValidationError(
+                        `Batch ${selectedBatch.batchNumber} is not the current active batch. Please select ${activeBatch.batchNumber}.`
+                      );
+                      setForm(prev => ({ ...prev, batchRef: activeBatch.id || "" }));
+                      return;
+                    }
+                    setBatchValidationError("");
+                    setForm(prev => ({ ...prev, batchRef: selectedBatchId }));
+                  }}
                   required
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
                 >
                   <option value="">Select batch...</option>
-                  {batches.filter((b) => b.status === "ACTIVE").map((b) => (
+                  {batches.filter((b) => (b.packsProduced ?? 0) < (b.maxPacks ?? 10000)).map((b) => (
                     <option key={b.id} value={b.id}>
-                      {b.batchNumber} — {b.packsProduced.toLocaleString()} / {b.maxPacks.toLocaleString()} packs
+                      {b.batchNumber} — {(b.maxPacks - b.packsProduced).toLocaleString()} remaining
                     </option>
                   ))}
                 </select>
+                {batchValidationError && (
+                  <div className="mt-2 px-3 py-2 bg-red-100 text-red-800 text-xs rounded-md">
+                    {batchValidationError}
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => window.open("/production/batches", "_blank")}
@@ -1000,7 +1044,7 @@ export default function ProductionPage() {
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={saving || !form.employeeId || (form.stageId === "STG-08" && !form.batchRef) || (form.stageId === "STG-01" && form.inputMode === "manual" && !form.actualPieces) || (form.stageId === "STG-01" && form.inputMode === "measure" && !form.metersInput) || (form.stageId !== "STG-01" && !form.actualPieces)}
+            disabled={saving || !form.employeeId || (form.stageId === "STG-08" && !form.batchRef) || (form.stageId === "STG-01" && form.inputMode === "manual" && !form.actualPieces) || (form.stageId === "STG-01" && form.inputMode === "measure" && !form.metersInput) || (form.stageId !== "STG-01" && !form.actualPieces) || batchValidationError !== null}
             className="py-2 px-6 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 disabled:opacity-50"
           >
             {saving ? "Saving..." : editingEntryId ? "Update Entry" : "Log Entry"}
@@ -1122,6 +1166,7 @@ export default function ProductionPage() {
                             batchRef: entry.batchRef,
                             entryId: entry.id,
                             packSize: "HALF_DOZEN",
+                            employeeId: entry.employeeId,
                           });
                           window.location.href = `/storage?${params.toString()}`;
                         }}

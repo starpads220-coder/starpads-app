@@ -108,8 +108,11 @@ export default function AdminTargetsPage() {
         "STG-04": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
         "STG-05": { defaultTarget: 200, defaultWageRate: 10000, unit: "pieces" },
         "STG-06": { defaultTarget: 400, defaultWageRate: 8000, unit: "pieces" },
+        "STG-06-Checking": { defaultTarget: 400, defaultWageRate: 8000, unit: "pieces" },
+        "STG-06-Rolling": { defaultTarget: 400, defaultWageRate: 8000, unit: "pieces" },
         "STG-07": { defaultTarget: 360, defaultWageRate: 10000, unit: "pieces" },
         "STG-08": { defaultTarget: 120, defaultWageRate: 12000, unit: "packs" },
+        "STG-09": { defaultTarget: 250, defaultWageRate: 8000, unit: "pieces" },
       };
       const config = defaults[stageId] || { defaultTarget: 0, defaultWageRate: 0, unit: "pieces" };
       await setDoc(doc(db, "productionStages", stageId), {
@@ -138,8 +141,11 @@ export default function AdminTargetsPage() {
           "STG-04": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
           "STG-05": { defaultTarget: 200, defaultWageRate: 10000, unit: "pieces" },
           "STG-06": { defaultTarget: 400, defaultWageRate: 8000, unit: "pieces" },
+          "STG-06-Checking": { defaultTarget: 400, defaultWageRate: 8000, unit: "pieces" },
+          "STG-06-Rolling": { defaultTarget: 400, defaultWageRate: 8000, unit: "pieces" },
           "STG-07": { defaultTarget: 360, defaultWageRate: 10000, unit: "pieces" },
           "STG-08": { defaultTarget: 120, defaultWageRate: 12000, unit: "packs" },
+          "STG-09": { defaultTarget: 250, defaultWageRate: 8000, unit: "pieces" },
         };
         const config = defaults[stageId] || { defaultTarget: 0, defaultWageRate: 0, unit: "pieces" };
         await setDoc(doc(db, "productionStages", stageId), {

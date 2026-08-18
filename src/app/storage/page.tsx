@@ -94,13 +94,14 @@ export default function StoragePage() {
   const [wipCustomStart, setWipCustomStart] = useState("");
   const [wipCustomEnd, setWipCustomEnd] = useState("");
 
-  useEffect(() => {
+useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const tabParam = params.get("tab");
     const dateParam = params.get("date");
     const quantityParam = params.get("quantity");
     const batchRefParam = params.get("batchRef");
     const entryIdParam = params.get("entryId");
+    const employeeIdParam = params.get("employeeId");
     const customerRefParam = params.get("customerRef");
     const destinationParam = params.get("destination");
     const packSizeParam = params.get("packSize");
@@ -119,6 +120,10 @@ export default function StoragePage() {
         batchRef: batchRefParam || prev.batchRef,
         packSize: (packSizeParam as PackSize) || prev.packSize,
       }));
+    }
+    if (employeeIdParam && employees.length > 0) {
+      const emp = employees.find((e) => e.id === employeeIdParam);
+      setStockInForm((prev) => ({ ...prev, receivedBy: emp ? emp.name : employeeIdParam }));
     }
     if (customerRefParam || destinationParam || packSizeParam || dispatchedByParam || dateParam) {
       setStockOutForm((prev) => ({
@@ -245,9 +250,9 @@ export default function StoragePage() {
     const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
     const filtered = productionEntries.filter((e) => e.date >= wipBounds.start && e.date <= wipBounds.end);
     const counts: Record<StageId, number> = {
-      "STG-01": 0, "STG-02": 0, "STG-03": 0, "STG-04": 0, "STG-05": 0, "STG-06": 0, "STG-07": 0, "STG-08": 0,
+      "STG-01": 0, "STG-02": 0, "STG-03": 0, "STG-04": 0, "STG-05": 0, "STG-06-Checking": 0, "STG-06-Rolling": 0, "STG-07": 0, "STG-08": 0, "STG-09": 0, "STG-10": 0,
     };
-    filtered.forEach((e) => { counts[e.stageId] += e.actualPieces; });
+    filtered.forEach((e) => { counts[e.stageId] = (counts[e.stageId] || 0) + e.actualPieces; });
     return counts;
   }, [productionEntries, wipPeriod, wipCustomStart, wipCustomEnd]);
 
@@ -256,8 +261,8 @@ export default function StoragePage() {
   const wipCut = Math.max(0, stageCounts["STG-01"] - stageCounts["STG-02"]);
   const wipSewn = Math.max(0, (stageCounts["STG-02"] + stageCounts["STG-03"]) - stageCounts["STG-04"]);
   const wipOverlocked = Math.max(0, stageCounts["STG-04"] - stageCounts["STG-05"]);
-  const wipPouches = Math.max(0, stageCounts["STG-05"] - stageCounts["STG-06"]);
-  const wipPinned = Math.max(0, stageCounts["STG-06"] - stageCounts["STG-07"]);
+  const wipPouches = Math.max(0, stageCounts["STG-05"] - stageCounts["STG-06-Checking"]);
+  const wipPinned = Math.max(0, stageCounts["STG-06-Rolling"] - stageCounts["STG-07"]);
   const wipPacked = Math.max(0, stageCounts["STG-07"] - totalPackagedPads);
 
   const wipEntries = useMemo(() => {
@@ -605,7 +610,7 @@ export default function StoragePage() {
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
               </div>
             </ChartCard>
-            <ChartCard title="Checked & Held" subtitle="STG-06 awaiting pinning & folding" variant="gradient" accentColor={wipPinned > 500 ? palette.orange : palette.blue}>
+            <ChartCard title="Rolled & Held" subtitle="STG-06-Rolling awaiting pinning & folding" variant="gradient" accentColor={wipPinned > 500 ? palette.orange : palette.blue}>
               <div className="flex flex-col items-center justify-center h-full">
                 <span className="text-2xl font-bold" style={{ color: wipPinned > 500 ? palette.orange : palette.blue }}>{wipPinned.toLocaleString()}</span>
                 <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
@@ -706,7 +711,7 @@ export default function StoragePage() {
                   required className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
                   <option value="">Select batch...</option>
                   {(moveEntryId ? batches : batches.filter((b) => b.status === "ACTIVE")).map((b) => (
-                    <option key={b.id} value={b.id}>{b.batchNumber} — {b.packsProduced.toLocaleString()} / {b.maxPacks.toLocaleString()} packs</option>
+                    <option key={b.id} value={b.id}>{b.batchNumber} — {(b.maxPacks - b.packsProduced).toLocaleString()} remaining</option>
                   ))}
                 </select>
                 <button type="button" onClick={() => window.open("/production/batches", "_blank")}

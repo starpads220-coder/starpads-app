@@ -107,12 +107,12 @@ service cloud.firestore {
     // ============================================================
     // batches - Production batch lifecycle
     // All authenticated users can read
-    // Create/Update: PRODUCTION_SUPERVISOR or ADMIN
+    // Create/Update: ADMIN, PRODUCTION_SUPERVISOR, FINANCIAL_MANAGER, SALES_MANAGER, SALES_STAFF
     // Delete: ADMIN only
     // ============================================================
     match /batches/{batchId} {
       allow read: if isAuthenticated();
-      allow create, update: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+      allow create, update: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF']);
       allow delete: if isAdmin();
     }
 
