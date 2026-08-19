@@ -315,7 +315,7 @@ export default function StoragePage() {
     return counts;
   }, [productionEntries, wipPeriod, wipCustomStart, wipCustomEnd]);
 
-const totalPackagedPads = stageCounts["STG-08"];
+const totalPackagedPads = stageCounts["STG-10"];
 
   const wipCut = Math.max(0, stageCounts["STG-01"] - stageCounts["STG-02"]);
   const wipSewn = Math.max(0, (stageCounts["STG-02"] + stageCounts["STG-03"]) - stageCounts["STG-04"]);

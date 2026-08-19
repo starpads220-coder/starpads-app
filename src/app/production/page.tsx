@@ -522,14 +522,14 @@ const totalPackagedPads = useMemo(
   }, [filteredEntries]);
 
   const pendingPackaging = useMemo(
-    () => entries.filter((e) => e.stageId === "STG-08" && !e.movedToStockAt),
+    () => entries.filter((e) => e.stageId === "STG-10" && !e.movedToStockAt),
     [entries]
   );
 
   const batchPackCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     entries
-      .filter((e) => e.stageId === "STG-08" && e.batchRef)
+      .filter((e) => e.stageId === "STG-10" && e.batchRef)
       .forEach((e) => {
         counts[e.batchRef] = (counts[e.batchRef] || 0) + e.actualPieces;
       });
@@ -1126,7 +1126,7 @@ const totalPackagedPads = useMemo(
             </h2>
             <p className="text-sm text-gray-500 mt-1">
               {pendingPackaging.length > 0
-                ? `${pendingPackaging.length} packaging (STG-08) ${pendingPackaging.length === 1 ? 'entry has' : 'entries have'} not yet been moved to stock.`
+                ? `${pendingPackaging.length} packaging (STG-10) ${pendingPackaging.length === 1 ? 'entry has' : 'entries have'} not yet been moved to stock.`
                 : "All packaged goods have been transferred to stock."}
             </p>
           </div>

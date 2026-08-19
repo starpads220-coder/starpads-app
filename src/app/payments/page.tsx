@@ -807,67 +807,138 @@ export default function PaymentsPage() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {emp.allEntries.map((entry) => (
-                                  <tr key={entry.id} className="border-b border-gray-200 last:border-0">
-                                    <td className="py-2 pr-4 text-gray-700">{entry.date}</td>
-                                    <td className="py-2 pr-4 text-gray-700">
-                                      {getStageLabel(entry.stageId)}
-                                    </td>
-                                    <td className="py-2 pr-4 text-gray-600 text-xs">
-                                      {formatMaterialDisplay(entry)}
-                                    </td>
-                                    <td className="py-2 pr-4 text-gray-900 font-medium">
-                                      {entry.actualPieces}
-                                    </td>
-                                    <td className="py-2 pr-4 text-gray-500">
-                                      {entry.targetPieces}
-                                    </td>
-                                    <td className="py-2 pr-4 text-ugx font-medium">
-                                      UGX {entry.earningsUgx.toLocaleString()}
-                                    </td>
-                                    <td className="py-2 pr-4">
-                                      <StatusBadge value={entry.performancePct} />
-                                    </td>
-                                    <td className="py-2 pr-4">
-                                      <span
-                                        className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${
-                                          entry.paymentStatus === "paid"
-                                            ? "bg-green-100 text-green-700"
-                                            : "bg-amber-100 text-amber-700"
-                                        }`}
-                                      >
-                                        {entry.paymentStatus === "paid" ? "Paid" : "Due"}
-                                      </span>
-                                    </td>
-                                    <td className="py-2 pr-4 text-right whitespace-nowrap">
-                                      {canEdit && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            const params = new URLSearchParams({
-                                              editEntryId: entry.id,
-                                            });
-                                            router.push(`/production?${params.toString()}`);
-                                          }}
-                                          className="text-xs text-stock-blue hover:underline mr-2"
-                                        >
-                                          Edit
-                                        </button>
-                                      )}
-                                      {canDelete && (
-                                        <button
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            setDeleteConfirmEntryId(entry.id);
-                                          }}
-                                          className="text-xs text-red-600 hover:underline"
-                                        >
-                                          Delete
-                                        </button>
-                                      )}
-                                    </td>
-                                  </tr>
-                                ))}
+                                {emp.dueEntries.length > 0 && (
+                                  <>
+                                    <tr className="bg-amber-50/50">
+                                      <td colSpan={9} className="py-2 px-3 text-xs font-bold text-amber-800 uppercase tracking-wider border-b border-gray-200">
+                                        Due Entries ({emp.dueEntries.length})
+                                      </td>
+                                    </tr>
+                                    {emp.dueEntries.map((entry) => (
+                                      <tr key={entry.id} className="border-b border-gray-200 bg-amber-50/20 hover:bg-amber-50 transition-colors">
+                                        <td className="py-2 pr-4 pl-3 text-gray-700">{entry.date}</td>
+                                        <td className="py-2 pr-4 text-gray-700">
+                                          {getStageLabel(entry.stageId)}
+                                        </td>
+                                        <td className="py-2 pr-4 text-gray-600 text-xs">
+                                          {formatMaterialDisplay(entry)}
+                                        </td>
+                                        <td className="py-2 pr-4 text-gray-900 font-medium">
+                                          {entry.actualPieces}
+                                        </td>
+                                        <td className="py-2 pr-4 text-gray-500">
+                                          {entry.targetPieces}
+                                        </td>
+                                        <td className="py-2 pr-4 text-ugx font-medium">
+                                          UGX {entry.earningsUgx.toLocaleString()}
+                                        </td>
+                                        <td className="py-2 pr-4">
+                                          <StatusBadge value={entry.performancePct} />
+                                        </td>
+                                        <td className="py-2 pr-4">
+                                          <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-amber-100 text-amber-700">
+                                            Due
+                                          </span>
+                                        </td>
+                                        <td className="py-2 pr-4 text-right whitespace-nowrap">
+                                          {canEdit && (
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const params = new URLSearchParams({
+                                                  editEntryId: entry.id,
+                                                });
+                                                router.push(`/production?${params.toString()}`);
+                                              }}
+                                              className="text-xs text-stock-blue hover:underline mr-2"
+                                            >
+                                              Edit
+                                            </button>
+                                          )}
+                                          {canDelete && (
+                                            <button
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setDeleteConfirmEntryId(entry.id);
+                                              }}
+                                              className="text-xs text-red-600 hover:underline"
+                                            >
+                                              Delete
+                                            </button>
+                                          )}
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </>
+                                )}
+                                {(() => {
+                                  const paidEntries = emp.allEntries.filter((e) => e.paymentStatus === "paid");
+                                  if (paidEntries.length === 0) return null;
+                                  return (
+                                    <>
+                                      <tr className="bg-gray-50 mt-4">
+                                        <td colSpan={9} className="py-2 px-3 text-xs font-bold text-gray-600 uppercase tracking-wider border-b border-gray-200">
+                                          Paid Entries ({paidEntries.length})
+                                        </td>
+                                      </tr>
+                                      {paidEntries.map((entry) => (
+                                        <tr key={entry.id} className="border-b border-gray-200 last:border-0 hover:bg-gray-50 transition-colors">
+                                          <td className="py-2 pr-4 pl-3 text-gray-700">{entry.date}</td>
+                                          <td className="py-2 pr-4 text-gray-700">
+                                            {getStageLabel(entry.stageId)}
+                                          </td>
+                                          <td className="py-2 pr-4 text-gray-600 text-xs">
+                                            {formatMaterialDisplay(entry)}
+                                          </td>
+                                          <td className="py-2 pr-4 text-gray-900 font-medium">
+                                            {entry.actualPieces}
+                                          </td>
+                                          <td className="py-2 pr-4 text-gray-500">
+                                            {entry.targetPieces}
+                                          </td>
+                                          <td className="py-2 pr-4 text-ugx font-medium">
+                                            UGX {entry.earningsUgx.toLocaleString()}
+                                          </td>
+                                          <td className="py-2 pr-4">
+                                            <StatusBadge value={entry.performancePct} />
+                                          </td>
+                                          <td className="py-2 pr-4">
+                                            <span className="inline-block px-2 py-0.5 text-xs font-medium rounded-full bg-green-100 text-green-700">
+                                              Paid
+                                            </span>
+                                          </td>
+                                          <td className="py-2 pr-4 text-right whitespace-nowrap">
+                                            {canEdit && (
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  const params = new URLSearchParams({
+                                                    editEntryId: entry.id,
+                                                  });
+                                                  router.push(`/production?${params.toString()}`);
+                                                }}
+                                                className="text-xs text-stock-blue hover:underline mr-2"
+                                              >
+                                                Edit
+                                              </button>
+                                            )}
+                                            {canDelete && (
+                                              <button
+                                                onClick={(e) => {
+                                                  e.stopPropagation();
+                                                  setDeleteConfirmEntryId(entry.id);
+                                                }}
+                                                className="text-xs text-red-600 hover:underline"
+                                              >
+                                                Delete
+                                              </button>
+                                            )}
+                                        </td>
+                                        </tr>
+                                      ))}
+                                    </>
+                                  );
+                                })()}
                               </tbody>
                             </table>
                           </div>
