@@ -228,7 +228,20 @@ export default function StoragePage() {
     const emp = employees.find((e) => e.id === empId);
     setStockInForm((prev) => ({ ...prev, receivedBy: emp ? emp.id : empId }));
   }, [employees]);
-  // --- end URL param auto-population ---
+
+  // The oldest active batch (earliest startDate, fallback to lowest batchNumber) is the one that must be filled first
+  const oldestActiveBatch = useMemo(() => {
+    // Only consider batches that are ACTIVE and have not yet reached their max capacity
+    const activeBatches = batches.filter((b) => b.status === "ACTIVE" && b.packsProduced < b.maxPacks);
+    if (activeBatches.length === 0) return null;
+    return activeBatches.reduce((oldest, b) => {
+      if (b.startDate < oldest.startDate) return b;
+      if (b.startDate > oldest.startDate) return oldest;
+      return b.batchNumber < oldest.batchNumber ? b : oldest;
+    });
+  }, [batches]);
+
+  const activeBatch = oldestActiveBatch;
 
   const periodBounds = useMemo(
     () => getStoragePeriodBounds(storagePeriod, storageCustomStart, storageCustomEnd),
@@ -268,17 +281,6 @@ export default function StoragePage() {
     () => Object.entries(currentStock).reduce((sum, [size, qty]) => sum + qty * PACK_SIZES[size as PackSize], 0),
     [currentStock]
   );
-
-  // The oldest active batch (earliest startDate) is the one that must be filled first
-  const oldestActiveBatch = useMemo(() => {
-    const activeBatches = batches.filter((b) => b.status === "ACTIVE");
-    if (activeBatches.length === 0) return null;
-    return activeBatches.reduce((oldest, b) =>
-      b.startDate < oldest.startDate ? b : oldest
-    );
-  }, [batches]);
-
-  const activeBatch = oldestActiveBatch;
 
   // The batch shown in the dashboard card — uses dashboard selector, falls back to oldest active
   const dashboardBatch = useMemo(() => {
@@ -852,8 +854,8 @@ const totalPackagedPads = stageCounts["STG-10"];
               <label className="block text-sm font-medium text-gray-700 mb-1">Batch</label>
               {oldestActiveBatch && (
                 <p className="text-xs text-amber-600 mb-1">
-                  ⚠️ Active batch: <strong>{oldestActiveBatch.batchNumber}</strong> —{" "}
-                  {(oldestActiveBatch.maxPacks - oldestActiveBatch.packsProduced).toLocaleString()} packs remaining. Fill this batch before using a newer one.
+                  ⚠️ Suggested batch: <strong>{oldestActiveBatch.batchNumber}</strong> —{" "}
+                  {(oldestActiveBatch.maxPacks - oldestActiveBatch.packsProduced).toLocaleString()} packs remaining.
                 </p>
               )}
               <div className="flex gap-2">
