@@ -529,7 +529,7 @@ const totalPackagedPads = useMemo(
   const batchPackCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     entries
-      .filter((e) => e.stageId === "STG-10" && e.batchRef)
+      .filter((e) => (e.stageId === "STG-10" || e.movedToStockAt) && e.batchRef)
       .forEach((e) => {
         counts[e.batchRef] = (counts[e.batchRef] || 0) + e.actualPieces;
       });
