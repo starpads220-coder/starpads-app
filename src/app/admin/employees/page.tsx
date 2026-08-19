@@ -231,7 +231,7 @@ export default function AdminEmployeesPage() {
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">{emp.name}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">{emp.role.replace(/_/g, " ")}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">
-                      {emp.department.charAt(0) + emp.department.slice(1).toLowerCase()}
+                      {emp.department ? emp.department.charAt(0) + emp.department.slice(1).toLowerCase() : "—"}
                     </td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${emp.active ? "bg-performance-green/10 text-performance-green" : "bg-gray-100 text-gray-500"}`}>
