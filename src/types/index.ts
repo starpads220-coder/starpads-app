@@ -102,6 +102,7 @@ export interface ProductionEntry {
   notes?: string;
   paymentStatus?: "due" | "paid";
   movedToStockAt?: import("firebase/firestore").Timestamp | null;
+  paymentId?: string;
 }
 
 export interface StockIn {
@@ -140,13 +141,18 @@ export interface SaleTransaction {
   id: string;
   date: string;
   customerName: string;
-  customerType: string;
+  customerType: CustomerType;
+  customerCategory?: CustomerCategory | "";
+  customerSubType?: CustomerSubType | "";
   packSize: PackSize;
+  packVariant?: PackVariant;
   quantitySold: number;
   unitPrice: number;
   totalAmount: number;
-  paymentMethod: string;
+  paymentMethod: PaymentMethod;
   notes?: string;
+  salespersonId?: string;
+  batchRef?: string;
 }
 
 export type ExpenseCategory =
@@ -185,6 +191,9 @@ export interface ProductionStage {
   name: string;
   isActive: boolean;
   stageId: StageId;
+  defaultTarget: number;
+  defaultWageRate: number;
+  materialTargets?: Record<string, number>;
 }
 
 export interface Payment {
@@ -196,4 +205,61 @@ export interface Payment {
   periodEnd?: string;
   method?: string;
   notes?: string;
+  grossAmount?: number;
+  totalAmount?: number;
+  nssfEmployeeDeduction?: number;
+  nssfBusinessContribution?: number;
+  payeeTax?: number;
+  netPayAmount?: number;
+  receiptNumber?: string;
+  status?: "pending" | "paid" | "failed";
+}
+
+export type CustomerCategory = "WHOLESALE" | "RETAIL" | "INSTITUTIONAL" | "B2B" | "B2C";
+export type CustomerType = "RETAIL" | "BULK" | "AGENT";
+export type CustomerSubType = string;
+export type PackVariant = "MAX" | "STANDARD" | "";
+export type PaymentMethod = "CASH" | "BANK_TRANSFER" | "MOBILE_MONEY" | "CREDIT";
+export type SalesTargetType = "DAILY" | "WEEKLY" | "MONTHLY" | "QUARTERLY" | "SIX_MONTHS" | "ANNUAL";
+
+export interface SalesTarget {
+  id: string;
+  targetType: SalesTargetType;
+  targetAmount: number;
+  periodReference: string;
+  description?: string;
+  createdAt?: import("firebase/firestore").Timestamp | string;
+  createdBy?: string;
+}
+
+export interface TargetConfig {
+  id: string;
+  employeeId: string;
+  stageId: StageId;
+  dailyTarget: number;
+  effectiveDate: string;
+}
+
+export interface PayeeBracket {
+  label: string;
+  rate: number;
+  tax: number;
+}
+
+export interface DeductionBreakdown {
+  grossAmount: number;
+  nssfEmployeeDeduction: number;
+  nssfBusinessContribution: number;
+  payeeTax: number;
+  netPayAmount: number;
+  payeeBracket: PayeeBracket;
+}
+
+export interface UserRole {
+  uid: string;
+  role: EmployeeRole;
+  status: "pending" | "active" | "suspended";
+  email?: string;
+  employeeId?: string;
+  createdAt?: import("firebase/firestore").Timestamp | string | number;
 }

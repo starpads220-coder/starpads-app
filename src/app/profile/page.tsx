@@ -27,9 +27,14 @@ export default function ProfilePage() {
     );
   }
 
-  // Format created date helper
-  const formatDate = (dateStr?: string) => {
-    if (!dateStr) return "N/A";
+  const formatDate = (dateInput?: any) => {
+    if (!dateInput) return "N/A";
+    let dateStr = dateInput;
+    if (typeof dateInput === "object" && typeof dateInput.toDate === "function") {
+      dateStr = dateInput.toDate().toISOString();
+    } else if (typeof dateInput === "number") {
+      dateStr = new Date(dateInput).toISOString();
+    }
     try {
       const date = new Date(dateStr);
       return date.toLocaleDateString("en-US", {
@@ -40,7 +45,7 @@ export default function ProfilePage() {
         minute: "2-digit",
       });
     } catch {
-      return dateStr;
+      return String(dateStr);
     }
   };
 
