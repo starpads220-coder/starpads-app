@@ -22,7 +22,7 @@ const defaultForm: Omit<Employee, "id" | "dailyWageRate"> = {
   role: "WORKER" as EmployeeRole,
   department: "PRODUCTION" as Department,
   startDate: new Date().toISOString().split("T")[0],
-  isActive: true,
+  active: true,
 };
 
 const roleOptions: EmployeeRole[] = [
@@ -95,7 +95,7 @@ export default function AdminEmployeesPage() {
       role: emp.role,
       department: emp.department,
       startDate: emp.startDate,
-      isActive: emp.isActive,
+      active: emp.active,
     });
     setEditingId(emp.id);
     setShowForm(true);
@@ -122,7 +122,7 @@ export default function AdminEmployeesPage() {
 
   const handleToggleActive = async (emp: Employee) => {
     await updateDoc(doc(db, "employees", emp.id), {
-      isActive: !emp.isActive,
+      active: !emp.active,
     });
     queryClient.invalidateQueries({ queryKey: ["employees"] });
     setDeleteTarget(null);
@@ -234,14 +234,14 @@ export default function AdminEmployeesPage() {
                       {emp.department.charAt(0) + emp.department.slice(1).toLowerCase()}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${emp.isActive ? "bg-performance-green/10 text-performance-green" : "bg-gray-100 text-gray-500"}`}>
-                        {emp.isActive ? "Active" : "Inactive"}
+                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${emp.active ? "bg-performance-green/10 text-performance-green" : "bg-gray-100 text-gray-500"}`}>
+                        {emp.active ? "Active" : "Inactive"}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
                       <button onClick={() => handleEdit(emp)} className="text-sm text-stock-blue hover:underline mr-3">Edit</button>
                       <button onClick={() => setDeleteTarget(emp.id)} className="text-sm text-performance-red hover:underline">
-                        {emp.isActive ? "Deactivate" : "Activate"}
+                        {emp.active ? "Deactivate" : "Activate"}
                       </button>
                     </td>
                   </tr>
@@ -253,13 +253,13 @@ export default function AdminEmployeesPage() {
 
         <ConfirmDialog
           open={deleteTarget !== null}
-          title={employees.find((e) => e.id === deleteTarget)?.isActive ? "Deactivate Employee" : "Reactivate Employee"}
+          title={employees.find((e) => e.id === deleteTarget)?.active ? "Deactivate Employee" : "Reactivate Employee"}
           message={
-            employees.find((e) => e.id === deleteTarget)?.isActive
+            employees.find((e) => e.id === deleteTarget)?.active
               ? "This employee will no longer appear in production entry forms and other active selections, but all their records will be preserved. You can reactivate them later."
               : "This employee will reappear in production entry forms and become active again."
           }
-          confirmLabel={employees.find((e) => e.id === deleteTarget)?.isActive ? "Deactivate" : "Reactivate"}
+          confirmLabel={employees.find((e) => e.id === deleteTarget)?.active ? "Deactivate" : "Reactivate"}
           onConfirm={async () => {
             const emp = employees.find((e) => e.id === deleteTarget);
             if (emp) await handleToggleActive(emp);
