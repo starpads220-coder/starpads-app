@@ -29,10 +29,11 @@ const STAGES = [
   { stageId: "STG-02", name: "Sewing Inner [Middle]", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
   { stageId: "STG-03", name: "Sewing Outer [TopLayer]", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
   { stageId: "STG-04", name: "Overlocking", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
-  { stageId: "STG-05", name: "Pouch Making", defaultTarget: 200, unit: "pieces", defaultWageRate: 10000 },
-  { stageId: "STG-06", name: "Checking & Pinning", defaultTarget: 400, unit: "pieces", defaultWageRate: 8000 },
-  { stageId: "STG-07", name: "Pinning and Folding", defaultTarget: 360, unit: "pieces", defaultWageRate: 10000 },
-  { stageId: "STG-08", name: "Packaging", defaultTarget: 120, unit: "packs", defaultWageRate: 12000 },
+  { stageId: "STG-05", name: "Pouch Making", defaultTarget: 250, unit: "pieces", defaultWageRate: 8000 },
+  { stageId: "STG-06", name: "Checking", defaultTarget: 200, unit: "pieces", defaultWageRate: 10000 },
+  { stageId: "STG-07", name: "Holling", defaultTarget: 400, unit: "pieces", defaultWageRate: 8000 },
+  { stageId: "STG-08", name: "Pinning and Folding", defaultTarget: 360, unit: "pieces", defaultWageRate: 10000 },
+  { stageId: "STG-09", name: "Packaging", defaultTarget: 120, unit: "packs", defaultWageRate: 12000 },
 ];
 
 async function seed() {

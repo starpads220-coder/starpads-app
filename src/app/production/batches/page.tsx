@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   collection,
   addDoc,
@@ -26,6 +26,18 @@ export default function BatchesPage() {
   const { data: batches = [], isLoading } = useCollectionQuery<Batch>("batches", [
     orderBy("startDate", "desc"),
   ], { staleTime: 2 * 60 * 1000 });
+
+  useEffect(() => {
+    batches.forEach((batch) => {
+      if (batch.status === "ACTIVE" && (batch.packsProduced ?? 0) >= (batch.maxPacks ?? 10000)) {
+        const batchRef = doc(db, "batches", batch.id);
+        updateDoc(batchRef, {
+          status: "COMPLETE",
+          completionDate: new Date().toISOString().split("T")[0],
+        }).catch(console.error);
+      }
+    });
+  }, [batches]);
 
   const generateBatchNumber = async (): Promise<string> => {
     const counterRef = doc(db, "counters", "batchCounter");
@@ -60,6 +72,13 @@ export default function BatchesPage() {
   const handleCreateBatch = async () => {
     setCreating(true);
     try {
+      // First, deactivate any existing ACTIVE batch
+      if (batches.length > 0) {
+        const activeBatch = batches.find((b) => b.status === "ACTIVE");
+        if (activeBatch) {
+          await updateDoc(doc(db, "batches", activeBatch.id), { status: "INACTIVE" });
+        }
+      }
       const batchNumber = await generateBatchNumber();
       const todayStr = new Date().toISOString().split("T")[0];
       const batchData = {
@@ -170,7 +189,9 @@ export default function BatchesPage() {
                       className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${
                         batch.status === "ACTIVE"
                           ? "bg-stock-blue/10 text-stock-blue"
-                          : "bg-gray-100 text-gray-500"
+                          : batch.status === "INACTIVE"
+                            ? "bg-gray-200 text-gray-500"
+                            : "bg-gray-100 text-gray-500"
                       }`}
                     >
                       {batch.status}
@@ -184,6 +205,9 @@ export default function BatchesPage() {
                       >
                         Close Batch
                       </button>
+                    )}
+                    {batch.status === "INACTIVE" && (
+                      <span className="text-xs text-gray-400 ml-2">inactive</span>
                     )}
                   </td>
                 </tr>

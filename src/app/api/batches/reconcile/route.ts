@@ -1,6 +1,20 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebase-admin";
 
+const PACK_SIZE_PADS: Record<string, number> = {
+  HALF_DOZEN: 6,
+  DOZEN: 12,
+  CARTON: 120,
+  ONE_PACK: 3,
+};
+
+const PADS_PER_PACK = 3;
+const BATCH_MAX_PACKS = 10000;
+
+function getPadValue(packSize: string, quantity: number): number {
+  return (quantity || 0) * (PACK_SIZE_PADS[packSize] ?? 1);
+}
+
 export async function POST() {
   const db = getAdminDb();
   if (!db) {
@@ -13,145 +27,211 @@ export async function POST() {
   try {
     const log: Array<{ batchId: string; action: string; details: string }> = [];
 
-    // Step 1: Find/ensure batch P0002 exists
+    // ── Step 1: Ensure P0002 exists ────────────────────────────────────────
     const p0002Ref = db.collection("batches").doc("P0002");
     const p0002Snap = await p0002Ref.get();
 
     if (!p0002Snap.exists) {
       await p0002Ref.set({
         batchNumber: "P0002",
-        startDate: new Date().toISOString().split("T")[0],
+        startDate: "2024-01-01",
         completionDate: null,
         status: "ACTIVE",
-        maxPacks: 10000,
+        maxPacks: BATCH_MAX_PACKS,
         packsProduced: 0,
         createdAt: new Date().toISOString().split("T")[0],
       });
       log.push({
         batchId: "P0002",
         action: "created",
-        details: "P0002 batch did not exist, created with ACTIVE status",
+        details: "P0002 did not exist; created with ACTIVE status.",
       });
     }
 
-    // Step 2: Recalculate P0002's packsProduced from its stock-ins
-    let totalPadsP0002 = 0;
-    const p0002StockIns = db.collection("stockIns").where("batchRef", "==", "P0002");
-    const p0002StockInsSnap = await p0002StockIns.get();
+    // ── Step 2: Calculate current packs already in P0002 ──────────────────
+    const p0002StockInsSnap = await db
+      .collection("stockIns")
+      .where("batchRef", "==", "P0002")
+      .get();
 
+    let totalPadsP0002 = 0;
     p0002StockInsSnap.forEach((d) => {
       const data = d.data();
-      const packSizeStr = data.packSize || "";
-      const packSizeVal = (packSizeStr === "HALF_DOZEN" ? 6 : packSizeStr === "DOZEN" ? 12 : packSizeStr === "CARTON" ? 120 : packSizeStr === "ONE_PACK" ? 3 : 1);
-      totalPadsP0002 += (data.quantity || 0) * packSizeVal;
+      totalPadsP0002 += getPadValue(data.packSize, data.quantity);
+    });
+    let packsInP0002 = Math.floor(totalPadsP0002 / PADS_PER_PACK);
+
+    const p0002BatchDoc = await db.collection("batches").doc("P0002").get();
+    if (p0002BatchDoc.exists) {
+      packsInP0002 += (p0002BatchDoc.data()?.packsProduced ?? 0);
+    }
+
+    log.push({
+      batchId: "P0002",
+      action: "current-count",
+      details: `P0002 currently has ${packsInP0002} / ${BATCH_MAX_PACKS} packs.`,
     });
 
-    const packsProducedP0002 = Math.floor(totalPadsP0002 / 3);
+    // ── Step 3: If P0002 is under capacity, migrate P0004 stock-ins ────────
+    if (packsInP0002 < BATCH_MAX_PACKS) {
+      const p0004StockInsSnap = await db
+        .collection("stockIns")
+        .where("batchRef", "==", "P0004")
+        .get();
 
-    // Step 3: Update P0002 if packsProduced changed or status is wrong
-    const updates: Record<string, unknown> = {};
-
-    const currentPacks = p0002Snap.exists ? p0002Snap.data().packsProduced ?? 0 : 0;
-    const currentStatus = p0002Snap.exists ? p0002Snap.data().status ?? "ACTIVE" : "ACTIVE";
-
-    if (packsProducedP0002 !== currentPacks) {
-      updates.packsProduced = packsProducedP0002;
+      // migrate oldest entries first by sorting in memory to avoid missing index error
+      const p0004Docs = p0004StockInsSnap.docs.sort((a, b) => {
+        const dateA = a.data().date || "";
+        const dateB = b.data().date || "";
+        return dateA.localeCompare(dateB);
+      });
       log.push({
-        batchId: "P0002",
-        action: "packsProduced-updated",
-        details: "Updated from " + currentPacks + " to " + packsProducedP0002 + " packs",
-      });
-    }
-
-    // If P0002 is marked COMPLETE but doesn't have 10000 packs, change to ACTIVE
-    if (currentStatus === "COMPLETE" && packsProducedP0002 < 10000) {
-      updates.status = "ACTIVE";
-      updates.completionDate = null;
-      log.push({
-        batchId: "P0002",
-        action: "status-reactivated",
-        details: "Batch was COMPLETE but has only " + packsProducedP0002 + "/10000 packs, reactivated to ACTIVE",
-      });
-    } else if (currentStatus === "ACTIVE" && packsProducedP0002 >= 10000) {
-      // If somehow ACTIVE but has 10000+, mark COMPLETE
-      updates.status = "COMPLETE";
-      updates.completionDate = new Date().toISOString().split("T")[0];
-      log.push({
-        batchId: "P0002",
-        action: "status-completed",
-        details: "Batch has " + packsProducedP0002 + "/10000 packs, marked COMPLETE",
-      });
-    }
-
-    if (Object.keys(updates).length > 0) {
-      await p0002Ref.update(updates);
-      log.push({
-        batchId: "P0002",
-        action: "batch-updated",
-        details: "P0002 updated: packsProduced=" + packsProducedP0002 + ", status=" + (updates.status || currentStatus),
-      });
-    }
-
-    // Step 4: Recalculate all other batches based on their stock-ins
-    const batchesRef = db.collection("batches");
-    const batchesSnap = await batchesRef.get();
-
-    const batchUpdatePromises: Promise<any>[] = [];
-
-    batchesSnap.forEach((batchDoc) => {
-      const batchId = batchDoc.id;
-      if (batchId === "P0002") return;
-
-      const batchData = batchDoc.data();
-      const batchMaxPacks = batchData.maxPacks ?? 10000;
-
-      // Count pads in stockIns for this batch
-      let totalPads = 0;
-      const batchStockIns = db.collection("stockIns").where("batchRef", "==", batchId);
-      const batchStockInsSnap = await batchStockIns.get();
-
-      batchStockInsSnap.forEach((d) => {
-        const data = d.data();
-        const packSizeVal = (data.packSize === "HALF_DOZEN" ? 6 : data.packSize === "DOZEN" ? 12 : data.packSize === "CARTON" ? 120 : data.packSize === "ONE_PACK" ? 3 : 1);
-        totalPads += (data.quantity || 0) * packSizeVal;
+        batchId: "P0004",
+        action: "migration-start",
+        details: `Found ${p0004Docs.length} stock-in entries in P0004 to evaluate.`,
       });
 
-      const packsStored = Math.floor(totalPads / 3);
+      const migrationBatch = db.batch();
+      let migratedCount = 0;
+      let migratedPacks = 0;
 
-      const batchUpdates: Record<string, unknown> = {};
+      for (const stockInDoc of p0004Docs) {
+        if (packsInP0002 >= BATCH_MAX_PACKS) break;
 
-      if (packsStored >= 10000) {
-        batchUpdates.status = "COMPLETE";
-        batchUpdates.completionDate = new Date().toISOString().split("T")[0];
-      } else if (batchData.status !== "ACTIVE") {
-        batchUpdates.status = "ACTIVE";
+        const data = stockInDoc.data();
+        const entryPads = getPadValue(data.packSize, data.quantity);
+        const entryPacks = Math.floor(entryPads / PADS_PER_PACK);
+        const remainingCapacity = BATCH_MAX_PACKS - packsInP0002;
+
+        if (entryPacks <= remainingCapacity) {
+          // Whole entry fits into P0002 — reassign it
+          migrationBatch.update(stockInDoc.ref, { batchRef: "P0002" });
+          packsInP0002 += entryPacks;
+          migratedPacks += entryPacks;
+          migratedCount++;
+        } else {
+          // Entry would overflow — split: keep the overflow portion in P0004
+          // Migrate only what fits (as a new stockIn doc for P0002)
+          const packsToMigrate = remainingCapacity;
+          const padsToMigrate = packsToMigrate * PADS_PER_PACK;
+          const overflowPads = entryPads - padsToMigrate;
+
+          // Derive quantity in the same pack size units for the migrated portion
+          const padSizeVal = PACK_SIZE_PADS[data.packSize] ?? 1;
+          const migrateQty = Math.floor(padsToMigrate / padSizeVal);
+          const overflowQty = data.quantity - migrateQty;
+
+          if (migrateQty > 0) {
+            const newP0002Doc = db.collection("stockIns").doc();
+            migrationBatch.set(newP0002Doc, {
+              ...data,
+              batchRef: "P0002",
+              quantity: migrateQty,
+              notes: `[Migrated from P0004 on reconciliation] ${data.notes ?? ""}`.trim(),
+            });
+          }
+
+          if (overflowQty > 0) {
+            // Update original P0004 doc to reflect reduced quantity
+            migrationBatch.update(stockInDoc.ref, { quantity: overflowQty });
+          } else {
+            // Nothing left in P0004 for this doc
+            migrationBatch.update(stockInDoc.ref, { quantity: 0 });
+          }
+
+          packsInP0002 += packsToMigrate;
+          migratedPacks += packsToMigrate;
+          migratedCount++;
+
+          log.push({
+            batchId: "P0004",
+            action: "entry-split",
+            details: `Entry ${stockInDoc.id} split: ${migrateQty} units → P0002, ${overflowQty} units remain in P0004.`,
+          });
+          break; // P0002 is now at capacity
+        }
       }
+
+      await migrationBatch.commit();
+
+      log.push({
+        batchId: "migration",
+        action: "migration-complete",
+        details: `Migrated ${migratedCount} entries (${migratedPacks.toLocaleString()} packs) from P0004 → P0002. P0002 now at ${packsInP0002} / ${BATCH_MAX_PACKS} packs.`,
+      });
+    } else {
+      log.push({
+        batchId: "P0002",
+        action: "migration-skipped",
+        details: `P0002 already at or above capacity (${packsInP0002} packs). No migration needed.`,
+      });
+    }
+
+    // ── Step 4: Recalculate and update ALL batch statuses ──────────────────
+    const batchesSnap = await db.collection("batches").get();
+    const updatePromises: Promise<FirebaseFirestore.WriteResult>[] = [];
+
+    for (const batchDoc of batchesSnap.docs) {
+      const batchId = batchDoc.id;
+      const batchData = batchDoc.data();
+      const batchMaxPacks = batchData.maxPacks ?? BATCH_MAX_PACKS;
+
+      // SUM STOCK-INS QUANTITY COLUMN INSTEAD OF PRODUCTION ENTRIES
+      const stockInSnap = await db
+        .collection("stockIns")
+        .where("batchRef", "==", batchId)
+        .get();
+
+      let packsStored = 0;
+      stockInSnap.forEach((d) => {
+        packsStored += (d.data().quantity as number) || 0;
+      });
+
+      const updates: Record<string, unknown> = {};
 
       if (packsStored !== batchData.packsProduced) {
-        batchUpdates.packsProduced = packsStored;
+        updates.packsProduced = packsStored;
       }
 
-      if (Object.keys(batchUpdates).length > 0) {
-        var p = batchDoc.ref.update(batchUpdates);
-        batchUpdatePromises.push(p);
-        var actionName = packsStored >= 10000 ? "marked-complete" : "status-reactivated";
-        var detailStr = packsStored + "/10000 packs, " + actionName;
+      if (packsStored >= batchMaxPacks && batchData.status !== "COMPLETE") {
+        updates.status = "COMPLETE";
+        updates.completionDate = new Date().toISOString().split("T")[0];
         log.push({
-          batchId: batchId,
-          action: actionName,
-          details: detailStr,
+          batchId,
+          action: "status-completed",
+          details: `${batchId} has ${packsStored}/${batchMaxPacks} packs — marked COMPLETE.`,
+        });
+      } else if (packsStored < batchMaxPacks && batchData.status === "COMPLETE") {
+        // Was wrongly marked COMPLETE — reactivate
+        updates.status = "ACTIVE";
+        updates.completionDate = null;
+        log.push({
+          batchId,
+          action: "status-reactivated",
+          details: `${batchId} was COMPLETE but only has ${packsStored}/${batchMaxPacks} packs — reactivated to ACTIVE.`,
         });
       }
-    });
 
-    await Promise.all(batchUpdatePromises);
+      if (Object.keys(updates).length > 0) {
+        updatePromises.push(batchDoc.ref.update(updates));
+        log.push({
+          batchId,
+          action: "batch-updated",
+          details: `Updated: ${JSON.stringify(updates)}`,
+        });
+      }
+    }
 
-    // Step 5: Log reconciliation run
-    var runDetails = "Reconciliation completed at " + new Date().toISOString() + ". P0002: " + (packsProducedP0002 ?? 0) + "/10000 packs. Total batch updates: " + log.length;
+    await Promise.all(updatePromises);
+
+    // ── Step 5: Final P0002 read for response ──────────────────────────────
+    const p0002Final = await p0002Ref.get();
+    const p0002FinalData = p0002Final.data() ?? {};
+
     log.push({
       batchId: "system",
       action: "reconciliation-run",
-      details: runDetails,
+      details: `Completed at ${new Date().toISOString()}. P0002: ${p0002FinalData.packsProduced ?? packsInP0002}/${BATCH_MAX_PACKS} packs. Total log entries: ${log.length}.`,
     });
 
     return NextResponse.json({
@@ -159,11 +239,11 @@ export async function POST() {
       message: "Batch reconciliation completed successfully",
       data: {
         p0002: {
-          packsProduced: packsProducedP0002 ?? 0,
-          status: p0002Snap.exists ? p0002Snap.data().status ?? "ACTIVE" : "ACTIVE",
-          packsRemaining: 10000 - (packsProducedP0002 ?? 0),
+          packsProduced: p0002FinalData.packsProduced ?? packsInP0002,
+          status: p0002FinalData.status ?? "ACTIVE",
+          packsRemaining: BATCH_MAX_PACKS - (p0002FinalData.packsProduced ?? packsInP0002),
         },
-        log: log,
+        log,
       },
     });
   } catch (err) {

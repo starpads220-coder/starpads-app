@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   collection,
@@ -85,6 +85,8 @@ export default function StoragePage() {
   };
 
   const [moveEntryId, setMoveEntryId] = useState<string | null>(null);
+  // Dashboard batch selector — defaults to oldest active batch
+  const [dashboardBatchId, setDashboardBatchId] = useState<string>("");
   const [storagePeriod, setStoragePeriod] = useState<StoragePeriod>("month");
   const [storageCustomStart, setStorageCustomStart] = useState("");
   const [storageCustomEnd, setStorageCustomEnd] = useState("");
@@ -95,53 +97,6 @@ export default function StoragePage() {
   const [wipCustomStart, setWipCustomStart] = useState("");
   const [wipCustomEnd, setWipCustomEnd] = useState("");
 
-useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const tabParam = params.get("tab");
-    const dateParam = params.get("date");
-    const quantityParam = params.get("quantity");
-    const batchRefParam = params.get("batchRef");
-    const entryIdParam = params.get("entryId");
-    const employeeIdParam = params.get("employeeId");
-    const customerRefParam = params.get("customerRef");
-    const destinationParam = params.get("destination");
-    const packSizeParam = params.get("packSize");
-    const dispatchedByParam = params.get("dispatchedBy");
-    if (tabParam === "stock-in") {
-      setActiveTab("stock-in");
-    }
-    if (tabParam === "stock-out") {
-      setActiveTab("stock-out");
-    }
-    if (dateParam || quantityParam || batchRefParam || packSizeParam) {
-      setStockInForm((prev) => ({
-        ...prev,
-        date: dateParam || prev.date,
-        quantity: quantityParam ? Math.round(parseFloat(quantityParam) / 3) : prev.quantity,
-        batchRef: batchRefParam || prev.batchRef,
-        packSize: (packSizeParam as PackSize) || prev.packSize,
-      }));
-    }
-    if (employeeIdParam && employees.length > 0) {
-      const emp = employees.find((e) => e.id === employeeIdParam);
-      setStockInForm((prev) => ({ ...prev, receivedBy: emp ? emp.name : employeeIdParam }));
-    }
-    if (customerRefParam || destinationParam || packSizeParam || dispatchedByParam || dateParam) {
-      setStockOutForm((prev) => ({
-        ...prev,
-        date: dateParam || prev.date,
-        customerRef: customerRefParam || prev.customerRef,
-        destination: destinationParam || prev.destination,
-        packSize: (packSizeParam as PackSize) || prev.packSize,
-        quantity: quantityParam ? Math.round(parseFloat(quantityParam) / 3) : prev.quantity,
-        batchRef: batchRefParam || prev.batchRef,
-        dispatchedBy: dispatchedByParam || prev.dispatchedBy,
-      }));
-    }
-    if (entryIdParam) {
-      setMoveEntryId(entryIdParam);
-    }
-  }, []);
 
   const [stockInForm, setStockInForm] = useState({
     date: new Date().toISOString().split("T")[0],
@@ -186,6 +141,95 @@ useEffect(() => {
     "saleTransactions", [orderBy("date", "desc")], { staleTime: 60 * 1000 }
   );
 
+  // --- URL param auto-population (Move to Stock flow) ---
+  // Refs are placed here so all state/query hooks above are already initialized.
+  const pendingEmployeeIdRef = useRef<string | null>(null);
+  const urlParamsAppliedRef = useRef(false);
+  const employeeResolved = useRef(false);
+
+  // Effect 1: Apply non-employee URL params once on mount
+  useEffect(() => {
+    if (urlParamsAppliedRef.current) return;
+    urlParamsAppliedRef.current = true;
+
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get("tab");
+    const dateParam = params.get("date");
+    const quantityParam = params.get("quantity");
+    const batchRefParam = params.get("batchRef");
+    const entryIdParam = params.get("entryId");
+    const employeeIdParam = params.get("employeeId");
+    const customerRefParam = params.get("customerRef");
+    const destinationParam = params.get("destination");
+    const packSizeParam = params.get("packSize");
+    const dispatchedByParam = params.get("dispatchedBy");
+
+    if (tabParam === "stock-in") setActiveTab("stock-in");
+    if (tabParam === "stock-out") setActiveTab("stock-out");
+
+    const isMoveToStock = !!entryIdParam;
+    const packSizeMap: Record<string, number> = {
+      HALF_DOZEN: 6,
+      DOZEN: 12,
+      CARTON: 120,
+      ONE_PACK: 1,
+    };
+    const resolvedPackSize = (packSizeParam as PackSize) || "HALF_DOZEN";
+
+    if (isMoveToStock || dateParam || quantityParam || batchRefParam || packSizeParam) {
+      setStockInForm((prev) => ({
+        ...prev,
+        date: dateParam || prev.date,
+        quantity: quantityParam
+          ? Math.round(parseFloat(quantityParam))
+          : prev.quantity,
+        batchRef: batchRefParam || prev.batchRef,
+        packSize: resolvedPackSize,
+      }));
+    }
+
+    if (employeeIdParam) {
+      pendingEmployeeIdRef.current = employeeIdParam;
+    }
+
+    if (isMoveToStock && (customerRefParam || destinationParam || packSizeParam || dispatchedByParam || dateParam)) {
+      setStockOutForm((prev) => ({
+        ...prev,
+        date: dateParam || prev.date,
+        customerRef: customerRefParam || prev.customerRef,
+        destination: destinationParam || prev.destination,
+        packSize: (packSizeParam as PackSize) || prev.packSize,
+        quantity: quantityParam ? Math.round(parseFloat(quantityParam)) : prev.quantity,
+        batchRef: batchRefParam || prev.batchRef,
+        dispatchedBy: dispatchedByParam || prev.dispatchedBy,
+      }));
+    } else if (customerRefParam || destinationParam || packSizeParam || dispatchedByParam || dateParam) {
+      setStockOutForm((prev) => ({
+        ...prev,
+        date: dateParam || prev.date,
+        customerRef: customerRefParam || prev.customerRef,
+        destination: destinationParam || prev.destination,
+        packSize: (packSizeParam as PackSize) || prev.packSize,
+        quantity: quantityParam ? Math.round(parseFloat(quantityParam)) : prev.quantity,
+        batchRef: batchRefParam || prev.batchRef,
+        dispatchedBy: dispatchedByParam || prev.dispatchedBy,
+      }));
+    }
+
+    if (entryIdParam) setMoveEntryId(entryIdParam);
+  }, []);
+
+  // Effect 2: Resolve employeeId → receivedBy once employees data arrives from Firestore
+  useEffect(() => {
+    if (employeeResolved.current) return;
+    if (!pendingEmployeeIdRef.current || employees.length === 0) return;
+    employeeResolved.current = true;
+    const empId = pendingEmployeeIdRef.current;
+    const emp = employees.find((e) => e.id === empId);
+    setStockInForm((prev) => ({ ...prev, receivedBy: emp ? emp.id : empId }));
+  }, [employees]);
+  // --- end URL param auto-population ---
+
   const periodBounds = useMemo(
     () => getStoragePeriodBounds(storagePeriod, storageCustomStart, storageCustomEnd),
     [storagePeriod, storageCustomStart, storageCustomEnd]
@@ -225,16 +269,30 @@ useEffect(() => {
     [currentStock]
   );
 
-  const activeBatch = useMemo(() => batches.find((b) => b.status === "ACTIVE"), [batches]);
+  // The oldest active batch (earliest startDate) is the one that must be filled first
+  const oldestActiveBatch = useMemo(() => {
+    const activeBatches = batches.filter((b) => b.status === "ACTIVE");
+    if (activeBatches.length === 0) return null;
+    return activeBatches.reduce((oldest, b) =>
+      b.startDate < oldest.startDate ? b : oldest
+    );
+  }, [batches]);
+
+  const activeBatch = oldestActiveBatch;
+
+  // The batch shown in the dashboard card — uses dashboard selector, falls back to oldest active
+  const dashboardBatch = useMemo(() => {
+    if (dashboardBatchId) return batches.find((b) => b.id === dashboardBatchId) ?? activeBatch;
+    return activeBatch;
+  }, [dashboardBatchId, batches, activeBatch]);
+
+  // Combined packs: direct from the single source of truth
+  const batchTotalPacks = useMemo(() => dashboardBatch?.packsProduced ?? 0, [dashboardBatch]);
 
   const batchCompletionPct = useMemo(() => {
-    if (!activeBatch) return 0;
-    const batchStoredPads = stockIns
-      .filter((si) => si.batchRef === activeBatch.id)
-      .reduce((sum, si) => sum + si.quantity * PACK_SIZES[si.packSize as PackSize], 0);
-    const batchPacksStored = batchStoredPads / PADS_PER_PACK;
-    return Math.min(100, Math.round((batchPacksStored / activeBatch.maxPacks) * 100));
-  }, [activeBatch, stockIns]);
+    if (!dashboardBatch) return 0;
+    return Math.min(100, Math.round((batchTotalPacks / dashboardBatch.maxPacks) * 100));
+  }, [dashboardBatch, batchTotalPacks]);
 
   const daysOfStock = useMemo(() => {
     const now = new Date();
@@ -251,9 +309,9 @@ useEffect(() => {
     const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
     const filtered = productionEntries.filter((e) => e.date >= wipBounds.start && e.date <= wipBounds.end);
     const counts: Record<StageId, number> = {
-      "STG-01": 0, "STG-02": 0, "STG-03": 0, "STG-04": 0, "STG-05": 0, "STG-06-Checking": 0, "STG-09": 0, "STG-07": 0, "STG-08": 0,
+      "STG-01": 0, "STG-02": 0, "STG-03": 0, "STG-04": 0, "STG-05": 0, "STG-06": 0, "STG-09": 0, "STG-07": 0, "STG-08": 0, "STG-10": 0,
     };
-    filtered.forEach((e) => { counts[e.stageId] = (counts[e.stageId] || 0) + e.actualPieces; });
+    filtered.forEach((e) => { const sid = e.stageId as StageId; counts[sid] = (counts[sid] || 0) + e.actualPieces; });
     return counts;
   }, [productionEntries, wipPeriod, wipCustomStart, wipCustomEnd]);
 
@@ -347,6 +405,47 @@ const totalPackagedPads = stageCounts["STG-08"];
     e.preventDefault();
     setSaving(true);
     try {
+      // ── Sequential batch enforcement ──────────────────────────────────────
+      // Determine the oldest ACTIVE batch at submit time (freshest from state)
+      const activeBatches = batches.filter((b) => b.status === "ACTIVE");
+      const oldestActive = activeBatches.length > 0
+        ? activeBatches.reduce((oldest, b) => b.startDate < oldest.startDate ? b : oldest)
+        : null;
+
+      if (oldestActive && stockInForm.batchRef !== oldestActive.id) {
+        const batchNum = oldestActive.batchNumber;
+        const remaining = oldestActive.maxPacks - oldestActive.packsProduced;
+        showToast(
+          `⚠️ Fill active batch ${batchNum} first (${remaining.toLocaleString()} packs remaining) before adding stock to a newer batch.`,
+          "error"
+        );
+        setSaving(false);
+        return;
+      }
+
+      // ── Capacity cap: prevent exceeding the remaining capacity ────────────
+      if (oldestActive) {
+        const thisBatchCurrentPadsQuery = query(
+          collection(db, "stockIns"),
+          where("batchRef", "==", stockInForm.batchRef)
+        );
+        const currentSnap = await getDocs(thisBatchCurrentPadsQuery);
+        // Capacity check: use raw quantity sum (same unit as packsProduced)
+        const currentPacks = currentSnap.docs.reduce((sum, d) => sum + ((d.data().quantity as number) || 0), 0);
+        const remaining = oldestActive.maxPacks - oldestActive.packsProduced;
+        const incomingPacks = stockInForm.quantity;
+
+        if (incomingPacks > remaining) {
+          showToast(
+            `⚠️ Entry would exceed batch capacity. Only ${remaining.toLocaleString()} packs remaining in ${oldestActive.batchNumber}. You entered ${incomingPacks.toLocaleString()} packs.`,
+            "error"
+          );
+          setSaving(false);
+          return;
+        }
+      }
+      // ─────────────────────────────────────────────────────────────────────
+
       const batchDocRef = doc(db, "batches", stockInForm.batchRef);
       await addDoc(collection(db, "stockIns"), { ...stockInForm, createdAt: Timestamp.now() });
       if (moveEntryId) {
@@ -355,19 +454,24 @@ const totalPackagedPads = stageCounts["STG-08"];
         });
         setMoveEntryId(null);
       }
-      const batchInsQuery = query(collection(db, "stockIns"), where("batchRef", "==", stockInForm.batchRef));
-      const batchInsSnap = await getDocs(batchInsQuery);
-      const totalPadsInBatch = batchInsSnap.docs.reduce((sum, d) => {
-        const data = d.data();
-        return sum + (data.quantity || 0) * PACK_SIZES[data.packSize as PackSize];
-      }, 0);
-      const packsStored = Math.floor(totalPadsInBatch / PADS_PER_PACK);
-      const batchUpdates: Record<string, unknown> = { packsProduced: packsStored };
-      if (packsStored >= 10000) {
+      
+      // Update packsProduced = sum of all stock-in quantity entries for this batch
+      const allBatchStockInsSnap = await getDocs(
+        query(collection(db, "stockIns"), where("batchRef", "==", stockInForm.batchRef))
+      );
+      const newPacksProduced = allBatchStockInsSnap.docs.reduce(
+        (sum, d) => sum + ((d.data().quantity as number) || 0),
+        0
+      );
+      const selectedBatch = batches.find((b) => b.id === stockInForm.batchRef);
+      const maxPacks = selectedBatch?.maxPacks ?? 10000;
+      const batchUpdates: Record<string, unknown> = { packsProduced: newPacksProduced };
+      if (newPacksProduced >= maxPacks) {
         batchUpdates.status = "COMPLETE";
         batchUpdates.completionDate = new Date().toISOString().split("T")[0];
       }
       await updateDoc(batchDocRef, batchUpdates);
+
       queryClient.invalidateQueries({ queryKey: ["stockIns"] });
       queryClient.invalidateQueries({ queryKey: ["batches"] });
       setStockInForm({ date: new Date().toISOString().split("T")[0], batchRef: "", packSize: "HALF_DOZEN", quantity: 0, receivedBy: "", notes: "" });
@@ -497,14 +601,49 @@ const totalPackagedPads = stageCounts["STG-08"];
             </div>
           </ChartCard>
 
-          <ChartCard title="Batch Completion" subtitle={activeBatch?.batchNumber || "No Active Batch"} variant="gradient">
-            <div className="flex-1 flex items-center justify-center pt-2">
+          <ChartCard
+            title="Batch Progress"
+            subtitle={
+              dashboardBatch
+                ? `${dashboardBatch.batchNumber} — ${batchTotalPacks.toLocaleString()} / ${dashboardBatch.maxPacks.toLocaleString()} packs`
+                : "No Active Batch"
+            }
+            variant="gradient"
+          >
+            <div className="flex-1 flex flex-col items-center justify-center gap-2 pt-1">
               <RadialProgress
                 value={batchCompletionPct}
                 label={`${batchCompletionPct}%`}
-                subLabel="Stored"
+                subLabel="Complete"
                 color={batchCompletionPct === 100 ? "#22c55e" : "#3b82f6"}
               />
+              <div className="flex items-center gap-3 text-xs text-gray-400 mt-1">
+                <span className="flex items-center gap-1">
+                  <span className="inline-block w-2 h-2 rounded-full bg-emerald-400"></span>
+                  Finished Packs: {batchTotalPacks.toLocaleString()}
+                </span>
+              </div>
+              {/* Batch selector */}
+              <div className="flex items-center gap-2 mt-1 w-full px-1">
+                <select
+                  value={dashboardBatchId || dashboardBatch?.id || ""}
+                  onChange={(e) => setDashboardBatchId(e.target.value)}
+                  className="flex-1 px-2 py-1.5 border border-gray-200 rounded-md text-xs bg-white text-gray-700"
+                >
+                  {batches.map((b) => (
+                    <option key={b.id} value={b.id}>
+                      {b.batchNumber} ({b.status})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => window.open("/production/batches", "_blank")}
+                  className="px-2 py-1.5 bg-gray-100 text-gray-700 text-xs font-medium rounded-md hover:bg-gray-200 whitespace-nowrap"
+                >
+                  + New
+                </button>
+              </div>
             </div>
           </ChartCard>
 
@@ -711,13 +850,24 @@ const totalPackagedPads = stageCounts["STG-08"];
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Batch</label>
+              {oldestActiveBatch && (
+                <p className="text-xs text-amber-600 mb-1">
+                  ⚠️ Active batch: <strong>{oldestActiveBatch.batchNumber}</strong> —{" "}
+                  {(oldestActiveBatch.maxPacks - oldestActiveBatch.packsProduced).toLocaleString()} packs remaining. Fill this batch before using a newer one.
+                </p>
+              )}
               <div className="flex gap-2">
                 <select value={stockInForm.batchRef} onChange={(e) => setStockInForm({ ...stockInForm, batchRef: e.target.value })}
                   required className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
                   <option value="">Select batch...</option>
-                  {(moveEntryId ? batches : batches.filter((b) => b.status === "ACTIVE")).map((b) => (
-                    <option key={b.id} value={b.id}>{b.batchNumber} — {(b.maxPacks - b.packsProduced).toLocaleString()} remaining</option>
-                  ))}
+                  {(moveEntryId ? batches : batches.filter((b) => b.status === "ACTIVE")).map((b) => {
+                    const isOldest = b.id === oldestActiveBatch?.id;
+                    return (
+                      <option key={b.id} value={b.id}>
+                        {isOldest ? "✅ " : "🔒 "}{b.batchNumber} — {(b.maxPacks - b.packsProduced).toLocaleString()} remaining
+                      </option>
+                    );
+                  })}
                 </select>
                 <button type="button" onClick={() => window.open("/production/batches", "_blank")}
                   className="px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200 whitespace-nowrap">+ New</button>
@@ -727,13 +877,14 @@ const totalPackagedPads = stageCounts["STG-08"];
               <label className="block text-sm font-medium text-gray-700 mb-1">Pack Size</label>
               <select value={stockInForm.packSize} onChange={(e) => setStockInForm({ ...stockInForm, packSize: e.target.value as PackSize })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
-                <option value="HALF_DOZEN">Half Dozen (6 Packs)</option>
-                <option value="DOZEN">Dozen (12 Packs)</option>
-                <option value="CARTON">Carton (120 packs)</option>
+                <option value="ONE_PACK">Single Pack (1 Pad)</option>
+                <option value="HALF_DOZEN">Half Dozen (6 Pads)</option>
+                <option value="DOZEN">Dozen (12 Pads)</option>
+                <option value="CARTON">Carton (120 Pads)</option>
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Packs</label>
               <input type="number" value={stockInForm.quantity || ""} onChange={(e) => setStockInForm({ ...stockInForm, quantity: parseInt(e.target.value) || 0 })}
                 required min={1} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
             </div>
@@ -772,7 +923,7 @@ const totalPackagedPads = stageCounts["STG-08"];
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pack Size</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quantity</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Packs</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Received By</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Notes</th>
                   </tr>
@@ -885,7 +1036,7 @@ const totalPackagedPads = stageCounts["STG-08"];
                 <select value={stockOutForm.batchRef} onChange={(e) => setStockOutForm({ ...stockOutForm, batchRef: e.target.value })}
                   required className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
                   <option value="">Select batch...</option>
-                  {batches.map((b) => (<option key={b.id} value={b.id}>{b.batchNumber} — {b.packsProduced.toLocaleString()} / {b.maxPacks.toLocaleString()} packs</option>))}
+                  {batches.filter((b) => b.status === "ACTIVE").map((b) => (<option key={b.id} value={b.id}>{b.batchNumber} — {b.packsProduced.toLocaleString()} / {b.maxPacks.toLocaleString()} packs</option>))}
                 </select>
                 <button type="button" onClick={() => window.open("/production/batches", "_blank")}
                   className="px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200 whitespace-nowrap">+ New</button>
@@ -901,7 +1052,7 @@ const totalPackagedPads = stageCounts["STG-08"];
               </select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Quantity</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Packs</label>
               <input type="number" value={stockOutForm.quantity || ""} onChange={(e) => setStockOutForm({ ...stockOutForm, quantity: parseInt(e.target.value) || 0 })}
                 required min={1} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
             </div>
@@ -937,7 +1088,7 @@ const totalPackagedPads = stageCounts["STG-08"];
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer Ref</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pack Size</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Packs</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Dispatched By</th>
                   </tr>
                 </thead>

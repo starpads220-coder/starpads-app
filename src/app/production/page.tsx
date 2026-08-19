@@ -77,10 +77,11 @@ const stageUnit: Record<StageId, string> = {
   "STG-03": "pieces",
   "STG-04": "pieces",
   "STG-05": "pieces",
-  "STG-06-Checking": "pieces",
-  "STG-09": "pieces",
+  "STG-06": "pieces",
   "STG-07": "pieces",
   "STG-08": "packs",
+  "STG-09": "pieces",
+  "STG-10": "packs",
 };
 
 const stagesWithMaterial: StageId[] = ["STG-01", "STG-02", "STG-03"];
@@ -96,7 +97,7 @@ export default function ProductionPage() {
 
   const recalculateBatchPacks = useCallback(async (batchId: string) => {
     const entriesSnap = await getDocs(
-      query(collection(db, "productionEntries"), where("batchRef", "==", batchId), where("stageId", "==", "STG-08"))
+      query(collection(db, "productionEntries"), where("batchRef", "==", batchId), where("stageId", "==", "STG-10"))
     );
     const totalPacks = entriesSnap.docs.reduce((sum, d) => sum + ((d.data().actualPieces as number) || 0), 0);
     await updateDoc(doc(db, "batches", batchId), { packsProduced: totalPacks });
@@ -252,16 +253,16 @@ export default function ProductionPage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.employeeId) return;
-    if (form.stageId === "STG-08" && !form.batchRef) return;
+    if (form.stageId === "STG-10" && !form.batchRef) return;
     if (form.stageId === "STG-01") {
       if (form.inputMode === "manual" && !form.actualPieces) return;
       if (form.inputMode === "measure" && !form.metersInput) return;
     }
-    if (form.stageId === "STG-08" && form.batchRef && batchValidationError) {
+    if (form.stageId === "STG-10" && form.batchRef && batchValidationError) {
       // Already has a validation error from onChange revert, prevent submit
       return;
     }
-    if (form.stageId === "STG-08" && form.batchRef) {
+    if (form.stageId === "STG-10" && form.batchRef) {
       const selectedBatch = batches.find((b) => b.id === form.batchRef);
       const isActive = activeBatch ? selectedBatch?.id === activeBatch.id : false;
       if (!isActive) {
@@ -298,7 +299,7 @@ export default function ProductionPage() {
         wastePct: null,
         targetPieces: dailyTarget,
         actualPieces: isMeasureCutting ? calculatedCuttingPieces : form.actualPieces,
-        batchRef: form.stageId === "STG-08" ? form.batchRef : "",
+        batchRef: form.stageId === "STG-10" ? form.batchRef : "",
         performancePct: performance,
         earningsUgx: estimatedEarnings,
         notes: form.notes,
@@ -310,7 +311,7 @@ export default function ProductionPage() {
         await updateDoc(doc(db, "productionEntries", editingEntryId), entryData);
         setEditingEntryId(null);
         window.history.replaceState({}, "", window.location.pathname);
-        if (oldEntry?.stageId === "STG-08" && oldEntry.batchRef && oldEntry.batchRef !== form.batchRef) {
+        if (oldEntry?.stageId === "STG-10" && oldEntry.batchRef && oldEntry.batchRef !== form.batchRef) {
           try { await recalculateBatchPacks(oldEntry.batchRef); } catch {}
         }
       } else {
@@ -321,7 +322,7 @@ export default function ProductionPage() {
         });
       }
 
-      if (form.stageId === "STG-08" && form.batchRef) {
+      if (form.stageId === "STG-10" && form.batchRef) {
         try {
           await recalculateBatchPacks(form.batchRef);
         } catch (err) {
@@ -367,7 +368,7 @@ export default function ProductionPage() {
   const stageBarData = useMemo(() => {
     const labels: Record<string, string> = {
       "STG-01": "Cut", "STG-02": "Sew-In", "STG-03": "Sew-Out", "STG-04": "Overlock",
-      "STG-05": "Pouch", "STG-06-Checking": "Checking", "STG-09": "Pouching & Cutting", "STG-07": "Holling", "STG-08": "Packaging",
+      "STG-05": "Pouch Cutting", "STG-06": "Pouch Making", "STG-07": "Checking", "STG-08": "Holling", "STG-09": "Pinning and Folding", "STG-10": "Packaging",
     };
     return STAGE_ORDER.map((s) => ({ label: labels[s] || s, value: stageCounts[s] }));
   }, [stageCounts]);
@@ -403,8 +404,8 @@ export default function ProductionPage() {
     [filteredEntries]
   );
 
-  const totalPackagedPads = useMemo(
-    () => stageCounts["STG-08"],
+const totalPackagedPads = useMemo(
+    () => stageCounts["STG-10"],
     [stageCounts]
   );
 
@@ -614,7 +615,7 @@ export default function ProductionPage() {
           </div>
         </ChartCard>
 
-        <ChartCard title="Finished Pads" subtitle="Packaging stage (STG-08)" variant="gradient" accentColor="#22c55e">
+        <ChartCard title="Finished Pads" subtitle="Packaging stage (STG-10)" variant="gradient" accentColor="#22c55e">
           <div className="flex flex-col items-center justify-center h-full">
             <span className="text-3xl font-bold text-emerald-500">{totalPackagedPads.toLocaleString()}</span>
             <span className="text-xs text-gray-400 mt-1">completed pads packaged</span>
@@ -1140,7 +1141,7 @@ export default function ProductionPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Worker</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pieces</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Packs</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
@@ -1155,18 +1156,19 @@ export default function ProductionPage() {
                     <td className="px-4 py-3 text-sm text-gray-500">{entry.date}</td>
                     <td className="px-4 py-3 text-right">
                       <button
-                        onClick={() => {
+onClick={() => {
+                          const pieces = entry.actualPieces;
+                          const packs = pieces;
                           const params = new URLSearchParams({
                             tab: "stock-in",
                             date: entry.date,
-                            quantity: String(entry.actualPieces),
+                            quantity: String(packs),
                             batchRef: entry.batchRef,
                             entryId: entry.id,
-                            packSize: "HALF_DOZEN",
                             employeeId: entry.employeeId,
                           });
                           window.location.href = `/storage?${params.toString()}`;
-                        }}
+                      }}
                         className="py-1.5 px-3 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 transition-colors"
                       >
                         Move to Stock
