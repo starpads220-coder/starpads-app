@@ -180,6 +180,13 @@ export interface Employee {
   active?: boolean;
 }
 
+export interface ProductionStage {
+  id: string;
+  name: string;
+  isActive: boolean;
+  stageId: StageId;
+}
+
 export interface Payment {
   id: string;
   employeeId: string;
