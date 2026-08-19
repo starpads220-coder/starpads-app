@@ -78,11 +78,9 @@ const stageUnit: Record<StageId, string> = {
   "STG-04": "pieces",
   "STG-05": "pieces",
   "STG-06-Checking": "pieces",
-  "STG-06-Rolling": "pieces",
+  "STG-09": "pieces",
   "STG-07": "pieces",
   "STG-08": "packs",
-  "STG-09": "pieces",
-  "STG-10": "pieces",
 };
 
 const stagesWithMaterial: StageId[] = ["STG-01", "STG-02", "STG-03"];
@@ -369,8 +367,7 @@ export default function ProductionPage() {
   const stageBarData = useMemo(() => {
     const labels: Record<string, string> = {
       "STG-01": "Cut", "STG-02": "Sew-In", "STG-03": "Sew-Out", "STG-04": "Overlock",
-      "STG-05": "Pouch", "STG-06-Checking": "Checking", "STG-06-Rolling": "Rolling",
-      "STG-07": "Pin/Fold", "STG-08": "Packaging", "STG-09": "Pouching & Cutting", "STG-10": "Holling",
+      "STG-05": "Pouch", "STG-06-Checking": "Checking", "STG-09": "Pouching & Cutting", "STG-07": "Holling", "STG-08": "Packaging",
     };
     return STAGE_ORDER.map((s) => ({ label: labels[s] || s, value: stageCounts[s] }));
   }, [stageCounts]);

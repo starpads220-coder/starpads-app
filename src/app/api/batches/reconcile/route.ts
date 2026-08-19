@@ -39,7 +39,7 @@ export async function POST() {
     const p0002StockIns = db.collection("stockIns").where("batchRef", "==", "P0002");
     const p0002StockInsSnap = await p0002StockIns.get();
 
-p0002StockInsSnap.forEach((d) => {
+    p0002StockInsSnap.forEach((d) => {
       const data = d.data();
       const packSizeStr = data.packSize || "";
       const packSizeVal = (packSizeStr === "HALF_DOZEN" ? 6 : packSizeStr === "DOZEN" ? 12 : packSizeStr === "CARTON" ? 120 : packSizeStr === "ONE_PACK" ? 3 : 1);
@@ -98,7 +98,7 @@ p0002StockInsSnap.forEach((d) => {
 
     const batchUpdatePromises: Promise<any>[] = [];
 
-batchesSnap.forEach((batchDoc) => {
+    batchesSnap.forEach((batchDoc) => {
       const batchId = batchDoc.id;
       if (batchId === "P0002") return;
 
@@ -134,33 +134,6 @@ batchesSnap.forEach((batchDoc) => {
       if (Object.keys(batchUpdates).length > 0) {
         var p = batchDoc.ref.update(batchUpdates);
         batchUpdatePromises.push(p);
-        var actionName = packsStored >= 10000 ? "marked-complete" : "status-reactivated";
-        var detailStr = packsStored + "/10000 packs, " + actionName;
-        log.push({
-          batchId: batchId,
-          action: actionName,
-          details: detailStr,
-        });
-      }
-    });
-
-      const packsStored = Math.floor(totalPads / 3);
-
-      const batchUpdates: Record<string, unknown> = {};
-
-      if (packsStored >= 10000) {
-        batchUpdates.status = "COMPLETE";
-        batchUpdates.completionDate = new Date().toISOString().split("T")[0];
-      } else if (batchData.status !== "ACTIVE") {
-        batchUpdates.status = "ACTIVE";
-      }
-
-      if (packsStored !== batchData.packsProduced) {
-        batchUpdates.packsProduced = packsStored;
-      }
-
-      if (Object.keys(batchUpdates).length > 0) {
-        batchUpdatePromises.push(batchDoc.ref.update(batchUpdates));
         var actionName = packsStored >= 10000 ? "marked-complete" : "status-reactivated";
         var detailStr = packsStored + "/10000 packs, " + actionName;
         log.push({

@@ -25,6 +25,7 @@ import { PieWithLegendChart } from "@/components/charts/PieWithLegendChart";
 import { VerticalBarChart } from "@/components/charts/VerticalBarChart";
 import { CalendarHeatmap } from "@/components/charts/CalendarHeatmap";
 import { palette } from "@/components/charts";
+import { showToast } from "@/components/ui/Toast";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 
@@ -116,7 +117,7 @@ useEffect(() => {
       setStockInForm((prev) => ({
         ...prev,
         date: dateParam || prev.date,
-        quantity: quantityParam ? parseInt(quantityParam, 10) || 0 : prev.quantity,
+        quantity: quantityParam ? Math.round(parseFloat(quantityParam) / 3) : prev.quantity,
         batchRef: batchRefParam || prev.batchRef,
         packSize: (packSizeParam as PackSize) || prev.packSize,
       }));
@@ -132,7 +133,7 @@ useEffect(() => {
         customerRef: customerRefParam || prev.customerRef,
         destination: destinationParam || prev.destination,
         packSize: (packSizeParam as PackSize) || prev.packSize,
-        quantity: quantityParam ? parseInt(quantityParam, 10) || 0 : prev.quantity,
+        quantity: quantityParam ? Math.round(parseFloat(quantityParam) / 3) : prev.quantity,
         batchRef: batchRefParam || prev.batchRef,
         dispatchedBy: dispatchedByParam || prev.dispatchedBy,
       }));
@@ -250,19 +251,19 @@ useEffect(() => {
     const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
     const filtered = productionEntries.filter((e) => e.date >= wipBounds.start && e.date <= wipBounds.end);
     const counts: Record<StageId, number> = {
-      "STG-01": 0, "STG-02": 0, "STG-03": 0, "STG-04": 0, "STG-05": 0, "STG-06-Checking": 0, "STG-06-Rolling": 0, "STG-07": 0, "STG-08": 0, "STG-09": 0, "STG-10": 0,
+      "STG-01": 0, "STG-02": 0, "STG-03": 0, "STG-04": 0, "STG-05": 0, "STG-06-Checking": 0, "STG-09": 0, "STG-07": 0, "STG-08": 0,
     };
     filtered.forEach((e) => { counts[e.stageId] = (counts[e.stageId] || 0) + e.actualPieces; });
     return counts;
   }, [productionEntries, wipPeriod, wipCustomStart, wipCustomEnd]);
 
-  const totalPackagedPads = stageCounts["STG-08"];
+const totalPackagedPads = stageCounts["STG-08"];
 
   const wipCut = Math.max(0, stageCounts["STG-01"] - stageCounts["STG-02"]);
   const wipSewn = Math.max(0, (stageCounts["STG-02"] + stageCounts["STG-03"]) - stageCounts["STG-04"]);
   const wipOverlocked = Math.max(0, stageCounts["STG-04"] - stageCounts["STG-05"]);
-  const wipPouches = Math.max(0, stageCounts["STG-05"] - stageCounts["STG-06-Checking"]);
-  const wipPinned = Math.max(0, stageCounts["STG-06-Rolling"] - stageCounts["STG-07"]);
+  const wipPouches = Math.max(0, stageCounts["STG-05"] - stageCounts["STG-09"]);
+  const wipPinned = Math.max(0, stageCounts["STG-09"] - stageCounts["STG-07"]);
   const wipPacked = Math.max(0, stageCounts["STG-07"] - totalPackagedPads);
 
   const wipEntries = useMemo(() => {
@@ -370,6 +371,10 @@ useEffect(() => {
       queryClient.invalidateQueries({ queryKey: ["stockIns"] });
       queryClient.invalidateQueries({ queryKey: ["batches"] });
       setStockInForm({ date: new Date().toISOString().split("T")[0], batchRef: "", packSize: "HALF_DOZEN", quantity: 0, receivedBy: "", notes: "" });
+      showToast("Stock-In record saved successfully", "success");
+    } catch (err) {
+      console.error("Stock-In save failed:", err);
+      showToast("Failed to save Stock-In record: " + (err instanceof Error ? err.message : String(err)), "error");
     } finally {
       setSaving(false);
     }
