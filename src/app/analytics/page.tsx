@@ -350,7 +350,7 @@ export default function AnalyticsPage() {
     const ms = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}-01`;
     const perf: { label: string; value: number; color: string }[] = [];
     employees
-      .filter((e) => e.isActive)
+      .filter((e) => e.active)
       .slice(0, 10)
       .forEach((emp) => {
         const workerEntries = entries.filter((e) => e.employeeId === emp.id && e.date >= ms);

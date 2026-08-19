@@ -183,7 +183,7 @@ export default function PaymentsPage() {
 
   const productionEmployees = useMemo(() =>
     employees.filter(
-      (e) => (supervisorDepartment ? e.department === supervisorDepartment : e.department === "PRODUCTION") && e.isActive
+      (e) => (supervisorDepartment ? e.department === supervisorDepartment : e.department === "PRODUCTION") && e.active
     ),
     [employees, supervisorDepartment]
   );

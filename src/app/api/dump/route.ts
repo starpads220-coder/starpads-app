@@ -1,5 +1,6 @@
 import { getAdminDb } from "@/lib/firebase-admin";
 import { NextResponse } from "next/server";
+import type { Batch } from "@/types";
 
 export async function GET() {
   const db = getAdminDb();
@@ -7,7 +8,10 @@ export async function GET() {
 
   try {
     const batchesSnap = await db.collection("batches").get();
-    const batches = batchesSnap.docs.map(d => ({ id: d.id, ...d.data() as Record<string, unknown> }));
+    const batches = batchesSnap.docs.map(d => ({
+      ...d.data(),
+      id: d.id,
+    })) as Batch[];
 
     // Raw stock-in quantity sums per batch (what the user enters on the stock-in screen)
     const stockInsSnap = await db.collection("stockIns").get();

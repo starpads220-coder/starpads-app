@@ -149,10 +149,20 @@ export interface SaleTransaction {
   notes?: string;
 }
 
+export type ExpenseCategory =
+  | "RAW_MATERIALS"
+  | "LABOUR"
+  | "UTILITIES"
+  | "TRANSPORT"
+  | "PACKAGING_SUPPLIES"
+  | "EQUIPMENT_MAINTENANCE"
+  | "MARKETING"
+  | "MISCELLANEOUS";
+
 export interface Expense {
   id: string;
   date: string;
-  category: string;
+  category: ExpenseCategory;
   description: string;
   amountUgx: number;
   paidBy: string;
