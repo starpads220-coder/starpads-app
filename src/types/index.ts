@@ -178,6 +178,7 @@ export interface Employee {
   email?: string;
   startDate?: string;
   active?: boolean;
+  isActive?: boolean;
 }
 
 export interface ProductionStage {
