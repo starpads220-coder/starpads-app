@@ -30,7 +30,6 @@ import {
   PaymentMethod,
   SaleTransaction,
   SalesTarget,
-  SalesTargetType,
   Batch,
 } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
@@ -53,10 +52,9 @@ const SalesCharts = dynamic(() => import("@/components/sales/SalesCharts"), {
 
 type TabKey = "dashboard" | "calendar" | "entry";
 type AnalyticsPeriod = "day" | "week" | "month" | "12months" | "custom";
+type SalesTargetType = "MONTHLY" | "QUARTERLY" | "SIX_MONTHS" | "ANNUAL";
 
-const SALES_TARGET_TYPE_LABELS: Partial<Record<SalesTargetType, string>> = {
-  DAILY: "Daily",
-  WEEKLY: "Weekly",
+const SALES_TARGET_TYPE_LABELS: Record<SalesTargetType, string> = {
   MONTHLY: "Monthly",
   QUARTERLY: "Quarterly",
   SIX_MONTHS: "6 Months",
@@ -449,7 +447,7 @@ export default function SalesPage() {
       quantitySold: t.quantitySold,
       unitPrice: t.unitPrice,
       paymentMethod: t.paymentMethod,
-      salespersonId: t.salespersonId || "",
+      salespersonId: t.salespersonId,
       notes: t.notes || "",
       batchRef: t.batchRef || "",
     });
@@ -501,7 +499,7 @@ export default function SalesPage() {
       targetType: target.targetType,
       targetAmount: target.targetAmount,
       periodReference: target.periodReference,
-      description: target.description || "",
+      description: target.description,
     });
     setEditingTargetId(target.id);
     setShowTargetForm(true);

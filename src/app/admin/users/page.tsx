@@ -4,16 +4,7 @@ import { useState, useCallback } from "react";
 import { orderBy } from "firebase/firestore";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
-import { Employee, EmployeeRole } from "@/types";
-
-interface UserRecord {
-  uid: string;
-  email: string;
-  role: EmployeeRole;
-  status: "pending" | "active" | "suspended";
-  createdAt?: string | number;
-  employeeId?: string;
-}
+import { UserRole, Employee } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
@@ -31,7 +22,7 @@ export default function AdminUsersPage() {
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
   const [suspendTarget, setSuspendTarget] = useState<string | null>(null);
 
-  const { data: users = [], isLoading: usersLoading } = useQuery<UserRecord[]>({
+  const { data: users = [], isLoading: usersLoading } = useQuery<UserRole[]>({
     queryKey: ["users"],
     queryFn: async () => {
       const res = await fetch(`/api/users?adminUid=${userRole?.uid}`);
