@@ -22,7 +22,7 @@ const defaultForm: Omit<Employee, "id" | "dailyWageRate"> = {
   role: "WORKER" as EmployeeRole,
   department: "PRODUCTION" as Department,
   startDate: new Date().toISOString().split("T")[0],
-  isActive: true,
+  active: true,
 };
 
 const roleOptions: EmployeeRole[] = [
@@ -95,7 +95,7 @@ export default function AdminEmployeesPage() {
       role: emp.role,
       department: emp.department,
       startDate: emp.startDate,
-      isActive: emp.isActive,
+      active: emp.active,
     });
     setEditingId(emp.id);
     setShowForm(true);
@@ -122,7 +122,7 @@ export default function AdminEmployeesPage() {
 
   const handleToggleActive = async (emp: Employee) => {
     await updateDoc(doc(db, "employees", emp.id), {
-      isActive: !emp.isActive,
+      active: !emp.active,
     });
     queryClient.invalidateQueries({ queryKey: ["employees"] });
     setDeleteTarget(null);
