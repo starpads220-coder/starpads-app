@@ -66,7 +66,7 @@ const existingBatches = await db.collection("batches").get();
         const batchStartDate = batchData.startDate ?? "";
         if (batchStartDate < p0002StartDate) {
           deactivationPromises.push(
-            updateDoc(doc(db, "batches", batchDoc.id), {
+            updateDoc(doc(db as any, "batches", batchDoc.id), {
               status: "INACTIVE",
             })
           );

@@ -101,6 +101,7 @@ export interface ProductionEntry {
   inputMode?: "manual" | "measure";
   notes?: string;
   paymentStatus?: "due" | "paid";
+  paymentId?: string;
   movedToStockAt?: import("firebase/firestore").Timestamp | null;
 }
 
@@ -192,8 +193,10 @@ export interface ProductionStage {
   name: string;
   isActive: boolean;
   stageId: StageId;
+  materialTargets?: Record<MaterialType, number>;
+  defaultTarget: number;
+  defaultWageRate: number;
 }
-
 export interface Payment {
   id: string;
   employeeId: string;
@@ -203,4 +206,20 @@ export interface Payment {
   periodEnd?: string;
   method?: string;
   notes?: string;
+  grossAmount?: number;
+  nssfEmployeeDeduction?: number;
+  nssfBusinessContribution?: number;
+  payeeTax?: number;
+  netPayAmount?: number;
+  totalAmount?: number;
+  receiptNumber?: string;
+  status?: "due" | "paid";
+}
+
+export interface TargetConfig {
+  employeeId: string;
+  stageId: StageId;
+  effectiveDate: string;
+  dailyTarget: number;
+  overrideTarget: number;
 }

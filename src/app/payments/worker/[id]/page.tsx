@@ -282,8 +282,8 @@ export default function EmployeePaymentDetailPage() {
           receiptNumber={payment.receiptNumber || paymentId}
           employeeName={employee?.name || payment.employeeId}
           employeeRole={employee ? employee.role.replace(/_/g, " ") : ""}
-          periodStart={payment.periodStart}
-          periodEnd={payment.periodEnd}
+          periodStart={payment.periodStart || ""}
+          periodEnd={payment.periodEnd || ""}
           paidDate={payment.paidDate || ""}
           entries={receiptEntries}
           grossAmount={gross}
@@ -871,7 +871,7 @@ export default function EmployeePaymentDetailPage() {
                       {p.periodStart} &mdash; {p.periodEnd}
                     </td>
                     <td className="px-4 py-3 text-sm font-medium text-ugx">
-                      UGX {p.totalAmount.toLocaleString()}
+                      UGX {((p.totalAmount ?? 0) || p.amountUgx).toLocaleString()}
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -881,7 +881,7 @@ export default function EmployeePaymentDetailPage() {
                             : "bg-amber-100 text-amber-700"
                         }`}
                       >
-                        {p.status.toUpperCase()}
+                        {p.status?.toUpperCase() || ""}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">
