@@ -567,7 +567,6 @@ export default function SalesCharts({ transactions, expenses, salesTargets = [] 
     });
     return Object.entries(customerTotals)
       .sort((a, b) => b[1] - a[1])
-      .slice(0, 5)
       .map(([name, amount], i) => ({
         label: name,
         value: amount,
@@ -808,12 +807,12 @@ export default function SalesCharts({ transactions, expenses, salesTargets = [] 
             title="Top Customers"
             subtitle="Highest revenue contributors"
             variant="gradient"
+            className="h-[320px]"
             badge={topCustomers.length > 0 ? { label: "Total", value: topCustomers.length.toString(), color: "blue" } : undefined}
           >
-            <ColoredHorizBarChart
-              data={topCustomers}
-              emptyMessage={emptyLabel}
-            />
+            <div className="h-full overflow-y-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <ColoredHorizBarChart data={topCustomers} emptyMessage={emptyLabel} />
+            </div>
           </ChartCard>
 
           <VerticalBarChart

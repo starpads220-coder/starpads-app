@@ -608,40 +608,24 @@ const totalPackagedPads = useMemo(
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <ChartCard title="Total Pads" subtitle="Total individual pads (packs × 3)" variant="gradient" accentColor={palette.emerald}>
+          <div className="flex flex-col items-center justify-center h-full">
+            <span className="text-3xl font-bold text-emerald-500">{(totalPackagedPads * 3).toLocaleString()}</span>
+            <span className="text-xs text-gray-400 mt-1">individual pads</span>
+          </div>
+        </ChartCard>
         <ChartCard title="Total Pieces" subtitle="All stages combined" variant="gradient" accentColor="#3b82f6">
           <div className="flex flex-col items-center justify-center h-full">
             <span className="text-3xl font-bold text-blue-500">{totalPieces.toLocaleString()}</span>
             <span className="text-xs text-gray-400 mt-1">pieces produced this period</span>
           </div>
         </ChartCard>
-
-        <ChartCard title="Finished Pads" subtitle="Packaging stage (STG-10)" variant="gradient" accentColor="#22c55e">
+        <ChartCard title="Finished Packs" subtitle="completed packs packaged" variant="gradient" accentColor="#22c55e">
           <div className="flex flex-col items-center justify-center h-full">
             <span className="text-3xl font-bold text-emerald-500">{totalPackagedPads.toLocaleString()}</span>
-            <span className="text-xs text-gray-400 mt-1">completed pads packaged</span>
+            <span className="text-xs text-gray-400 mt-1">completed packs packaged</span>
           </div>
         </ChartCard>
-
-        <ChartCard title="Material Input" subtitle="Cutting & Measuring stage (STG-01)" variant="gradient" accentColor="#f59e0b">
-          <div className="flex flex-col items-center justify-center h-full">
-            <span className="text-3xl font-bold text-amber-500">{totalMetersInput.toFixed(1)}</span>
-            <span className="text-xs text-gray-400 mt-1">meters of fabric cut</span>
-          </div>
-        </ChartCard>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        <SingleDonutChart
-          value={estimatedComplete > 0 && estimatedComplete < Infinity ? estimatedComplete : 0}
-          total={maxStageValue}
-          title="Bottleneck Completion"
-          subtitle="Est. complete pads vs max stage"
-          color={palette.emerald}
-          centerLabel={(estimatedComplete > 0 && estimatedComplete < Infinity ? estimatedComplete : 0).toLocaleString()}
-          centerSubLabel={`of ${maxStageValue.toLocaleString()} pads`}
-          height={280}
-        />
-
         <SingleBarChart
           data={stageBarData}
           title="Stage Distribution"
@@ -658,6 +642,12 @@ const totalPackagedPads = useMemo(
           height={280}
         />
 
+        <ChartCard title="Material Input" subtitle="Cutting & Measuring stage (STG-01)" variant="gradient" accentColor="#f59e0b">
+          <div className="flex flex-col items-center justify-center h-full">
+            <span className="text-3xl font-bold text-amber-500">{totalMetersInput.toFixed(1)}</span>
+            <span className="text-xs text-gray-400 mt-1">meters of fabric cut</span>
+          </div>
+        </ChartCard>
         {workerMetrics.length >= 2 ? (
           <RadarChart
             data={workerRadarData}

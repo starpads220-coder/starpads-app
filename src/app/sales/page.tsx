@@ -185,6 +185,16 @@ export default function SalesPage() {
     orderBy("startDate", "desc"),
   ], { staleTime: 2 * 60 * 1000 });
 
+  // Sales are allocated to the oldest active batch that still has capacity.
+  const currentSaleBatch = useMemo(() => {
+    const available = batches.filter((batch) => batch.status === "ACTIVE" && batch.packsProduced < batch.maxPacks);
+    return available.reduce<Batch | null>((oldest, batch) => {
+      if (!oldest || batch.startDate < oldest.startDate) return batch;
+      if (batch.startDate === oldest.startDate && batch.batchNumber < oldest.batchNumber) return batch;
+      return oldest;
+    }, null);
+  }, [batches]);
+
   useEffect(() => {
     const unsub1 = onSnapshot(
       query(collection(db, "saleTransactions"), orderBy("date", "desc"), limit(500)),
@@ -361,6 +371,19 @@ export default function SalesPage() {
     orderBy("createdAt", "desc"),
   ], { staleTime: 30 * 1000 });
 
+  const periodTarget = useMemo(() => {
+    const preferredType: SalesTargetType | undefined =
+      analyticsPeriod === "12months" ? "ANNUAL" : analyticsPeriod === "month" ? "MONTHLY" : undefined;
+
+    return (preferredType
+      ? salesTargets.find((target) => target.targetType === preferredType)
+      : undefined) ?? salesTargets[0] ?? null;
+  }, [analyticsPeriod, salesTargets]);
+
+  const targetProgress = periodTarget && periodTarget.targetAmount > 0
+    ? (totalRevenue / periodTarget.targetAmount) * 100
+    : 0;
+
   const totalAmount = form.quantitySold * form.unitPrice;
   const expectedPrice = getExpectedPrice(form.packSize, form.packVariant);
   const expectedTotal = form.quantitySold * expectedPrice;
@@ -378,33 +401,36 @@ export default function SalesPage() {
     setFormError("");
     setFormSuccess(false);
     try {
+      const batchRef = form.batchRef || currentSaleBatch?.id || "";
+      if (!editingId && (!currentSaleBatch || batchRef !== currentSaleBatch.id)) {
+        throw new Error("Sales must be recorded against the current available batch.");
+      }
+
+      const saleData = { ...form, batchRef, totalAmount };
       if (editingId) {
         await updateDoc(doc(db, "saleTransactions", editingId), {
-          ...form,
-          totalAmount,
+          ...saleData,
         });
       } else {
         await addDoc(collection(db, "saleTransactions"), {
-          ...form,
-          totalAmount,
+          ...saleData,
           createdAt: Timestamp.now(),
         });
       }
       if (!editingId) {
-        const salesperson = employees.find((e) => e.id === form.salespersonId);
-        const batch = batches.find((b) => b.id === form.batchRef);
-        setRecentSale({
+        const params = new URLSearchParams({
+          tab: "stock-out",
           date: form.date,
-          customerName: form.customerName,
-          customerType: form.customerType,
-          batchRef: form.batchRef,
-          batchNumber: batch?.batchNumber || "",
+          customerRef: form.customerName,
+          destination: form.customerType === "BULK" ? "BULK_CUSTOMER" : form.customerType,
           packSize: form.packSize,
-          packVariant: form.packVariant,
-          quantitySold: form.quantitySold,
-          salespersonId: form.salespersonId,
-          salespersonName: salesperson?.name || form.salespersonId,
+          quantity: String(form.quantitySold),
+          dispatchedBy: form.salespersonId,
+          batchRef,
         });
+        // Redirect only after the sale transaction has been saved successfully.
+        window.location.href = `/storage?${params.toString()}`;
+        return;
       }
       setPadsInput(0);
       setEditingId(null);
@@ -1028,6 +1054,42 @@ export default function SalesPage() {
             )}
           </div>
 
+          <ChartCard
+            title="Sales Target Tracker"
+            subtitle={periodTarget
+              ? `${SALES_TARGET_TYPE_LABELS[periodTarget.targetType]} target • ${periodTarget.periodReference}`
+              : "Create a sales target to start tracking progress"}
+            variant="gradient"
+            accentColor={targetProgress >= 100 ? "#22c55e" : "#3b82f6"}
+          >
+            {periodTarget ? (
+              <div className="space-y-3">
+                <div className="flex items-end justify-between gap-4">
+                  <div>
+                    <p className="text-2xl font-bold text-gray-900">UGX {totalRevenue.toLocaleString()}</p>
+                    <p className="text-xs text-gray-400 mt-1">sales in the selected period</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm font-semibold text-gray-700">UGX {periodTarget.targetAmount.toLocaleString()}</p>
+                    <p className="text-xs text-gray-400 mt-1">target</p>
+                  </div>
+                </div>
+                <div className="h-3 rounded-full bg-gray-100 overflow-hidden">
+                  <div
+                    className="h-full rounded-full transition-all duration-500"
+                    style={{ width: `${Math.min(targetProgress, 100)}%`, backgroundColor: targetProgress >= 100 ? "#22c55e" : "#3b82f6" }}
+                  />
+                </div>
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>{targetProgress.toFixed(1)}% achieved</span>
+                  <span>UGX {Math.max(0, periodTarget.targetAmount - totalRevenue).toLocaleString()} remaining</span>
+                </div>
+              </div>
+            ) : (
+              <p className="flex h-full items-center justify-center text-sm text-gray-400">No sales target has been configured.</p>
+            )}
+          </ChartCard>
+
           {/* Sales List */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
             <div className="flex items-center justify-between">
@@ -1335,14 +1397,16 @@ export default function SalesPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Batch</label>
               <select
-                value={form.batchRef}
+                value={form.batchRef || currentSaleBatch?.id || ""}
                 onChange={(event) => setForm({ ...form, batchRef: event.target.value })}
+                required
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
               >
-                <option value="">Select batch (optional)...</option>
-                {batches.filter((b) => b.status === "ACTIVE").map((b) => (
-                  <option key={b.id} value={b.id}>{b.batchNumber} — {b.packsProduced.toLocaleString()} / {b.maxPacks.toLocaleString()} packs</option>
-                ))}
+                {currentSaleBatch ? (
+                  <option value={currentSaleBatch.id}>{currentSaleBatch.batchNumber} — {(currentSaleBatch.maxPacks - currentSaleBatch.packsProduced).toLocaleString()} packs remaining</option>
+                ) : (
+                  <option value="">No active batch with remaining capacity</option>
+                )}
               </select>
             </div>
             <div>

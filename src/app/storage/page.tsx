@@ -14,8 +14,7 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { useAuth } from "@/lib/auth-context";
-import { StockIn, StockOut, PackSize, Batch, ProductionEntry, SaleTransaction, StageId } from "@/types";
+import { StockIn, StockOut, PackSize, Batch, ProductionEntry, StageId, STAGE_LABELS, STAGE_ORDER } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { PACK_SIZES } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
@@ -67,22 +66,11 @@ function getStoragePeriodBounds(period: StoragePeriod, customStart?: string, cus
 }
 
 export default function StoragePage() {
-  const { userRole } = useAuth();
   const queryClient = useQueryClient();
-  const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
   const [activeTab, setActiveTab] = useState<"dashboard" | "stock-in" | "stock-out" | "wip" | "analytics">("dashboard");
   const [saving, setSaving] = useState(false);
 
-  const visibleTabs = useMemo(() => {
-    const allTabs = ["dashboard", "stock-in", "stock-out", "wip", "analytics"] as const;
-    if (isSupervisor) return allTabs.filter((t) => t !== "stock-out");
-    return allTabs;
-  }, [isSupervisor]);
-
-  const handleTabChange = (tab: typeof activeTab) => {
-    if (isSupervisor && tab === "stock-out") return;
-    setActiveTab(tab);
-  };
+  const visibleTabs = ["dashboard", "stock-in", "stock-out", "wip", "analytics"] as const;
 
   const [moveEntryId, setMoveEntryId] = useState<string | null>(null);
   // Dashboard batch selector — defaults to oldest active batch
@@ -90,6 +78,9 @@ export default function StoragePage() {
   const [storagePeriod, setStoragePeriod] = useState<StoragePeriod>("month");
   const [storageCustomStart, setStorageCustomStart] = useState("");
   const [storageCustomEnd, setStorageCustomEnd] = useState("");
+  const [stockInPeriod, setStockInPeriod] = useState<StoragePeriod>("month");
+  const [stockInCustomStart, setStockInCustomStart] = useState("");
+  const [stockInCustomEnd, setStockInCustomEnd] = useState("");
   const [stockOutPeriod, setStockOutPeriod] = useState<StoragePeriod>("month");
   const [stockOutCustomStart, setStockOutCustomStart] = useState("");
   const [stockOutCustomEnd, setStockOutCustomEnd] = useState("");
@@ -135,10 +126,6 @@ export default function StoragePage() {
 
   const { data: productionEntries = [] } = useCollectionQuery<ProductionEntry>(
     "productionEntries", [], { staleTime: 0 }
-  );
-
-  const { data: sales = [] } = useCollectionQuery<SaleTransaction>(
-    "saleTransactions", [orderBy("date", "desc")], { staleTime: 60 * 1000 }
   );
 
   // --- URL param auto-population (Move to Stock flow) ---
@@ -258,18 +245,6 @@ export default function StoragePage() {
     [stockOuts, periodBounds]
   );
 
-  const cumulativeStock = useMemo(() => {
-    const stock: Record<PackSize, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0, ONE_PACK: 0 };
-    stockIns.forEach((si) => { stock[si.packSize as PackSize] += si.quantity; });
-    stockOuts.forEach((so) => { stock[so.packSize as PackSize] -= so.quantity; });
-    return stock;
-  }, [stockIns, stockOuts]);
-
-  const cumulativeTotalPads = useMemo(
-    () => Object.entries(cumulativeStock).reduce((sum, [size, qty]) => sum + qty * PACK_SIZES[size as PackSize], 0),
-    [cumulativeStock]
-  );
-
   const currentStock = useMemo(() => {
     const stock: Record<PackSize, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0, ONE_PACK: 0 };
     periodStockIns.forEach((si) => { stock[si.packSize as PackSize] += si.quantity; });
@@ -277,9 +252,39 @@ export default function StoragePage() {
     return stock;
   }, [periodStockIns, periodStockOuts]);
 
+  // Dashboard balances reflect stock-in minus stock-out movements in the selected period.
+  // Each stored pack contains three pads.
+  const totalPacks = useMemo(
+    () =>
+      periodStockIns.reduce((sum, stockIn) => sum + stockIn.quantity, 0) -
+      periodStockOuts.reduce((sum, stockOut) => sum + stockOut.quantity, 0),
+    [periodStockIns, periodStockOuts]
+  );
+
   const totalPads = useMemo(
-    () => Object.entries(currentStock).reduce((sum, [size, qty]) => sum + qty * PACK_SIZES[size as PackSize], 0),
-    [currentStock]
+    () => totalPacks * PADS_PER_PACK,
+    [totalPacks]
+  );
+
+  const stockInBounds = useMemo(
+    () => getStoragePeriodBounds(stockInPeriod, stockInCustomStart, stockInCustomEnd),
+    [stockInPeriod, stockInCustomStart, stockInCustomEnd]
+  );
+
+  const stockInPeriodData = useMemo(
+    () => stockIns.filter((stockIn) => stockIn.date >= stockInBounds.start && stockIn.date <= stockInBounds.end),
+    [stockIns, stockInBounds]
+  );
+
+  // Stock-In tab totals reflect entries in its selected period.
+  const stockInTotalPacks = useMemo(
+    () => stockInPeriodData.reduce((sum, stockIn) => sum + stockIn.quantity, 0),
+    [stockInPeriodData]
+  );
+
+  const stockInTotalPads = useMemo(
+    () => stockInTotalPacks * PADS_PER_PACK,
+    [stockInTotalPacks]
   );
 
   // The batch shown in the dashboard card — uses dashboard selector, falls back to oldest active
@@ -296,17 +301,6 @@ export default function StoragePage() {
     return Math.min(100, Math.round((batchTotalPacks / dashboardBatch.maxPacks) * 100));
   }, [dashboardBatch, batchTotalPacks]);
 
-  const daysOfStock = useMemo(() => {
-    const now = new Date();
-    const sevenDaysAgo = new Date(now);
-    sevenDaysAgo.setDate(now.getDate() - 7);
-    const sevenDaysAgoStr = sevenDaysAgo.toISOString().split("T")[0];
-    const recentSales = sales.filter((s) => s.date >= sevenDaysAgoStr);
-    const recentSalesPads = recentSales.reduce((sum, s) => sum + s.quantitySold * PACK_SIZES[s.packSize as PackSize], 0);
-    const avgDailySales = recentSalesPads / 7;
-    return avgDailySales > 0 ? Math.round(cumulativeTotalPads / avgDailySales) : 999;
-  }, [sales, cumulativeTotalPads]);
-
   const stageCounts = useMemo(() => {
     const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
     const filtered = productionEntries.filter((e) => e.date >= wipBounds.start && e.date <= wipBounds.end);
@@ -316,15 +310,6 @@ export default function StoragePage() {
     filtered.forEach((e) => { const sid = e.stageId as StageId; counts[sid] = (counts[sid] || 0) + e.actualPieces; });
     return counts;
   }, [productionEntries, wipPeriod, wipCustomStart, wipCustomEnd]);
-
-const totalPackagedPads = stageCounts["STG-10"];
-
-  const wipCut = Math.max(0, stageCounts["STG-01"] - stageCounts["STG-02"]);
-  const wipSewn = Math.max(0, (stageCounts["STG-02"] + stageCounts["STG-03"]) - stageCounts["STG-04"]);
-  const wipOverlocked = Math.max(0, stageCounts["STG-04"] - stageCounts["STG-05"]);
-  const wipPouches = Math.max(0, stageCounts["STG-05"] - stageCounts["STG-09"]);
-  const wipPinned = Math.max(0, stageCounts["STG-09"] - stageCounts["STG-07"]);
-  const wipPacked = Math.max(0, stageCounts["STG-07"] - totalPackagedPads);
 
   const wipEntries = useMemo(() => {
     const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
@@ -336,8 +321,15 @@ const totalPackagedPads = stageCounts["STG-10"];
   const packsBySizeData = useMemo(() => {
     const bySize: Record<string, number> = {};
     stockIns.forEach((si) => { bySize[si.packSize] = (bySize[si.packSize] || 0) + si.quantity; });
-    return Object.entries(bySize).map(([name, value]) => ({
-      name: name === "HALF_DOZEN" ? "Half Dozen" : name === "DOZEN" ? "Dozen" : "Carton",
+    return Object.entries(bySize).map(([packSize, value]) => ({
+      name:
+        packSize === "ONE_PACK"
+          ? "Single Pack"
+          : packSize === "HALF_DOZEN"
+            ? "Half Dozen"
+            : packSize === "DOZEN"
+              ? "Dozen"
+              : "Carton",
       value,
     }));
   }, [stockIns]);
@@ -490,7 +482,17 @@ const totalPackagedPads = stageCounts["STG-10"];
     e.preventDefault();
     setSaving(true);
     try {
-      await addDoc(collection(db, "stockOuts"), { ...stockOutForm, createdAt: Timestamp.now() });
+      const batchRef = stockOutForm.batchRef || oldestActiveBatch?.id || "";
+      if (!oldestActiveBatch || batchRef !== oldestActiveBatch.id) {
+        showToast(
+          oldestActiveBatch
+            ? `⚠️ Record stock-out against current batch ${oldestActiveBatch.batchNumber} before using another batch.`
+            : "⚠️ No active batch with remaining capacity is available.",
+          "error"
+        );
+        return;
+      }
+      await addDoc(collection(db, "stockOuts"), { ...stockOutForm, batchRef, createdAt: Timestamp.now() });
       queryClient.invalidateQueries({ queryKey: ["stockOuts"] });
       setStockOutForm({ date: new Date().toISOString().split("T")[0], destination: "", customerRef: "", batchRef: "", packSize: "HALF_DOZEN", quantity: 0, dispatchedBy: "" });
     } finally {
@@ -529,7 +531,7 @@ const totalPackagedPads = stageCounts["STG-10"];
           {visibleTabs.map((tab) => (
             <button
               key={tab}
-              onClick={() => handleTabChange(tab)}
+              onClick={() => setActiveTab(tab)}
               className={`px-4 py-2 text-sm font-medium rounded-md ${
                 activeTab === tab ? "bg-gray-900 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"
               }`}
@@ -575,28 +577,14 @@ const totalPackagedPads = stageCounts["STG-10"];
         )}
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          <ChartCard title="Half Dozen" subtitle="6-pad packs in period" variant="gradient" accentColor={palette.blue}>
+          <ChartCard title="Total Packs" subtitle="Stock balance in period" variant="gradient" accentColor={palette.orange}>
             <div className="flex flex-col items-center justify-center h-full">
-              <span className="text-3xl font-bold text-blue-500">{currentStock.HALF_DOZEN.toLocaleString()}</span>
-              <span className="text-xs text-gray-400 mt-1">packs</span>
+              <span className="text-3xl font-bold text-orange-500">{totalPacks.toLocaleString()}</span>
+              <span className="text-xs text-gray-400 mt-1">packs in period</span>
             </div>
           </ChartCard>
 
-          <ChartCard title="Dozen" subtitle="12-pad packs in period" variant="gradient" accentColor={palette.indigo}>
-            <div className="flex flex-col items-center justify-center h-full">
-              <span className="text-3xl font-bold text-indigo-500">{currentStock.DOZEN.toLocaleString()}</span>
-              <span className="text-xs text-gray-400 mt-1">packs</span>
-            </div>
-          </ChartCard>
-
-          <ChartCard title="Carton" subtitle="120-pad packs in period" variant="gradient" accentColor={palette.purple}>
-            <div className="flex flex-col items-center justify-center h-full">
-              <span className="text-3xl font-bold text-purple-500">{currentStock.CARTON.toLocaleString()}</span>
-              <span className="text-xs text-gray-400 mt-1">packs</span>
-            </div>
-          </ChartCard>
-
-          <ChartCard title="Total Pads" subtitle="All pack sizes in period" variant="gradient" accentColor={palette.emerald}>
+          <ChartCard title="Total Pads" subtitle="Total packs × 3" variant="gradient" accentColor={palette.emerald}>
             <div className="flex flex-col items-center justify-center h-full">
               <span className="text-3xl font-bold text-emerald-500">{totalPads.toLocaleString()}</span>
               <span className="text-xs text-gray-400 mt-1">pads in period</span>
@@ -649,14 +637,24 @@ const totalPackagedPads = stageCounts["STG-10"];
             </div>
           </ChartCard>
 
-          <ChartCard title="Days of Stock" subtitle="Based on 7-day avg sales" variant="gradient">
-            <div className="flex-1 flex items-center justify-center pt-2">
-              <RadialProgress
-                value={daysOfStock === 999 ? 100 : Math.min((daysOfStock / 30) * 100, 100)}
-                label={daysOfStock === 999 ? "\u221E" : String(daysOfStock)}
-                subLabel="Days Left"
-                color={daysOfStock < 7 ? "#f59e0b" : "#22c55e"}
-              />
+          <ChartCard title="Half Dozen" subtitle="6-pad packs in period" variant="gradient" accentColor={palette.blue}>
+            <div className="flex flex-col items-center justify-center h-full">
+              <span className="text-3xl font-bold text-blue-500">{currentStock.HALF_DOZEN.toLocaleString()}</span>
+              <span className="text-xs text-gray-400 mt-1">packs</span>
+            </div>
+          </ChartCard>
+
+          <ChartCard title="Dozen" subtitle="12-pad packs in period" variant="gradient" accentColor={palette.indigo}>
+            <div className="flex flex-col items-center justify-center h-full">
+              <span className="text-3xl font-bold text-indigo-500">{currentStock.DOZEN.toLocaleString()}</span>
+              <span className="text-xs text-gray-400 mt-1">packs</span>
+            </div>
+          </ChartCard>
+
+          <ChartCard title="Carton" subtitle="120-pad packs in period" variant="gradient" accentColor={palette.purple}>
+            <div className="flex flex-col items-center justify-center h-full">
+              <span className="text-3xl font-bold text-purple-500">{currentStock.CARTON.toLocaleString()}</span>
+              <span className="text-xs text-gray-400 mt-1">packs</span>
             </div>
           </ChartCard>
 
@@ -732,56 +730,21 @@ const totalPackagedPads = stageCounts["STG-10"];
             </div>
           )}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            <ChartCard title="Cut Pieces" subtitle="STG-01 awaiting sewing" variant="gradient" accentColor={wipCut > 500 ? palette.orange : palette.blue}>
-              <div className="flex flex-col items-center justify-center h-full">
-                <span className="text-2xl font-bold" style={{ color: wipCut > 500 ? palette.orange : palette.blue }}>{wipCut.toLocaleString()}</span>
-                <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
-              </div>
-            </ChartCard>
-            <ChartCard title="Sewn Pads" subtitle="Sewing stages awaiting overlocking" variant="gradient" accentColor={wipSewn > 500 ? palette.orange : palette.blue}>
-              <div className="flex flex-col items-center justify-center h-full">
-                <span className="text-2xl font-bold" style={{ color: wipSewn > 500 ? palette.orange : palette.blue }}>{wipSewn.toLocaleString()}</span>
-                <span className="text-xs text-gray-400 mt-1">pads in queue</span>
-              </div>
-            </ChartCard>
-            <ChartCard title="Overlocked" subtitle="STG-04 awaiting pouches" variant="gradient" accentColor={wipOverlocked > 500 ? palette.orange : palette.blue}>
-              <div className="flex flex-col items-center justify-center h-full">
-                <span className="text-2xl font-bold" style={{ color: wipOverlocked > 500 ? palette.orange : palette.blue }}>{wipOverlocked.toLocaleString()}</span>
-                <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
-              </div>
-            </ChartCard>
-            <ChartCard title="Pouches" subtitle="STG-05 awaiting pinning" variant="gradient" accentColor={wipPouches > 500 ? palette.orange : palette.blue}>
-              <div className="flex flex-col items-center justify-center h-full">
-                <span className="text-2xl font-bold" style={{ color: wipPouches > 500 ? palette.orange : palette.blue }}>{wipPouches.toLocaleString()}</span>
-                <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
-              </div>
-            </ChartCard>
-            <ChartCard title="Rolled & Held" subtitle="STG-06-Rolling awaiting pinning & folding" variant="gradient" accentColor={wipPinned > 500 ? palette.orange : palette.blue}>
-              <div className="flex flex-col items-center justify-center h-full">
-                <span className="text-2xl font-bold" style={{ color: wipPinned > 500 ? palette.orange : palette.blue }}>{wipPinned.toLocaleString()}</span>
-                <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
-              </div>
-            </ChartCard>
-            <ChartCard title="Pinned & Folded" subtitle="STG-07 awaiting packaging" variant="gradient" accentColor={wipPacked > 500 ? palette.orange : palette.blue}>
-              <div className="flex flex-col items-center justify-center h-full">
-                <span className="text-2xl font-bold" style={{ color: wipPacked > 500 ? palette.orange : palette.blue }}>{wipPacked.toLocaleString()}</span>
-                <span className="text-xs text-gray-400 mt-1">pieces in queue</span>
-              </div>
-            </ChartCard>
-            <ChartCard title="Total WIP" subtitle="All stages combined" variant="gradient" accentColor={palette.violet}>
-              <div className="flex flex-col items-center justify-center h-full">
-                <span className="text-2xl font-bold text-violet-500">{(wipCut + wipSewn + wipOverlocked + wipPouches + wipPinned + wipPacked).toLocaleString()}</span>
-                <span className="text-xs text-gray-400 mt-1">pieces in progress</span>
-              </div>
-            </ChartCard>
-            <ChartCard title="Packaged" subtitle="STG-08 complete" variant="gradient" accentColor={palette.emerald}>
-              <div className="flex flex-col items-center justify-center h-full">
-                <span className="text-2xl font-bold text-emerald-500">{totalPackagedPads.toLocaleString()}</span>
-                <span className="text-xs text-gray-400 mt-1">pads packaged</span>
-              </div>
-            </ChartCard>
+            {STAGE_ORDER.map((stageId) => {
+              const isPackStage = stageId === "STG-08" || stageId === "STG-10";
+              const unit = isPackStage ? "packs produced" : "pieces produced";
+              const color = isPackStage ? palette.emerald : palette.blue;
+
+              return (
+                <ChartCard key={stageId} title={STAGE_LABELS[stageId]} subtitle={stageId} variant="gradient" accentColor={color}>
+                  <div className="flex flex-col items-center justify-center h-full">
+                    <span className="text-2xl font-bold" style={{ color }}>{stageCounts[stageId].toLocaleString()}</span>
+                    <span className="text-xs text-gray-400 mt-1">{unit}</span>
+                  </div>
+                </ChartCard>
+              );
+            })}
           </div>
-          <p className="text-xs text-gray-500">Orange accent indicates potential bottlenecks where WIP has accumulated above 500.</p>
 
           {/* WIP Entries */}
           <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
@@ -842,6 +805,74 @@ const totalPackagedPads = stageCounts["STG-10"];
 
       {activeTab === "stock-in" && (
         <>
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-lg font-semibold text-gray-900">Stock-In Summary</h2>
+              <p className="text-sm text-gray-500">
+                {stockInPeriod === "today" ? "Today" : stockInPeriod === "week" ? "Last 7 days" : stockInPeriod === "month" ? "Last 30 days" : stockInPeriod === "12months" ? "Last 12 months" : "Custom period"}
+              </p>
+            </div>
+            <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
+              {(["today", "week", "month", "12months", "custom"] as const).map((period) => (
+                <button
+                  key={period}
+                  onClick={() => setStockInPeriod(period)}
+                  className={`px-3 py-1.5 text-sm font-medium rounded-md ${
+                    stockInPeriod === period ? "bg-white shadow-sm text-gray-900" : "text-gray-500"
+                  }`}
+                >
+                  {period === "today" ? "Today" : period === "week" ? "This Week" : period === "month" ? "This Month" : period === "12months" ? "12 Months" : "Custom"}
+                </button>
+              ))}
+            </div>
+          </div>
+          {stockInPeriod === "custom" && (
+            <div className="flex items-center gap-2">
+              <input type="date" value={stockInCustomStart} onChange={(e) => setStockInCustomStart(e.target.value)}
+                className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
+              <span className="text-xs text-gray-400">to</span>
+              <input type="date" value={stockInCustomEnd} onChange={(e) => setStockInCustomEnd(e.target.value)}
+                className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <ChartCard title="Total Packs" subtitle="Stock-in entries in period" variant="gradient" accentColor={palette.orange}>
+            <div className="flex flex-col items-center justify-center h-full">
+              <span className="text-3xl font-bold text-orange-500">{stockInTotalPacks.toLocaleString()}</span>
+              <span className="text-xs text-gray-400 mt-1">packs in stock</span>
+            </div>
+          </ChartCard>
+
+          <ChartCard title="Total Pads" subtitle="Total packs × 3" variant="gradient" accentColor={palette.emerald}>
+            <div className="flex flex-col items-center justify-center h-full">
+              <span className="text-3xl font-bold text-emerald-500">{stockInTotalPads.toLocaleString()}</span>
+              <span className="text-xs text-gray-400 mt-1">pads in stock</span>
+            </div>
+          </ChartCard>
+
+          <ChartCard
+            title="Batch Progress"
+            subtitle={
+              dashboardBatch
+                ? `${dashboardBatch.batchNumber} — ${batchTotalPacks.toLocaleString()} / ${dashboardBatch.maxPacks.toLocaleString()} packs`
+                : "No Active Batch"
+            }
+            variant="gradient"
+          >
+            <div className="flex flex-col items-center justify-center h-full">
+              <RadialProgress
+                value={batchCompletionPct}
+                label={`${batchCompletionPct}%`}
+                subLabel="Complete"
+                color={batchCompletionPct === 100 ? "#22c55e" : "#3b82f6"}
+              />
+            </div>
+          </ChartCard>
+        </div>
+
         <form onSubmit={handleStockInSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
           <h2 className="text-lg font-semibold">Stock-In Entry</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1035,10 +1066,15 @@ const totalPackagedPads = stageCounts["STG-10"];
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Batch</label>
               <div className="flex gap-2">
-                <select value={stockOutForm.batchRef} onChange={(e) => setStockOutForm({ ...stockOutForm, batchRef: e.target.value })}
+                <select value={stockOutForm.batchRef || oldestActiveBatch?.id || ""} onChange={(e) => setStockOutForm({ ...stockOutForm, batchRef: e.target.value })}
                   required className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm">
-                  <option value="">Select batch...</option>
-                  {batches.filter((b) => b.status === "ACTIVE").map((b) => (<option key={b.id} value={b.id}>{b.batchNumber} — {b.packsProduced.toLocaleString()} / {b.maxPacks.toLocaleString()} packs</option>))}
+                  {oldestActiveBatch ? (
+                    <option value={oldestActiveBatch.id}>
+                      {oldestActiveBatch.batchNumber} — {(oldestActiveBatch.maxPacks - oldestActiveBatch.packsProduced).toLocaleString()} packs remaining
+                    </option>
+                  ) : (
+                    <option value="">No active batch with remaining capacity</option>
+                  )}
                 </select>
                 <button type="button" onClick={() => window.open("/production/batches", "_blank")}
                   className="px-3 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200 whitespace-nowrap">+ New</button>

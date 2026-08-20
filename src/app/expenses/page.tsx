@@ -59,7 +59,7 @@ function getPeriodBounds(period: AnalyticsPeriod, customStart?: string, customEn
 
 const CATEGORY_OPTIONS: ExpenseCategory[] = [
   "RAW_MATERIALS", "LABOUR", "UTILITIES", "TRANSPORT",
-  "PACKAGING_SUPPLIES", "EQUIPMENT_MAINTENANCE", "MARKETING", "MISCELLANEOUS",
+  "PACKAGING_SUPPLIES", "EQUIPMENT_MAINTENANCE", "MARKETING", "CONTRIBUTIONS", "CUSTOM", "MISCELLANEOUS",
 ];
 
 const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
@@ -70,7 +70,19 @@ const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   PACKAGING_SUPPLIES: "Packaging Supplies",
   EQUIPMENT_MAINTENANCE: "Equipment Maintenance",
   MARKETING: "Marketing",
+  CONTRIBUTIONS: "Contributions",
+  CUSTOM: "Custom",
   MISCELLANEOUS: "Miscellaneous",
+};
+
+const SUBCATEGORY_OPTIONS: Partial<Record<ExpenseCategory, string[]>> = {
+  RAW_MATERIALS: ["Flannel", "PUL", "Microfibre", "Snap Button", "Threads", "Packaging Bags Paper", "Packaging Bags Polythene", "Boxes", "Custom"],
+  UTILITIES: ["Water", "Electricity", "Custom"],
+  TRANSPORT: ["Raw Materials", "Employees", "Custom"],
+  EQUIPMENT_MAINTENANCE: ["Overlock", "Straight Stitch", "Manual Machine", "Rings", "Bourbons", "Custom"],
+  MARKETING: ["UGC Influencers", "Marketers", "Paid Ads", "Custom"],
+  CONTRIBUTIONS: ["Custom"],
+  MISCELLANEOUS: ["Custom"],
 };
 
 const COLORS = [
@@ -90,8 +102,14 @@ export default function ExpensesPage() {
   const [form, setForm] = useState({
     date: new Date().toISOString().split("T")[0],
     category: "RAW_MATERIALS" as ExpenseCategory,
+    customCategory: "",
+    subcategory: "",
+    customSubcategory: "",
     description: "",
     amountUgx: 0,
+    unitCost: 0,
+    itemCount: 1,
+    labourTotalPayments: 0,
     paidBy: "",
     receiptRef: "",
   });
@@ -109,6 +127,10 @@ export default function ExpensesPage() {
     () => expenses.filter((e) => e.date >= periodBounds.start && e.date <= periodBounds.end),
     [expenses, periodBounds]
   );
+
+  const calculatedAmount = form.category === "LABOUR"
+    ? form.labourTotalPayments
+    : form.unitCost * form.itemCount;
 
   const { data: employees = [] } = useCollectionQuery<{ id: string; name: string }>(
     "employees", [orderBy("name")], { staleTime: 10 * 60 * 1000 }
@@ -226,12 +248,15 @@ export default function ExpensesPage() {
     try {
       await addDoc(collection(db, "expenses"), {
         ...form,
+        category: form.category === "CUSTOM" ? (form.customCategory.trim() || "CUSTOM") : form.category,
+        subcategory: form.subcategory === "Custom" ? form.customSubcategory.trim() : form.subcategory,
+        amountUgx: calculatedAmount,
         createdAt: Timestamp.now(),
       });
       setForm({
         date: new Date().toISOString().split("T")[0],
-        category: "RAW_MATERIALS", description: "",
-        amountUgx: 0, paidBy: "", receiptRef: "",
+        category: "RAW_MATERIALS", customCategory: "", subcategory: "", customSubcategory: "", description: "",
+        amountUgx: 0, unitCost: 0, itemCount: 1, labourTotalPayments: 0, paidBy: "", receiptRef: "",
       });
       setFormSuccess(true);
       queryClient.invalidateQueries({ queryKey: ["expenses"] });
@@ -422,22 +447,55 @@ export default function ExpensesPage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as ExpenseCategory })}
+            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as ExpenseCategory, subcategory: "", customSubcategory: "" })}
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
               {CATEGORY_OPTIONS.map((c) => (
                 <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>
               ))}
             </select>
           </div>
+          {form.category === "CUSTOM" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Custom Category</label>
+              <input type="text" value={form.customCategory} onChange={(e) => setForm({ ...form, customCategory: e.target.value })} required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+            </div>
+          )}
+          {form.category !== "LABOUR" && form.category !== "CUSTOM" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Subcategory</label>
+              <select value={form.subcategory} onChange={(e) => setForm({ ...form, subcategory: e.target.value, customSubcategory: "" })} required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                <option value="">Select...</option>
+                {(SUBCATEGORY_OPTIONS[form.category] || ["Custom"]).map((subcategory) => <option key={subcategory} value={subcategory}>{subcategory}</option>)}
+              </select>
+            </div>
+          )}
+          {form.subcategory === "Custom" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Custom Subcategory</label>
+              <input type="text" value={form.customSubcategory} onChange={(e) => setForm({ ...form, customSubcategory: e.target.value })} required
+                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+            </div>
+          )}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
             <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
               required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
           </div>
+          {form.category === "LABOUR" ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Total Payments (UGX)</label>
+              <input type="number" value={form.labourTotalPayments || ""} onChange={(e) => setForm({ ...form, labourTotalPayments: parseInt(e.target.value) || 0 })}
+                required min={0} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+            </div>
+          ) : <>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost (UGX)</label><input type="number" value={form.unitCost || ""} onChange={(e) => setForm({ ...form, unitCost: parseInt(e.target.value) || 0 })} required min={0} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" /></div>
+            <div><label className="block text-sm font-medium text-gray-700 mb-1">Number of Items (Frequency)</label><input type="number" value={form.itemCount || ""} onChange={(e) => setForm({ ...form, itemCount: parseInt(e.target.value) || 0 })} required min={1} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" /></div>
+          </>}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Amount (UGX)</label>
-            <input type="number" value={form.amountUgx || ""} onChange={(e) => setForm({ ...form, amountUgx: parseInt(e.target.value) || 0 })}
-              required min={0} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+            <input type="number" value={calculatedAmount || ""} readOnly required min={0} className="w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-md text-sm" />
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Paid By</label>

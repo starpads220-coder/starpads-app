@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebase-admin";
+import {
+  collection,
+  doc,
+  getDocs,
+  updateDoc,
+} from "firebase/firestore";
 
 const PACK_SIZE_PADS: Record<string, number> = {
   HALF_DOZEN: 6,
@@ -48,7 +54,33 @@ export async function POST() {
       });
     }
 
-    // ── Step 2: Calculate current packs already in P0002 ──────────────────
+    // ── Step 1.5: Deactivate any ACTIVE batches with earlier startDate than P0002 ────────
+    const p0002StartDate = p0002Snap.exists ? p0002Snap.data()?.startDate ?? "2024-01-01" : "2024-01-01";
+const existingBatches = await db.collection("batches").get();
+
+    const deactivationPromises = [];
+
+    for (const batchDoc of existingBatches.docs) {
+      const batchData = batchDoc.data();
+      if (batchData.status === "ACTIVE" && batchDoc.id !== "P0002") {
+        const batchStartDate = batchData.startDate ?? "";
+        if (batchStartDate < p0002StartDate) {
+          deactivationPromises.push(
+            updateDoc(doc(db, "batches", batchDoc.id), {
+              status: "INACTIVE",
+            })
+          );
+          log.push({
+            batchId: batchDoc.id,
+            action: "deactivated",
+            details: `Deactivated ${batchDoc.data().batchNumber} (startDate: ${batchStartDate}) in favor of P0002.`,
+          });
+        }
+      }
+    }
+
+    await Promise.all(deactivationPromises);
+    // ─────────────────────────────────────────────────────────────────────
     const p0002StockInsSnap = await db
       .collection("stockIns")
       .where("batchRef", "==", "P0002")

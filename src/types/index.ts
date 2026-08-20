@@ -157,12 +157,18 @@ export type ExpenseCategory =
   | "PACKAGING_SUPPLIES"
   | "EQUIPMENT_MAINTENANCE"
   | "MARKETING"
+  | "CONTRIBUTIONS"
+  | "CUSTOM"
   | "MISCELLANEOUS";
 
 export interface Expense {
   id: string;
   date: string;
   category: ExpenseCategory;
+  subcategory?: string;
+  unitCost?: number;
+  itemCount?: number;
+  labourTotalPayments?: number;
   description: string;
   amountUgx: number;
   paidBy: string;
