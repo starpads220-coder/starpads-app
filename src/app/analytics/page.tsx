@@ -46,6 +46,37 @@ import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 
 const dayLabels = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+// Each packaged pack (STG-10) and each stored stock unit contains 3 pads.
+const PADS_PER_PACK = 3;
+
+// Mirrors getStoragePeriodBounds on the storage page so the Current Stock card
+// shows the same figure as storage's Total Pads when the same period is selected
+// (rolling windows: week = last 7 days, month = last 30 days).
+function getCurrentStockBounds(
+  timeWindow: "today" | "week" | "month" | "custom",
+  customStart?: string,
+  customEnd?: string,
+) {
+  const now = new Date();
+  const todayStr = now.toISOString().split("T")[0];
+  switch (timeWindow) {
+    case "today":
+      return { start: todayStr, end: todayStr };
+    case "week": {
+      const d = new Date(now);
+      d.setDate(now.getDate() - 6);
+      return { start: d.toISOString().split("T")[0], end: todayStr };
+    }
+    case "month": {
+      const d = new Date(now);
+      d.setDate(now.getDate() - 29);
+      return { start: d.toISOString().split("T")[0], end: todayStr };
+    }
+    case "custom":
+      return { start: customStart || todayStr, end: customEnd || todayStr };
+  }
+}
+
 const expenseColorMap: Record<string, string> = {
   RAW_MATERIALS: palette.violet,
   LABOUR: palette.sky,
@@ -250,11 +281,11 @@ export default function AnalyticsPage() {
   );
 
   const { data: stockIns = [] } = useCollectionQuery<StockIn>(
-    "stockIns", [orderBy("date", "desc"), limit(2000)], { staleTime: 60 * 1000 },
+    "stockIns", [orderBy("date", "desc")], { staleTime: 60 * 1000 },
   );
 
   const { data: stockOuts = [] } = useCollectionQuery<StockOut>(
-    "stockOuts", [orderBy("date", "desc"), limit(2000)], { staleTime: 60 * 1000 },
+    "stockOuts", [orderBy("date", "desc")], { staleTime: 60 * 1000 },
   );
 
   const { data: batches = [] } = useCollectionQuery<Batch>(
@@ -281,6 +312,38 @@ export default function AnalyticsPage() {
   const totalPiecesProduced = useMemo(
     () => filteredEntries.reduce((s, e) => s + e.actualPieces, 0),
     [filteredEntries],
+  );
+
+  // Pads Produced: finished packs recorded at STG-10 (Packaging) in the selected period — each pack holds 3 pads.
+  const padsProduced = useMemo(
+    () =>
+      filteredEntries
+        .filter((e) => e.stageId === "STG-10")
+        .reduce((s, e) => s + e.actualPieces, 0) * PADS_PER_PACK,
+    [filteredEntries],
+  );
+
+  const stockBounds = useMemo(
+    () => getCurrentStockBounds(timeWindow, customStart, customEnd),
+    [timeWindow, customStart, customEnd],
+  );
+
+  const filteredStockIns = useMemo(
+    () => stockIns.filter((si) => si.date >= stockBounds.start && si.date <= stockBounds.end),
+    [stockIns, stockBounds],
+  );
+
+  const filteredStockOuts = useMemo(
+    () => stockOuts.filter((so) => so.date >= stockBounds.start && so.date <= stockBounds.end),
+    [stockOuts, stockBounds],
+  );
+
+  // Current Stock: packs moved in minus packs moved out within the selected period, expressed in pads.
+  const currentStockPads = useMemo(
+    () =>
+      (filteredStockIns.reduce((s, si) => s + si.quantity, 0) -
+        filteredStockOuts.reduce((s, so) => s + so.quantity, 0)) * PADS_PER_PACK,
+    [filteredStockIns, filteredStockOuts],
   );
 
   const totalRevenue = useMemo(
@@ -320,16 +383,25 @@ export default function AnalyticsPage() {
     [stockByPack],
   );
 
-  const activeBatch = useMemo(() => batches.find((b) => b.status === "ACTIVE"), [batches]);
+  // Mirrors the storage page: the oldest ACTIVE batch with remaining capacity
+  // (earliest startDate, fallback lowest batchNumber) is the one being filled first.
+  const activeBatch = useMemo(() => {
+    const activeBatches = batches.filter((b) => b.status === "ACTIVE" && b.packsProduced < b.maxPacks);
+    if (activeBatches.length === 0) return null;
+    return activeBatches.reduce((oldest, b) => {
+      if (b.startDate < oldest.startDate) return b;
+      if (b.startDate > oldest.startDate) return oldest;
+      return b.batchNumber < oldest.batchNumber ? b : oldest;
+    });
+  }, [batches]);
 
+  // Progress from the batch document itself — packsProduced / maxPacks.
   const batchProgress = useMemo(
     () =>
       activeBatch
-        ? Math.min(100, Math.round(
-            (stockIns.filter((si) => si.batchRef === activeBatch.id).reduce((s, si) => s + si.quantity, 0) / 5000) * 100,
-          ))
+        ? Math.min(100, Math.round((activeBatch.packsProduced / activeBatch.maxPacks) * 100))
         : 0,
-    [activeBatch, stockIns],
+    [activeBatch],
   );
 
   const achievementValues = useMemo(
@@ -479,12 +551,12 @@ export default function AnalyticsPage() {
   const kpiMetrics = [
     {
       label: "Pads Produced",
-      value: totalPiecesProduced.toLocaleString(),
+      value: padsProduced.toLocaleString(),
       color: "green" as const,
     },
     {
       label: "Current Stock",
-      value: `${totalPadsInStock.toLocaleString()} pads`,
+      value: `${currentStockPads.toLocaleString()} pads`,
       color: "blue" as const,
     },
     {
@@ -605,7 +677,7 @@ export default function AnalyticsPage() {
 
             <ChartCard
               title="Batch Progress"
-              subtitle={activeBatch ? `Batch: ${activeBatch.id}` : "No active batch"}
+              subtitle={activeBatch ? `Batch: ${activeBatch.batchNumber}` : "No active batch"}
               variant="gradient"
               badge={
                 batchProgress > 0
@@ -618,7 +690,7 @@ export default function AnalyticsPage() {
                   value={batchProgress}
                   max={100}
                   label="Batch"
-                  subLabel={`${batchProgress}% of 5000 packs`}
+                  subLabel={`${batchProgress}% of ${activeBatch ? activeBatch.maxPacks.toLocaleString() : 0} packs`}
                   color={batchProgress >= 80 ? palette.emerald : batchProgress >= 50 ? palette.violet : palette.yellow}
                   size={140}
                   variant="circular"

@@ -147,6 +147,7 @@ export default function PaymentsPage() {
 
   const [payEmployeeId, setPayEmployeeId] = useState<string | null>(null);
   const [payProcessing, setPayProcessing] = useState(false);
+  const [modalPayeeTax, setModalPayeeTax] = useState<number | null>(null);
 
   const { data: employees = [] } = useCollectionQuery<Employee>("employees", [
     orderBy("name"),
@@ -335,6 +336,19 @@ export default function PaymentsPage() {
   };
 
   const payEmployee = employeePayments.find((e) => e.employeeId === payEmployeeId);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!payEmployee || payEmployee.dueEntries.length === 0) {
+      setModalPayeeTax(null);
+      return;
+    }
+    const todayStr = new Date().toISOString().split("T")[0];
+    getCumulativePayeeForEmployee(payEmployee.employeeId, payEmployee.dueAmount, todayStr)
+      .then((v) => { if (!cancelled) setModalPayeeTax(v); })
+      .catch(() => { if (!cancelled) setModalPayeeTax(computePayeeTax(payEmployee.dueAmount)); });
+    return () => { cancelled = true; };
+  }, [payEmployee?.employeeId, payEmployee?.dueAmount]);
 
   const handlePayConfirm = async () => {
     if (!payEmployee || payEmployee.dueEntries.length === 0) return;
@@ -1143,13 +1157,13 @@ export default function PaymentsPage() {
                   <span className="font-semibold text-red-600">- UGX {computeNssfEmployee(payEmployee.dueAmount).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600">PAYEE Tax</span>
-                  <span className="font-semibold text-red-600">- UGX {computePayeeTax(payEmployee.dueAmount).toLocaleString()}</span>
+                  <span className="text-gray-600">PAYEE Tax (20% for qualifying employees)</span>
+                  <span className="font-semibold text-red-600">- UGX {(modalPayeeTax ?? computePayeeTax(payEmployee.dueAmount)).toLocaleString()}</span>
                 </div>
                 <div className="border-t border-gray-200 pt-2 flex justify-between items-center text-sm">
                   <span className="font-semibold text-gray-800">Net Pay to Employee</span>
                   <span className="text-lg font-bold text-green-600">
-                    UGX {(payEmployee.dueAmount - computeNssfEmployee(payEmployee.dueAmount) - computePayeeTax(payEmployee.dueAmount)).toLocaleString()}
+                    UGX {(payEmployee.dueAmount - computeNssfEmployee(payEmployee.dueAmount) - (modalPayeeTax ?? computePayeeTax(payEmployee.dueAmount))).toLocaleString()}
                   </span>
                 </div>
                 <div className="border-t border-dashed border-gray-200 pt-2 flex justify-between items-center text-sm">

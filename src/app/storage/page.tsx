@@ -120,7 +120,7 @@ export default function StoragePage() {
     "batches", [orderBy("startDate", "desc")], { staleTime: 2 * 60 * 1000 }
   );
 
-  const { data: employees = [] } = useCollectionQuery<{ id: string; name: string }>(
+  const { data: employees = [] } = useCollectionQuery<{ id: string; name: string; isActive?: boolean; active?: boolean }>(
     "employees", [orderBy("name")], { staleTime: 10 * 60 * 1000 }
   );
 
@@ -926,7 +926,7 @@ export default function StoragePage() {
               <select value={stockInForm.receivedBy} onChange={(e) => setStockInForm({ ...stockInForm, receivedBy: e.target.value })}
                 required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                 <option value="">Select...</option>
-                {employees.map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
+                {employees.filter((e) => e.isActive !== false && e.active !== false).map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
               </select>
             </div>
             <div>
@@ -1099,7 +1099,7 @@ export default function StoragePage() {
               <select value={stockOutForm.dispatchedBy} onChange={(e) => setStockOutForm({ ...stockOutForm, dispatchedBy: e.target.value })}
                 required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                 <option value="">Select...</option>
-                {employees.map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
+                {employees.filter((e) => e.isActive !== false && e.active !== false).map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
               </select>
             </div>
           </div>

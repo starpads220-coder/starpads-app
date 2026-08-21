@@ -56,14 +56,29 @@ export default function AdminEmployeesPage() {
 
   const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
   const isAdmin = userRole?.role === "ADMIN";
+  const isFinancialManager = userRole?.role === "FINANCIAL_MANAGER";
+  // Create & edit: admin, supervisor, financial manager.
+  const canManageEmployees = isAdmin || isSupervisor || isFinancialManager;
+  // Deactivate / reactivate ("delete"): admin only.
+  const canToggleActive = isAdmin;
 
   const visibleEmployees = useMemo(() => {
-    if (isAdmin) return employees;
+    if (isAdmin || isFinancialManager) return employees;
     if (isSupervisor && supervisorDepartment) {
       return employees.filter((e) => e.department === supervisorDepartment);
     }
     return [];
-  }, [employees, isAdmin, isSupervisor, supervisorDepartment]);
+  }, [employees, isAdmin, isFinancialManager, isSupervisor, supervisorDepartment]);
+
+  const activeEmployees = useMemo(
+    () => visibleEmployees.filter((e) => e.isActive ?? e.active ?? true),
+    [visibleEmployees],
+  );
+
+  const deactivatedEmployees = useMemo(
+    () => visibleEmployees.filter((e) => !(e.isActive ?? e.active ?? true)),
+    [visibleEmployees],
+  );
 
   const availableDepartments = useMemo(() => {
     if (isSupervisor && supervisorDepartment) {
@@ -133,7 +148,7 @@ export default function AdminEmployeesPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Employee Register</h1>
-          {isAdmin && (
+          {canManageEmployees && (
             <button
               onClick={() => {
                 resetForm();
@@ -141,18 +156,9 @@ export default function AdminEmployeesPage() {
               }}
               className="py-2 px-4 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800"
             >
-              Add Employee
-            </button>
-          )}
-          {isSupervisor && supervisorDepartment && (
-            <button
-              onClick={() => {
-                resetForm();
-                setShowForm(true);
-              }}
-              className="py-2 px-4 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800"
-            >
-              Add Employee ({supervisorDepartment.charAt(0) + supervisorDepartment.slice(1).toLowerCase()})
+              {isSupervisor && supervisorDepartment
+                ? `Add Employee (${supervisorDepartment.charAt(0) + supervisorDepartment.slice(1).toLowerCase()})`
+                : "Add Employee"}
             </button>
           )}
         </div>
@@ -224,9 +230,9 @@ export default function AdminEmployeesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {visibleEmployees.length === 0 ? (
+                {activeEmployees.length === 0 ? (
                   <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No employees found.</td></tr>
-                ) : visibleEmployees.map((emp, i) => (
+                ) : activeEmployees.map((emp, i) => (
                   <tr key={emp.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">{emp.name}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">{emp.role.replace(/_/g, " ")}</td>
@@ -239,15 +245,46 @@ export default function AdminEmployeesPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-right">
-                      <button onClick={() => handleEdit(emp)} className="text-sm text-stock-blue hover:underline mr-3">Edit</button>
-                      <button onClick={() => setDeleteTarget(emp.id)} className="text-sm text-performance-red hover:underline">
-                        {(emp.isActive ?? emp.active) ? "Deactivate" : "Activate"}
-                      </button>
+                      {canManageEmployees && (
+                        <button onClick={() => handleEdit(emp)} className="text-sm text-stock-blue hover:underline mr-3">Edit</button>
+                      )}
+                      {canToggleActive && (
+                        <button onClick={() => setDeleteTarget(emp.id)} className="text-sm text-performance-red hover:underline">
+                          Deactivate
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {deactivatedEmployees.length > 0 && (
+          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+            <div className="flex items-center justify-between mb-3">
+              <h2 className="text-sm font-semibold text-gray-900">Deactivated Employees</h2>
+              <span className="text-xs text-gray-500">{deactivatedEmployees.length} deactivated</span>
+            </div>
+            <div className="space-y-2">
+              {deactivatedEmployees.map((emp) => (
+                <div key={emp.id} className="flex items-center justify-between rounded-md bg-gray-50 border border-gray-100 px-3 py-2">
+                  <div>
+                    <span className="text-sm font-medium text-gray-700">{emp.name}</span>
+                    <span className="text-xs text-gray-400 ml-2">{emp.role.replace(/_/g, " ")}</span>
+                  </div>
+                  {canToggleActive && (
+                    <button
+                      onClick={() => setDeleteTarget(emp.id)}
+                      className="text-sm text-stock-blue hover:underline"
+                    >
+                      Reactivate
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

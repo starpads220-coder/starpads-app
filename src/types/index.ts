@@ -232,10 +232,9 @@ export interface SalesTarget {
 }
 
 export interface PayeeBracket {
-  threshold: number;
+  label: string;
   rate: number;
-  baseAmount: number;
-  isPercentage: boolean;
+  tax: number;
 }
 
 export interface DeductionBreakdown {
@@ -244,4 +243,5 @@ export interface DeductionBreakdown {
   nssfBusinessContribution: number;
   payeeTax: number;
   netPayAmount: number;
+  payeeBracket?: PayeeBracket;
 }

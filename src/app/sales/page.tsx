@@ -177,7 +177,7 @@ export default function SalesPage() {
     salespersonName: string;
   } | null>(null);
 
-  const { data: employees = [] } = useCollectionQuery<{ id: string; name: string; role: string; department: string }>("employees", [
+  const { data: employees = [] } = useCollectionQuery<{ id: string; name: string; role: string; department: string; isActive?: boolean; active?: boolean }>("employees", [
     orderBy("name"),
   ], { staleTime: 10 * 60 * 1000 });
 
@@ -391,7 +391,7 @@ export default function SalesPage() {
   const formDiscountPercent = expectedTotal > 0 ? (formDiscountAmount / expectedTotal) * 100 : 0;
 
   const salespersonEmployees = useMemo(
-    () => employees.filter((e) => e.department === "SALES"),
+    () => employees.filter((e) => e.department === "SALES" && e.isActive !== false && e.active !== false),
     [employees]
   );
 
