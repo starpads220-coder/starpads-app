@@ -15,7 +15,7 @@ if (fs.existsSync(keyPath)) {
 const app = initializeApp({ credential: cert(serviceAccount) });
 const db = getFirestore(app);
 
-const PACK_SIZES = {
+const PACK_SIZES: Record<string, number> = {
   HALF_DOZEN: 6,
   DOZEN: 12,
   CARTON: 120,
@@ -36,7 +36,7 @@ async function check() {
     
     let totalPads = 0;
     const stockIns = await db.collection("stockIns").where("batchRef", "==", batchRefId).get();
-    stockIns.forEach(doc => {
+    stockIns.forEach((doc: any) => {
       const d = doc.data();
       totalPads += (d.quantity || 0) * (PACK_SIZES[d.packSize] || 0);
     });
@@ -51,3 +51,5 @@ async function check() {
 }
 
 check().catch(console.error);
+
+export {};

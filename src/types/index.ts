@@ -223,3 +223,25 @@ export interface TargetConfig {
   dailyTarget: number;
   overrideTarget: number;
 }
+
+export interface SalesTarget {
+  id?: string;
+  targetType: "MONTHLY" | "QUARTERLY" | "SIX_MONTHS" | "ANNUAL";
+  periodReference: string;
+  targetAmount: number;
+}
+
+export interface PayeeBracket {
+  threshold: number;
+  rate: number;
+  baseAmount: number;
+  isPercentage: boolean;
+}
+
+export interface DeductionBreakdown {
+  grossAmount: number;
+  nssfEmployeeDeduction: number;
+  nssfBusinessContribution: number;
+  payeeTax: number;
+  netPayAmount: number;
+}

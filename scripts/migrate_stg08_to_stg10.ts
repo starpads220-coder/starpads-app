@@ -1,26 +1,19 @@
-import * as admin from 'firebase-admin';
-import * as dotenv from 'dotenv';
-import * as path from 'path';
+const { initializeApp, cert } = require("firebase-admin/app");
+const { getFirestore } = require("firebase-admin/firestore");
+const fs = require("fs");
+const path = require("path");
 
-// Load environment variables from .env.local
-dotenv.config({ path: path.resolve(__dirname, '../.env.local') });
-
-if (!admin.apps.length) {
-  if (!process.env.FIREBASE_PROJECT_ID || !process.env.FIREBASE_CLIENT_EMAIL || !process.env.FIREBASE_PRIVATE_KEY) {
-    console.error("Missing Firebase Admin credentials in environment variables.");
-    process.exit(1);
-  }
-
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'),
-    }),
-  });
+let serviceAccount;
+const keyPath = path.join(__dirname, "../starpads-automation-firebase-adminsdk-fbsvc-e002811af9.json");
+if (fs.existsSync(keyPath)) {
+  serviceAccount = require(keyPath);
+} else {
+  console.error("No service account found");
+  process.exit(1);
 }
 
-const db = admin.firestore();
+const app = initializeApp({ credential: cert(serviceAccount) });
+const db = getFirestore(app);
 
 async function migrate() {
   console.log('Starting migration from STG-08 to STG-10...');

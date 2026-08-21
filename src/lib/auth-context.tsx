@@ -9,12 +9,12 @@ import {
   sendPasswordResetEmail,
 } from "firebase/auth";
 import { auth, db, isFirebaseConfigured } from "@/lib/firebase";
-import { Employee } from "@/types";
+import { Employee, EmployeeRole } from "@/types";
 import { doc, onSnapshot } from "firebase/firestore";
 
 interface AuthState {
   user: User | null;
-  userRole: EmployeeRole | null;
+  userRole: any | null;
   loading: boolean;
   roleLoaded: boolean;
   authResolved: boolean;
@@ -32,7 +32,7 @@ const AuthMethodsContext = createContext<AuthMethods | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
-  const [userRole, setUserRole] = useState<EmployeeRole | null>(null);
+  const [userRole, setUserRole] = useState<any | null>(null);
   const configured = isFirebaseConfigured();
   const fbReady = configured && !!auth && !!db;
   const [loading, setLoading] = useState(fbReady);
@@ -68,7 +68,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const roleRef = doc(_db, "userRoles", user.uid);
     const unsubRole = onSnapshot(roleRef, (snap) => {
       if (snap.exists()) {
-        setUserRole(snap.data() as EmployeeRole);
+        setUserRole(snap.data());
       } else {
         setUserRole(null);
       }

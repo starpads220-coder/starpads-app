@@ -24,7 +24,7 @@ export function RouteGuard({ children }: { children: React.ReactNode }) {
     }
     const role = userRole?.role ?? null;
     if (!isRouteAllowed(role, pathname)) {
-      const hasAccessibleRoutes = role && ROLE_ROUTES[role]?.length > 0;
+      const hasAccessibleRoutes = role && ROLE_ROUTES[role as EmployeeRole]?.length > 0;
       router.replace(hasAccessibleRoutes ? "/production" : "/no-access");
     }
   }, [user, userRole, loading, roleLoaded, authResolved, router, pathname]);
