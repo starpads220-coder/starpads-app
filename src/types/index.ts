@@ -81,6 +81,20 @@ export const PACK_SIZES: Record<PackSize, number> = {
   ONE_PACK: 1,
 };
 
+export type CustomerCategory = "B2B" | "B2C";
+
+export type CustomerType = "RETAIL" | "BULK" | "AGENT";
+
+export type CustomerSubType =
+  | "INDIVIDUAL"
+  | "PRIVATE_COMPANY"
+  | "NON_PROFIT"
+  | "RETAILER";
+
+export type PackVariant = "" | "MAX" | "STANDARD";
+
+export type PaymentMethod = "CASH" | "MOBILE_MONEY" | "BANK_TRANSFER";
+
 // ─── Firestore document types ────────────────────────────────────────────────
 
 export interface ProductionEntry {
@@ -141,12 +155,17 @@ export interface SaleTransaction {
   id: string;
   date: string;
   customerName: string;
-  customerType: string;
+  customerType: CustomerType;
+  customerCategory?: CustomerCategory;
+  customerSubType?: CustomerSubType;
   packSize: PackSize;
+  packVariant?: PackVariant;
   quantitySold: number;
   unitPrice: number;
   totalAmount: number;
-  paymentMethod: string;
+  paymentMethod: PaymentMethod;
+  salespersonId: string;
+  batchRef: string;
   notes?: string;
 }
 
@@ -225,10 +244,11 @@ export interface TargetConfig {
 }
 
 export interface SalesTarget {
-  id?: string;
+  id: string;
   targetType: "MONTHLY" | "QUARTERLY" | "SIX_MONTHS" | "ANNUAL";
   periodReference: string;
   targetAmount: number;
+  description: string;
 }
 
 export interface PayeeBracket {

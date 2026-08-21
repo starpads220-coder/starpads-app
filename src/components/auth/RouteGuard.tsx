@@ -4,6 +4,7 @@ import { useRouter, usePathname } from "next/navigation";
 import { useEffect } from "react";
 import { useAuth } from "@/lib/auth-context";
 import { isRouteAllowed, ROLE_ROUTES } from "@/lib/permissions";
+import type { EmployeeRole } from "@/types";
 
 export function RouteGuard({ children }: { children: React.ReactNode }) {
   const { user, userRole, loading, roleLoaded, authResolved } = useAuth();
