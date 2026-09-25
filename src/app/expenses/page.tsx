@@ -1,4 +1,7 @@
 "use client";
+import { AccountingFields } from "@/components/AccountingFields";
+import { AccountsSwitcher } from "@/components/AccountsSwitcher";
+import { emptyAccounting, validateAccounting, type AccountingSelection } from "@/lib/accounts";
 
 import { useState, useMemo, useCallback } from "react";
 import {
@@ -93,6 +96,7 @@ const COLORS = [
 export default function ExpensesPage() {
   const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
+  const [accounting, setAccounting] = useState<AccountingSelection>(() => ({ ...emptyAccounting(), accountGroup: "Expenses" }));
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState(false);
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>("month");
@@ -247,6 +251,7 @@ export default function ExpensesPage() {
     setFormSuccess(false);
     try {
       await addDoc(collection(db, "expenses"), {
+        accounting: validateAccounting(accounting, "expense"),
         ...form,
         category: form.category === "CUSTOM" ? (form.customCategory.trim() || "CUSTOM") : form.category,
         subcategory: form.subcategory === "Custom" ? form.customSubcategory.trim() : form.subcategory,
@@ -259,6 +264,7 @@ export default function ExpensesPage() {
         amountUgx: 0, unitCost: 0, itemCount: 1, labourTotalPayments: 0, paidBy: "", receiptRef: "",
       });
       setFormSuccess(true);
+      setAccounting({ ...emptyAccounting(), accountGroup: "Expenses" });
       queryClient.invalidateQueries({ queryKey: ["expenses"] });
       setTimeout(() => setFormSuccess(false), 5000);
     } catch (err) {
@@ -296,7 +302,7 @@ export default function ExpensesPage() {
     <RouteGuard>
     <div className="space-y-6">
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <h1 className="text-2xl font-bold text-gray-900">Expenses</h1>
+        <div className="space-y-3"><AccountsSwitcher /><h1 className="text-2xl font-bold text-gray-900">Expenses</h1></div>
           <div className="flex flex-wrap items-center gap-2">
           <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
             {(["day", "week", "month", "12months", "custom"] as const).map((p) => (
@@ -429,6 +435,7 @@ export default function ExpensesPage() {
 
       <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
         <h2 className="text-lg font-semibold">Expense Entry</h2>
+        <AccountingFields value={accounting} onChange={setAccounting} kind="expense" />
         {formError && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-4 rounded-xl">
             {formError}

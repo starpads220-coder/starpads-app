@@ -46,6 +46,7 @@ export const ROLE_ROUTES: Record<EmployeeRole, string[]> = {
 
 export function isRouteAllowed(role: EmployeeRole | null | undefined, pathname: string): boolean {
   if (!role) return false;
+  if (pathname === "/accounts") return ["ADMIN", "FINANCIAL_MANAGER", "FINANCE", "SALES_MANAGER", "SALES_STAFF"].includes(role);
   if (pathname === "/profile" || pathname.startsWith("/profile/")) return true;
   if (pathname === "/no-access") return true;
   const routes = ROLE_ROUTES[role];

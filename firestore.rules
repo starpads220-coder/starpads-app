@@ -199,6 +199,16 @@ service cloud.firestore {
     // Create: FINANCE or ADMIN
     // Update/Delete: ADMIN only
     // ============================================================
+    match /accountJournals/{journalId} {
+      allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF']);
+      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && request.resource.data.debitCode is string && request.resource.data.creditCode is string
+        && request.resource.data.debitCode != request.resource.data.creditCode
+        && request.resource.data.date is string && request.resource.data.description is string;
+      allow update, delete: if false;
+    }
     match /expenses/{expenseId} {
       allow read: if isAuthenticated();
       allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);

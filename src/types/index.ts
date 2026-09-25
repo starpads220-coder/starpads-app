@@ -152,6 +152,7 @@ export interface Batch {
 }
 
 export interface SaleTransaction {
+  accounting?: import("@/lib/accounts").AccountingSelection;
   id: string;
   date: string;
   customerName: string;
@@ -167,6 +168,11 @@ export interface SaleTransaction {
   salespersonId: string;
   batchRef: string;
   notes?: string;
+  saleType?: "SALE_OF_PADS" | "SALE_OF_MATERIAL" | "PAD_TRAINING" | "GRANTS_DONATIONS";
+  materialType?: "PUL" | "FLEECE" | "FLANNEL";
+  materialQuantity?: number;
+  trainingDays?: number;
+  grantAmount?: number;
 }
 
 export type ExpenseCategory =
@@ -182,6 +188,7 @@ export type ExpenseCategory =
   | "MISCELLANEOUS";
 
 export interface Expense {
+  accounting?: import("@/lib/accounts").AccountingSelection;
   id: string;
   date: string;
   category: ExpenseCategory;
