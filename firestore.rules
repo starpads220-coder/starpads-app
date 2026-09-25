@@ -207,7 +207,13 @@ service cloud.firestore {
         && request.resource.data.debitCode is string && request.resource.data.creditCode is string
         && request.resource.data.debitCode != request.resource.data.creditCode
         && request.resource.data.date is string && request.resource.data.description is string;
-      allow update, delete: if false;
+      allow update: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['date', 'debitCode', 'creditCode', 'amount', 'description'])
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && request.resource.data.debitCode is string && request.resource.data.creditCode is string
+        && request.resource.data.debitCode != request.resource.data.creditCode
+        && request.resource.data.date is string && request.resource.data.description is string;
+      allow delete: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
     }
     match /expenses/{expenseId} {
       allow read: if isAuthenticated();
