@@ -426,10 +426,7 @@ export default function SalesPage() {
   const formDiscountAmount = Math.max(0, expectedTotal - totalAmount);
   const formDiscountPercent = expectedTotal > 0 ? (formDiscountAmount / expectedTotal) * 100 : 0;
 
-  const salespersonEmployees = useMemo(
-    () => employees.filter((e) => e.department === "SALES" && e.isActive !== false && e.active !== false),
-    [employees]
-  );
+  const salespersonEmployees = employees;
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -1288,18 +1285,6 @@ export default function SalesPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Customer Channel</label>
-              <select
-                value={form.customerCategory}
-                onChange={(event) => setForm({ ...form, customerCategory: event.target.value as CustomerCategory })}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-              >
-                <option value="">Select...</option>
-                <option value="B2B">B2B (Business)</option>
-                <option value="B2C">B2C (Consumer)</option>
-              </select>
-            </div>
-            <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Customer Type</label>
               <select
                 value={form.customerType}
@@ -1371,7 +1356,7 @@ export default function SalesPage() {
                 <option value="ONE_PACK">1 Pack (3 pads/pack)</option>
               </select>
               <p className="mt-1 text-xs text-gray-500">
-                Expected price: UGX {expectedPrice.toLocaleString()} per pack
+                Expected price: UGX {expectedPrice.toLocaleString()} per {form.packSize === "HALF_DOZEN" ? "Half Dozen" : form.packSize === "DOZEN" ? "dozen" : form.packSize === "CARTON" ? "carton" : "pack"}
               </p>
             </div>
             {form.packSize === "ONE_PACK" && (

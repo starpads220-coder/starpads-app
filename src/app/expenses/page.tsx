@@ -92,6 +92,7 @@ const COLORS = [
   "#22c55e", "#3b82f6", "#f59e0b", "#ef4444",
   "#8b5cf6", "#ec4899", "#14b8a6", "#6b7280",
 ];
+const APPROVED_EXPENSE_PAYERS = ["Itamba Kezia", "Kigere Rose", "Ngobi Joshua Muwanguzi"] as const;
 
 export default function ExpensesPage() {
   const queryClient = useQueryClient();
@@ -139,6 +140,10 @@ export default function ExpensesPage() {
   const { data: employees = [] } = useCollectionQuery<{ id: string; name: string }>(
     "employees", [orderBy("name")], { staleTime: 10 * 60 * 1000 }
   );
+  const expensePayers = useMemo(() => APPROVED_EXPENSE_PAYERS.map(name => {
+    const employee = employees.find(item => item.name.trim().toLowerCase() === name.toLowerCase());
+    return { id: employee?.id ?? name, name };
+  }), [employees]);
 
   const today = new Date().toISOString().split("T")[0];
 
@@ -250,6 +255,8 @@ export default function ExpensesPage() {
     setFormError("");
     setFormSuccess(false);
     try {
+      if (!Number.isFinite(calculatedAmount) || calculatedAmount <= 0) throw new Error("Enter an expense amount greater than zero.");
+      if (!expensePayers.some(person => person.id === form.paidBy)) throw new Error("Select an approved employee under Paid By.");
       await addDoc(collection(db, "expenses"), {
         accounting: validateAccounting(accounting, "expense"),
         ...form,
@@ -468,7 +475,7 @@ export default function ExpensesPage() {
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
             </div>
           )}
-          {form.category !== "LABOUR" && form.category !== "CUSTOM" && (
+          {form.category !== "LABOUR" && form.category !== "CUSTOM" && form.category !== "MISCELLANEOUS" && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Subcategory</label>
               <select value={form.subcategory} onChange={(e) => setForm({ ...form, subcategory: e.target.value, customSubcategory: "" })} required
@@ -509,7 +516,7 @@ export default function ExpensesPage() {
             <select value={form.paidBy} onChange={(e) => setForm({ ...form, paidBy: e.target.value })}
               required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
               <option value="">Select...</option>
-              {employees.map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
+              {expensePayers.map((employee) => (<option key={employee.id} value={employee.id}>{employee.name}</option>))}
             </select>
           </div>
           <div>

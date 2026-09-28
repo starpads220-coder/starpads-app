@@ -7,6 +7,9 @@ export function AccountingFields({ value, onChange, kind }: { value: AccountingS
   const { data } = useRealtimeCollection<{ accounting?: AccountingSelection }>(kind === "sale" ? "saleTransactions" : "expenses");
   const saved = [...new Map(data.flatMap(row => row.accounting?.accountCode.startsWith("custom:") && groups.includes(row.accounting.accountGroup) ? [[row.accounting.accountCode, row.accounting] as const] : [])).values()];
   const availableAccounts = ACCOUNTS.filter(account => groups.includes(account.group) && (kind !== "sale" || SALES_ENTRY_ACCOUNT_CODES.includes(account.code as typeof SALES_ENTRY_ACCOUNT_CODES[number])));
+  const settlementAccounts = kind === "expense"
+    ? [{ code: "1030", name: "Cash" }, { code: "1000", name: "Bank" }]
+    : ACCOUNTS.filter(account => SETTLEMENT_CODES.includes(account.code)).map(account => ({ code: account.code, name: account.name }));
   const input = "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm";
   return <fieldset className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 space-y-3">
     <legend className="px-2 font-semibold text-gray-800">Chart of Accounts</legend>
@@ -22,7 +25,7 @@ export function AccountingFields({ value, onChange, kind }: { value: AccountingS
       })}{saved.map(a => <option key={a.accountCode} value={a.accountCode}>{a.accountName} (custom)</option>)}<option value="custom">Custom subcategory...</option></select></label>
       {value.accountCode.startsWith("custom:") && <label className="text-sm">Custom subcategory name<input required maxLength={100} className={input} value={value.accountName} onChange={e => onChange({ ...value, accountName: e.target.value, accountCode: `custom:${value.accountGroup}:${e.target.value.trim().toLowerCase()}` })} /></label>}
       {kind === "expense" && ["5080", "5090"].includes(value.accountCode) && <label className="text-sm">{value.accountCode === "5080" ? "Direct material details" : "Direct labour details"}<input required maxLength={120} className={input} value={value.accountDetail ?? ""} onChange={e => onChange({ ...value, accountDetail: e.target.value })} placeholder={value.accountCode === "5080" ? "Enter the material purchased or used" : "Enter the labour activity or worker details"} /></label>}
-      <label className="text-sm">{kind === "sale" ? "Received into" : "Paid from"}<select required className={input} value={value.settlementCode} onChange={e => onChange({ ...value, settlementCode: e.target.value })}><option value="">Select cash / bank account...</option>{ACCOUNTS.filter(a => SETTLEMENT_CODES.includes(a.code)).map(a => <option key={a.code} value={a.code}>{a.name}</option>)}</select></label>
+      <label className="text-sm">{kind === "sale" ? "Payment Method" : "Paid from"}<select required className={input} value={value.settlementCode} onChange={e => onChange({ ...value, settlementCode: e.target.value })}><option value="">{kind === "expense" ? "Select Cash or Bank..." : "Select payment method..."}</option>{settlementAccounts.map(account => <option key={account.code} value={account.code}>{account.name}</option>)}</select></label>
     </div>
   </fieldset>;
 }
