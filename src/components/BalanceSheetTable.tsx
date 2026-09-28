@@ -44,7 +44,7 @@ export function BalanceSheetTable({ columns }: { columns: BalanceSheetColumn[] }
 
   return (
     <section className="overflow-hidden rounded-xl border bg-white">
-      <div className="border-b px-5 py-4">
+      <div className="accounts-no-print border-b px-5 py-4">
         <h2 className="text-lg font-semibold">Balance Sheet</h2>
         <p className="text-sm text-gray-500">Self-computed from classified sales, expenses, and account journals · UGX</p>
       </div>

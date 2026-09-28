@@ -57,6 +57,15 @@ body {
     display: block !important;
   }
 
+  .accounts-page > * {
+    display: none !important;
+  }
+
+  .accounts-page > .accounts-print-header,
+  .accounts-page > .accounts-print-content {
+    display: block !important;
+  }
+
   .accounts-page section,
   .accounts-page table,
   .accounts-page tr {
