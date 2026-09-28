@@ -12,6 +12,7 @@ import { CashFlowStatementTab } from "@/components/accounts/CashFlowStatementTab
 import { IncomeStatementTab } from "@/components/accounts/IncomeStatementTab";
 import { ACCOUNTS, ACCOUNT_GROUPS, REMOVED_ACCOUNT_CODES, buildAccounts, type LedgerSource, type Journal } from "@/lib/accounts";
 import { buildFinancialStatements } from "@/lib/financial-statements";
+import type { AccountsPdfSection } from "@/components/reports/AccountsStatementPDF";
 
 type AccountView = "income" | "balance" | "cashflow" | "entries";
 
@@ -36,6 +37,7 @@ export default function AccountsPage() {
   const [customEnd, setCustomEnd] = useState("");
   const [journal, setJournal] = useState({ date: dateKey(new Date()), debitCode: "", creditCode: "", amount: "", description: "" });
   const [saving, setSaving] = useState(false);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
   const [editingJournalId, setEditingJournalId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
   const sales = useRealtimeCollection<LedgerSource>("saleTransactions");
@@ -62,6 +64,42 @@ export default function AccountsPage() {
   const canPost = ["ADMIN", "FINANCE", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
   const input = "w-full border border-gray-300 rounded-md px-3 py-2 text-sm";
   const reportTitle = view === "income" ? "Income Statement (Profit & Loss)" : view === "balance" ? "Balance Sheet" : "Cash Flow Statement";
+  const pdfSections = useMemo<AccountsPdfSection[]>(() => {
+    if (view === "income") return [
+      { title: "Revenue", rows: [{ label: "Sales revenue", amount: statements.revenue }, { label: "Total revenue", amount: statements.revenue, emphasis: "total" }] },
+      { title: "Cost of Goods Sold", rows: [{ label: "Cost of goods sold", amount: statements.costOfGoodsSold }, { label: "Gross profit", amount: statements.grossProfit, emphasis: "total" }] },
+      { title: "Operating Expenses", rows: [{ label: "Operating expenses", amount: statements.operatingExpenses }, { label: "Net income", amount: statements.netIncome, emphasis: "grand" }] },
+    ];
+    if (view === "cashflow") return [
+      { title: "Operating Cash Flows", rows: [{ label: "Cash received from sales", amount: statements.cashInflows }, { label: "Cash paid for expenses", amount: -statements.cashOutflows }, { label: "Account journal cash adjustments", amount: statements.cashAdjustments }, { label: "Net cash flow", amount: statements.netCashFlow, emphasis: "total" }] },
+      { title: "Cash Reconciliation", rows: [{ label: "Beginning cash balance", amount: statements.beginningCashBalance }, { label: "Ending cash balance", amount: statements.endingCashBalance, emphasis: "grand" }] },
+    ];
+    if (view === "balance") return [...ACCOUNT_GROUPS]
+      .filter(group => ["Current Assets", "Non-Current Assets", "Current Liabilities", "Non-Current Liabilities", "Equity"].includes(group))
+      .map(group => {
+        const rows = report.rows.filter(row => row.group === group && !REMOVED_ACCOUNT_CODES.has(row.code));
+        const total = group === "Equity" ? statements.equity : rows.reduce((sum, row) => sum + row.balance, 0);
+        return { title: group, rows: [...rows.map(row => ({ label: row.name, amount: row.balance })), ...(group === "Equity" ? [{ label: "Accumulated profit / loss", amount: statements.retainedEarnings }] : []), { label: `Total ${group}`, amount: total, emphasis: "total" as const }] };
+      }).concat([{ title: "Accounting Equation", rows: [{ label: "Total assets", amount: statements.assets }, { label: "Total liabilities and equity", amount: statements.liabilities + statements.equity, emphasis: "grand" }] }]);
+    return [];
+  }, [view, statements, report.rows]);
+
+  async function downloadPagelessPdf() {
+    if (view === "entries" || !valid) return;
+    setGeneratingPdf(true);
+    try {
+      const [{ pdf }, { AccountsStatementPDF }] = await Promise.all([import("@react-pdf/renderer"), import("@/components/reports/AccountsStatementPDF")]);
+      const blob = await pdf(<AccountsStatementPDF title={reportTitle} period={`${start} to ${end}`} sections={pdfSections} />).toBlob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `${view}-statement-${start}-to-${end}.pdf`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setGeneratingPdf(false);
+    }
+  }
   async function saveJournal(e: FormEvent) {
     e.preventDefault(); setSaving(true); setMessage("");
     try {
@@ -112,7 +150,7 @@ export default function AccountsPage() {
     <div role="tablist" aria-label="Financial statements" className="grid flex-1 overflow-hidden rounded-xl border bg-white sm:grid-cols-3">
       {([["income", "Income Statement (Profit & Loss)"], ["balance", "Balance Sheet"], ["cashflow", "Cash Flow Statement"]] as const).map(([id, label]) => <button key={id} type="button" role="tab" aria-selected={view === id} onClick={() => setView(id)} className={`min-h-14 border-b px-4 py-3 text-sm font-semibold transition-colors last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0 ${view === id ? "bg-gray-900 text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>{label}</button>)}
     </div>
-    {view !== "entries" && <button type="button" onClick={() => window.print()} className="rounded-lg bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800">Print {reportTitle}</button>}
+    {view !== "entries" && <div className="flex flex-wrap gap-2"><button type="button" onClick={() => window.print()} className="rounded-lg border border-blue-700 bg-white px-4 py-3 text-sm font-semibold text-blue-700 hover:bg-blue-50">Print</button><button type="button" disabled={generatingPdf || !valid} onClick={downloadPagelessPdf} className="rounded-lg bg-blue-700 px-5 py-3 text-sm font-semibold text-white hover:bg-blue-800 disabled:opacity-50">{generatingPdf ? "Generating PDF…" : "Download Pageless PDF"}</button></div>}
     </div>
     {view !== "entries" && period === "custom" && <div className="accounts-no-print flex flex-wrap gap-3"><label>From <input aria-label="Start date" type="date" value={customStart} onChange={e => setCustomStart(e.target.value)} className={input} /></label><label>To <input aria-label="End date" type="date" value={customEnd} onChange={e => setCustomEnd(e.target.value)} className={input} /></label></div>}
     {view !== "entries" && (!valid ? <p role="alert">Choose a valid start and end date.</p> : <>
