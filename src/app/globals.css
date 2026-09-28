@@ -27,3 +27,43 @@ body {
 .animate-slide-up {
   animation: slide-up 0.3s ease-out;
 }
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 14mm;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+  }
+
+  body > div,
+  body > header,
+  .accounts-no-print {
+    display: none !important;
+  }
+
+  body > main,
+  .accounts-page {
+    display: block !important;
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .accounts-print-header {
+    display: block !important;
+  }
+
+  .accounts-page section,
+  .accounts-page table,
+  .accounts-page tr {
+    break-inside: avoid;
+  }
+
+  .accounts-page .overflow-x-auto {
+    overflow: visible !important;
+  }
+}
