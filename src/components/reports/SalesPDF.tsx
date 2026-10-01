@@ -4,6 +4,7 @@ import { pdfStyles } from "./PDFStyles";
 
 interface SalesEntry {
   date: string;
+  invoiceNumber: string;
   customerName: string;
   customerType: string;
   packSize: string;
@@ -97,13 +98,14 @@ export function SalesPDF({
           <Text style={pdfStyles.sectionTitle}>Transaction Details</Text>
           <View style={pdfStyles.table}>
             <View style={pdfStyles.tableRow}>
-              <View style={{ ...pdfStyles.tableColHeader, width: "15%" }}><Text style={pdfStyles.tableCellHeader}>Date</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: "20%" }}><Text style={pdfStyles.tableCellHeader}>Customer</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: "15%" }}><Text style={pdfStyles.tableCellHeader}>Type</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: "12%" }}><Text style={pdfStyles.tableCellHeader}>Qty</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: "12%" }}><Text style={pdfStyles.tableCellHeader}>Date</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: "14%" }}><Text style={pdfStyles.tableCellHeader}>Invoice</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: "17%" }}><Text style={pdfStyles.tableCellHeader}>Customer</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: "12%" }}><Text style={pdfStyles.tableCellHeader}>Type</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: "8%" }}><Text style={pdfStyles.tableCellHeader}>Qty</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: "12%" }}><Text style={pdfStyles.tableCellHeader}>Price</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: "14%" }}><Text style={pdfStyles.tableCellHeader}>Total</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: "12%" }}><Text style={pdfStyles.tableCellHeader}>Method</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: "11%" }}><Text style={pdfStyles.tableCellHeader}>Method</Text></View>
             </View>
             {entries.length === 0 ? (
               <View style={pdfStyles.tableRow}>
@@ -112,13 +114,14 @@ export function SalesPDF({
             ) : (
               entries.slice(0, 50).map((e, i) => (
                 <View style={pdfStyles.tableRow} key={i}>
-                  <View style={{ ...pdfStyles.tableCol, width: "15%" }}><Text style={pdfStyles.tableCell}>{e.date}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: "20%" }}><Text style={pdfStyles.tableCell}>{e.customerName}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: "15%" }}><Text style={pdfStyles.tableCell}>{e.customerType}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: "12%" }}><Text style={pdfStyles.tableCell}>{e.quantitySold}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: "12%" }}><Text style={pdfStyles.tableCell}>{e.date}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: "14%" }}><Text style={pdfStyles.tableCell}>{e.invoiceNumber}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: "17%" }}><Text style={pdfStyles.tableCell}>{e.customerName}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: "12%" }}><Text style={pdfStyles.tableCell}>{e.customerType}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: "8%" }}><Text style={pdfStyles.tableCell}>{e.quantitySold}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: "12%" }}><Text style={pdfStyles.tableCell}>UGX {e.unitPrice.toLocaleString()}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: "14%" }}><Text style={pdfStyles.tableCell}>UGX {e.totalAmount.toLocaleString()}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: "12%" }}><Text style={pdfStyles.tableCell}>{e.paymentMethod}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: "11%" }}><Text style={pdfStyles.tableCell}>{e.paymentMethod}</Text></View>
                 </View>
               ))
             )}

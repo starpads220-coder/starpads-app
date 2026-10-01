@@ -194,20 +194,32 @@ export async function GET(request: NextRequest) {
 
         const byCustomerType: Record<string, number> = {};
         const byPaymentMethod: Record<string, number> = {};
+        const paymentLabel = (transaction: SaleTransaction) => {
+          const code = transaction.accounting?.settlementCode;
+          if (code === "1030") return "Cash";
+          if (code === "1000") return "Bank";
+          if (code === "1010") return "Mobile Money [MTN]";
+          if (code === "1020") return "Mobile Money [Airtel]";
+          if (transaction.paymentMethod === "CASH") return "Cash";
+          if (["BANK", "BANK_TRANSFER"].includes(transaction.paymentMethod)) return "Bank";
+          return transaction.paymentMethod === "MOBILE_MONEY_AIRTEL" ? "Mobile Money [Airtel]" : "Mobile Money [MTN]";
+        };
         transactions.forEach((t) => {
           byCustomerType[t.customerType] = (byCustomerType[t.customerType] || 0) + (t.totalAmount || 0);
-          byPaymentMethod[t.paymentMethod] = (byPaymentMethod[t.paymentMethod] || 0) + (t.totalAmount || 0);
+          const method = paymentLabel(t);
+          byPaymentMethod[method] = (byPaymentMethod[method] || 0) + (t.totalAmount || 0);
         });
 
         const entries = transactions.map((t) => ({
           date: t.date,
+          invoiceNumber: t.invoiceNumber || "—",
           customerName: t.customerName,
-          customerType: t.customerType,
+          customerType: t.saleType === "PAD_TRAINING" ? "Trainings" : t.customerType,
           packSize: t.packSize,
           quantitySold: t.quantitySold || 0,
           unitPrice: t.unitPrice || 0,
           totalAmount: t.totalAmount || 0,
-          paymentMethod: t.paymentMethod,
+          paymentMethod: paymentLabel(t),
         }));
 
         pdfElement = React.createElement(SalesPDF, {
@@ -246,6 +258,7 @@ export async function GET(request: NextRequest) {
           description: e.description,
           amountUgx: e.amountUgx || 0,
           paidBy: employees[e.paidBy] || e.paidBy,
+          receiptRef: e.receiptRef || "",
         }));
 
         const topExpenses = [...entries].sort((a, b) => b.amountUgx - a.amountUgx).slice(0, 20);

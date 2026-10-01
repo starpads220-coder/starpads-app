@@ -215,6 +215,22 @@ service cloud.firestore {
         && request.resource.data.date is string && request.resource.data.description is string;
       allow delete: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
     }
+    match /productionCosts/{costId} {
+      allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF']);
+      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && request.resource.data.date is string
+        && request.resource.data.description is string && request.resource.data.description.size() > 0
+        && request.resource.data.settlementCode in ['1000', '1030'];
+      allow update: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['date', 'description', 'amount', 'settlementCode', 'reference', 'notes'])
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && request.resource.data.date is string
+        && request.resource.data.description is string && request.resource.data.description.size() > 0
+        && request.resource.data.settlementCode in ['1000', '1030'];
+      allow delete: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
+    }
     match /expenses/{expenseId} {
       allow read: if isAuthenticated();
       allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);

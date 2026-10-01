@@ -119,7 +119,7 @@ export function SalesCalendar({ transactions, expenses }: Props) {
                 <ul className="space-y-2">
                   {daySales.map(s => (
                     <li key={s.id} className="text-sm flex justify-between bg-white p-2 rounded border border-gray-100">
-                      <span>{s.customerName} ({s.quantitySold}x {s.packSize.toLowerCase()})</span>
+                      <span>{s.invoiceNumber ? `${s.invoiceNumber} · ` : ""}{s.customerName} ({s.saleType === "PAD_TRAINING" ? "Trainings" : `${s.quantitySold}x ${s.packSize.toLowerCase()}`})</span>
                       <span className="font-medium">UGX {s.totalAmount.toLocaleString()}</span>
                     </li>
                   ))}

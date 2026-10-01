@@ -78,16 +78,6 @@ const CATEGORY_LABELS: Record<ExpenseCategory, string> = {
   MISCELLANEOUS: "Miscellaneous",
 };
 
-const SUBCATEGORY_OPTIONS: Partial<Record<ExpenseCategory, string[]>> = {
-  RAW_MATERIALS: ["Flannel", "PUL", "Microfibre", "Snap Button", "Threads", "Packaging Bags Paper", "Packaging Bags Polythene", "Boxes", "Custom"],
-  UTILITIES: ["Water", "Electricity", "Custom"],
-  TRANSPORT: ["Raw Materials", "Employees", "Custom"],
-  EQUIPMENT_MAINTENANCE: ["Overlock", "Straight Stitch", "Manual Machine", "Rings", "Bourbons", "Custom"],
-  MARKETING: ["UGC Influencers", "Marketers", "Paid Ads", "Custom"],
-  CONTRIBUTIONS: ["Custom"],
-  MISCELLANEOUS: ["Custom"],
-};
-
 const COLORS = [
   "#22c55e", "#3b82f6", "#f59e0b", "#ef4444",
   "#8b5cf6", "#ec4899", "#14b8a6", "#6b7280",
@@ -106,10 +96,6 @@ export default function ExpensesPage() {
 
   const [form, setForm] = useState({
     date: new Date().toISOString().split("T")[0],
-    category: "RAW_MATERIALS" as ExpenseCategory,
-    customCategory: "",
-    subcategory: "",
-    customSubcategory: "",
     description: "",
     amountUgx: 0,
     unitCost: 0,
@@ -133,7 +119,7 @@ export default function ExpensesPage() {
     [expenses, periodBounds]
   );
 
-  const calculatedAmount = form.category === "LABOUR"
+  const calculatedAmount = accounting.accountCode === "6010"
     ? form.labourTotalPayments
     : form.unitCost * form.itemCount;
 
@@ -244,7 +230,7 @@ export default function ExpensesPage() {
         label: CATEGORY_LABELS[cat as ExpenseCategory] || cat,
         value: amt,
         pct: total > 0 ? Math.round((amt / total) * 100) : 0,
-        color: COLORS[CATEGORY_OPTIONS.indexOf(cat as ExpenseCategory) % COLORS.length],
+        color: COLORS[Math.max(0, CATEGORY_OPTIONS.indexOf(cat as ExpenseCategory)) % COLORS.length],
       }))
       .sort((a, b) => b.value - a.value);
   }, [byCategory]);
@@ -257,18 +243,19 @@ export default function ExpensesPage() {
     try {
       if (!Number.isFinite(calculatedAmount) || calculatedAmount <= 0) throw new Error("Enter an expense amount greater than zero.");
       if (!expensePayers.some(person => person.id === form.paidBy)) throw new Error("Select an approved employee under Paid By.");
+      if (!form.receiptRef.trim()) throw new Error("Enter a Payment Voucher No.");
+      const validatedAccounting = validateAccounting(accounting, "expense");
       await addDoc(collection(db, "expenses"), {
-        accounting: validateAccounting(accounting, "expense"),
+        accounting: validatedAccounting,
         ...form,
-        category: form.category === "CUSTOM" ? (form.customCategory.trim() || "CUSTOM") : form.category,
-        subcategory: form.subcategory === "Custom" ? form.customSubcategory.trim() : form.subcategory,
+        category: validatedAccounting.accountName,
+        receiptRef: form.receiptRef.trim(),
         amountUgx: calculatedAmount,
         createdAt: Timestamp.now(),
       });
       setForm({
         date: new Date().toISOString().split("T")[0],
-        category: "RAW_MATERIALS", customCategory: "", subcategory: "", customSubcategory: "", description: "",
-        amountUgx: 0, unitCost: 0, itemCount: 1, labourTotalPayments: 0, paidBy: "", receiptRef: "",
+        description: "", amountUgx: 0, unitCost: 0, itemCount: 1, labourTotalPayments: 0, paidBy: "", receiptRef: "",
       });
       setFormSuccess(true);
       setAccounting({ ...emptyAccounting(), accountGroup: "Expenses" });
@@ -409,6 +396,7 @@ export default function ExpensesPage() {
                   <div>
                     <p className="text-xs font-semibold text-gray-700">{CATEGORY_LABELS[e.category] || e.category}</p>
                     <p className="text-[10px] text-gray-400">{e.description} · {e.date}</p>
+                    {e.receiptRef && <p className="text-[10px] text-gray-400">Payment Voucher No: {e.receiptRef}</p>}
                   </div>
                   <span className="text-xs font-semibold text-red-500">UGX {e.amountUgx.toLocaleString()}</span>
                 </div>
@@ -460,44 +448,11 @@ export default function ExpensesPage() {
               required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Category</label>
-            <select value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value as ExpenseCategory, subcategory: "", customSubcategory: "" })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
-              {CATEGORY_OPTIONS.map((c) => (
-                <option key={c} value={c}>{CATEGORY_LABELS[c]}</option>
-              ))}
-            </select>
-          </div>
-          {form.category === "CUSTOM" && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Custom Category</label>
-              <input type="text" value={form.customCategory} onChange={(e) => setForm({ ...form, customCategory: e.target.value })} required
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
-            </div>
-          )}
-          {form.category !== "LABOUR" && form.category !== "CUSTOM" && form.category !== "MISCELLANEOUS" && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Subcategory</label>
-              <select value={form.subcategory} onChange={(e) => setForm({ ...form, subcategory: e.target.value, customSubcategory: "" })} required
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
-                <option value="">Select...</option>
-                {(SUBCATEGORY_OPTIONS[form.category] || ["Custom"]).map((subcategory) => <option key={subcategory} value={subcategory}>{subcategory}</option>)}
-              </select>
-            </div>
-          )}
-          {form.subcategory === "Custom" && (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Custom Subcategory</label>
-              <input type="text" value={form.customSubcategory} onChange={(e) => setForm({ ...form, customSubcategory: e.target.value })} required
-                className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
-            </div>
-          )}
-          <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Description</label>
             <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
               required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
           </div>
-          {form.category === "LABOUR" ? (
+          {accounting.accountCode === "6010" ? (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Total Payments (UGX)</label>
               <input type="number" value={form.labourTotalPayments || ""} onChange={(e) => setForm({ ...form, labourTotalPayments: parseInt(e.target.value) || 0 })}
@@ -520,9 +475,10 @@ export default function ExpensesPage() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Receipt Ref</label>
-            <input type="text" value={form.receiptRef} onChange={(e) => setForm({ ...form, receiptRef: e.target.value })}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" placeholder="Optional" />
+            <label className="block text-sm font-medium text-gray-700 mb-1">Payment Voucher No</label>
+            <input type="text" value={form.receiptRef} onChange={(e) => { e.currentTarget.setCustomValidity(""); setForm({ ...form, receiptRef: e.target.value }); }}
+              onInvalid={(e) => e.currentTarget.setCustomValidity("Enter a Payment Voucher No.")}
+              required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
           </div>
         </div>
         <div className="flex justify-end">

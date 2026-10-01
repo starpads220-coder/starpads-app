@@ -93,7 +93,7 @@ export type CustomerSubType =
 
 export type PackVariant = "" | "MAX" | "STANDARD";
 
-export type PaymentMethod = "CASH" | "MOBILE_MONEY" | "BANK_TRANSFER";
+export type PaymentMethod = "CASH" | "BANK" | "MOBILE_MONEY_MTN" | "MOBILE_MONEY_AIRTEL" | "MOBILE_MONEY" | "BANK_TRANSFER";
 
 // ─── Firestore document types ────────────────────────────────────────────────
 
@@ -156,6 +156,7 @@ export interface SaleTransaction {
   accounting?: import("@/lib/accounts").AccountingSelection;
   id: string;
   date: string;
+  invoiceNumber?: string;
   customerName: string;
   customerType: CustomerType;
   customerCategory?: CustomerCategory;
@@ -200,6 +201,7 @@ export interface Expense {
   description: string;
   amountUgx: number;
   paidBy: string;
+  receiptRef?: string;
   notes?: string;
 }
 

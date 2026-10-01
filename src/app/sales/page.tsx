@@ -7,6 +7,7 @@ import { type FormEvent, useEffect, useState, useMemo, useCallback } from "react
 import {
   addDoc,
   collection,
+  deleteField,
   doc,
   updateDoc,
   deleteDoc,
@@ -15,11 +16,11 @@ import {
   query,
   Timestamp,
   limit,
+  where,
 } from "firebase/firestore";
 import dynamic from "next/dynamic";
 
 import { RouteGuard } from "@/components/auth/RouteGuard";
-import { SalesCalendar } from "@/components/ui/SalesCalendar";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -53,7 +54,7 @@ const SalesCharts = dynamic(() => import("@/components/sales/SalesCharts"), {
   ),
 });
 
-type TabKey = "dashboard" | "calendar" | "entry";
+type TabKey = "dashboard" | "sales-list" | "entry";
 type AnalyticsPeriod = "day" | "week" | "month" | "12months" | "custom";
 type SalesTargetType = "MONTHLY" | "QUARTERLY" | "SIX_MONTHS" | "ANNUAL";
 type SaleType = NonNullable<SaleTransaction["saleType"]>;
@@ -67,11 +68,37 @@ const SALE_TYPE_BY_ACCOUNT: Record<string, SaleType> = {
 };
 
 const MATERIAL_PRICES: Record<MaterialType, number> = {
-  PUL: 2000,
-  FLEECE: 2000,
+  PUL: 20000,
+  FLEECE: 20000,
   FLANNEL: 18000,
 };
 const TRAINING_DAILY_RATE = 300000;
+const SALES_PERSON_NAMES = ["Itamba Kezia", "Kigere Rose", "Ngobi Joshua Muwanguzi"] as const;
+
+function normalizeEmployeeName(name: string) {
+  return name.normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase();
+}
+
+const SALES_PERSON_NAME_KEYS = new Set(SALES_PERSON_NAMES.map(normalizeEmployeeName));
+
+function paymentMethodFromSettlement(settlementCode: string): PaymentMethod {
+  if (settlementCode === "1030") return "CASH";
+  if (settlementCode === "1000") return "BANK";
+  if (settlementCode === "1010") return "MOBILE_MONEY_MTN";
+  return "MOBILE_MONEY_AIRTEL";
+}
+
+function paymentMethodLabel(transaction: SaleTransaction): string {
+  const code = transaction.accounting?.settlementCode;
+  if (code === "1030") return "Cash";
+  if (code === "1000") return "Bank";
+  if (code === "1010") return "Mobile Money [MTN]";
+  if (code === "1020") return "Mobile Money [Airtel]";
+  if (transaction.paymentMethod === "CASH") return "Cash";
+  if (["BANK", "BANK_TRANSFER"].includes(transaction.paymentMethod)) return "Bank";
+  if (transaction.paymentMethod === "MOBILE_MONEY_AIRTEL") return "Mobile Money [Airtel]";
+  return "Mobile Money [MTN]";
+}
 
 const SALES_TARGET_TYPE_LABELS: Record<SalesTargetType, string> = {
   MONTHLY: "Monthly",
@@ -145,6 +172,7 @@ function getExpectedPrice(packSize: PackSize, packVariant?: PackVariant): number
 export default function SalesPage() {
   const { userRole } = useAuth();
   const [transactions, setTransactions] = useState<SaleTransaction[]>([]);
+  const [salesListSnapshot, setSalesListSnapshot] = useState<{ key: string; transactions: SaleTransaction[]; error: string }>({ key: "", transactions: [], error: "" });
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState("");
@@ -155,6 +183,9 @@ export default function SalesPage() {
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>("month");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+  const [salesListPeriod, setSalesListPeriod] = useState<AnalyticsPeriod>("month");
+  const [salesListCustomStart, setSalesListCustomStart] = useState("");
+  const [salesListCustomEnd, setSalesListCustomEnd] = useState("");
 
   const [showTargetForm, setShowTargetForm] = useState(false);
   const [targetForm, setTargetForm] = useState({
@@ -170,20 +201,20 @@ export default function SalesPage() {
 
   const [form, setForm] = useState({
     date: getDateKey(),
+    invoiceNumber: "",
     customerName: "",
     customerType: "RETAIL" as CustomerType,
     customerCategory: "" as CustomerCategory | "",
     customerSubType: "" as CustomerSubType | "",
-    packSize: "HALF_DOZEN" as PackSize,
-    packVariant: "" as PackVariant,
+    packSize: "ONE_PACK" as PackSize,
+    packVariant: "STANDARD" as PackVariant,
     quantitySold: 0,
-    unitPrice: 0,
-    paymentMethod: "CASH" as PaymentMethod,
+    unitPrice: 12000,
     salespersonId: "",
     notes: "",
     batchRef: "",
     saleType: "SALE_OF_PADS" as SaleType,
-    materialType: "PUL" as MaterialType,
+    materialType: "PUL" as MaterialType | "",
     materialQuantity: 0,
     trainingDays: 0,
     grantAmount: 0,
@@ -202,7 +233,10 @@ export default function SalesPage() {
     salespersonName: string;
   } | null>(null);
 
+  // Keep this aligned with the active worker source used by Production. The
+  // Salesperson dropdown is still restricted to the three approved names.
   const { data: employees = [] } = useCollectionQuery<{ id: string; name: string; role: string; department: string; isActive?: boolean; active?: boolean }>("employees", [
+    where("isActive", "==", true),
     orderBy("name"),
   ], { staleTime: 10 * 60 * 1000 });
 
@@ -251,6 +285,39 @@ export default function SalesPage() {
     () => getPeriodBounds(analyticsPeriod, customStart, customEnd),
     [analyticsPeriod, customStart, customEnd]
   );
+
+  const salesListBounds = useMemo(
+    () => getPeriodBounds(salesListPeriod, salesListCustomStart, salesListCustomEnd),
+    [salesListPeriod, salesListCustomStart, salesListCustomEnd],
+  );
+  const salesListKey = `${salesListBounds.start}|${salesListBounds.end}`;
+  const salesListDateError = salesListPeriod === "custom" && (!salesListCustomStart || !salesListCustomEnd)
+    ? "Select a start and end date."
+    : salesListBounds.start > salesListBounds.end ? "Start date must be on or before end date." : "";
+  const salesListLoading = !salesListDateError && salesListSnapshot.key !== salesListKey;
+  const salesListError = salesListDateError || (salesListSnapshot.key === salesListKey ? salesListSnapshot.error : "");
+  const salesListTransactions = salesListSnapshot.key === salesListKey ? salesListSnapshot.transactions : [];
+
+  useEffect(() => {
+    if (activeTab !== "sales-list" || salesListDateError) return;
+    const queryKey = `${salesListBounds.start}|${salesListBounds.end}`;
+    const unsubscribe = onSnapshot(
+      query(
+        collection(db, "saleTransactions"),
+        where("date", ">=", salesListBounds.start),
+        where("date", "<=", salesListBounds.end),
+        orderBy("date", "desc"),
+      ),
+      (snapshot) => {
+        setSalesListSnapshot({ key: queryKey, transactions: snapshot.docs.map((sale) => ({ id: sale.id, ...sale.data() } as SaleTransaction)), error: "" });
+      },
+      (error) => {
+        console.error("Sales list listener error:", error);
+        setSalesListSnapshot({ key: queryKey, transactions: [], error: "Sales could not be loaded for this period." });
+      },
+    );
+    return unsubscribe;
+  }, [activeTab, salesListBounds, salesListDateError]);
 
   const filteredTransactions = useMemo(
     () => transactions.filter((t) => t.date >= periodBounds.start && t.date <= periodBounds.end),
@@ -414,8 +481,12 @@ export default function SalesPage() {
     ? (totalRevenue / periodTarget.targetAmount) * 100
     : 0;
 
+  const originalMaterialSale = editingId ? transactions.find((transaction) => transaction.id === editingId && transaction.saleType === "SALE_OF_MATERIAL" && transaction.materialType === form.materialType) : undefined;
+  const materialUnitPrice = originalMaterialSale && Number.isFinite(originalMaterialSale.unitPrice)
+    ? originalMaterialSale.unitPrice
+    : MATERIAL_PRICES[form.materialType || "PUL"];
   const totalAmount = form.saleType === "SALE_OF_MATERIAL"
-    ? form.materialQuantity * MATERIAL_PRICES[form.materialType]
+    ? form.materialQuantity * materialUnitPrice
     : form.saleType === "PAD_TRAINING"
       ? form.trainingDays * TRAINING_DAILY_RATE
       : form.saleType === "GRANTS_DONATIONS"
@@ -426,7 +497,9 @@ export default function SalesPage() {
   const formDiscountAmount = Math.max(0, expectedTotal - totalAmount);
   const formDiscountPercent = expectedTotal > 0 ? (formDiscountAmount / expectedTotal) * 100 : 0;
 
-  const salespersonEmployees = employees;
+  const salespersonEmployees = employees.filter((employee) =>
+    SALES_PERSON_NAME_KEYS.has(normalizeEmployeeName(employee.name)),
+  );
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -434,19 +507,29 @@ export default function SalesPage() {
     setFormError("");
     setFormSuccess(false);
     try {
-      const isPadSale = form.saleType === "SALE_OF_PADS";
+      const isCustomSale = accounting.accountCode.startsWith("custom:");
+      const isPadSale = isCustomSale || form.saleType === "SALE_OF_PADS";
       const batchRef = isPadSale ? form.batchRef || currentSaleBatch?.id || "" : "";
       if (isPadSale && !editingId && (!currentSaleBatch || batchRef !== currentSaleBatch.id)) {
         throw new Error("Sales must be recorded against the current available batch.");
       }
 
-      const quantitySold = form.saleType === "SALE_OF_MATERIAL" ? form.materialQuantity : form.saleType === "PAD_TRAINING" ? form.trainingDays : form.saleType === "GRANTS_DONATIONS" ? 1 : form.quantitySold;
-      const unitPrice = form.saleType === "SALE_OF_MATERIAL" ? MATERIAL_PRICES[form.materialType] : form.saleType === "PAD_TRAINING" ? TRAINING_DAILY_RATE : form.saleType === "GRANTS_DONATIONS" ? form.grantAmount : form.unitPrice;
+      const quantitySold = isCustomSale ? form.quantitySold : form.saleType === "SALE_OF_MATERIAL" ? form.materialQuantity : form.saleType === "PAD_TRAINING" ? form.trainingDays : form.saleType === "GRANTS_DONATIONS" ? 1 : form.quantitySold;
+      const unitPrice = isCustomSale ? form.unitPrice : form.saleType === "SALE_OF_MATERIAL" ? materialUnitPrice : form.saleType === "PAD_TRAINING" ? TRAINING_DAILY_RATE : form.saleType === "GRANTS_DONATIONS" ? form.grantAmount : form.unitPrice;
       if (!Number.isFinite(totalAmount) || totalAmount <= 0) throw new Error("Enter a quantity or amount greater than zero.");
-      const saleData = { ...form, batchRef, quantitySold, unitPrice, totalAmount, accounting: validateAccounting(accounting, "sale") };
+      const validatedAccounting = validateAccounting(accounting, "sale");
+      const { salespersonId, ...formWithoutSalesperson } = form;
+      const formWithoutOtherSubcategories: Partial<typeof formWithoutSalesperson> = { ...formWithoutSalesperson };
+      delete formWithoutOtherSubcategories.materialType;
+      delete formWithoutOtherSubcategories.materialQuantity;
+      delete formWithoutOtherSubcategories.trainingDays;
+      delete formWithoutOtherSubcategories.grantAmount;
+      const saleData = { ...(isCustomSale ? formWithoutOtherSubcategories : formWithoutSalesperson), ...(form.saleType === "GRANTS_DONATIONS" && !isCustomSale ? { invoiceNumber: "" } : {}), ...(form.saleType === "PAD_TRAINING" && !isCustomSale ? { customerType: "RETAIL" as CustomerType } : {}), ...(["GRANTS_DONATIONS", "PAD_TRAINING"].includes(form.saleType) && !isCustomSale ? {} : { salespersonId }), ...(isCustomSale ? { saleType: "SALE_OF_PADS" as SaleType } : {}), batchRef, quantitySold, unitPrice, totalAmount, paymentMethod: paymentMethodFromSettlement(validatedAccounting.settlementCode), accounting: validatedAccounting };
       if (editingId) {
         await updateDoc(doc(db, "saleTransactions", editingId), {
           ...saleData,
+          ...(["GRANTS_DONATIONS", "PAD_TRAINING"].includes(form.saleType) ? { salespersonId: deleteField() } : {}),
+          ...(isCustomSale ? { materialType: deleteField(), materialQuantity: deleteField(), trainingDays: deleteField(), grantAmount: deleteField() } : {}),
         });
       } else {
         await addDoc(collection(db, "saleTransactions"), {
@@ -474,15 +557,15 @@ export default function SalesPage() {
       setEditingId(null);
       setForm({
         date: getDateKey(),
+        invoiceNumber: "",
         customerName: "",
         customerType: "RETAIL",
         customerCategory: "",
         customerSubType: "",
-        packSize: "HALF_DOZEN",
-        packVariant: "",
+        packSize: "ONE_PACK",
+        packVariant: "STANDARD",
         quantitySold: 0,
-        unitPrice: 0,
-        paymentMethod: "CASH",
+        unitPrice: 12000,
         salespersonId: "",
         notes: "",
         batchRef: "",
@@ -508,25 +591,25 @@ export default function SalesPage() {
     setEditingId(t.id);
     setForm({
       date: t.date,
+      invoiceNumber: t.saleType === "GRANTS_DONATIONS" ? "" : t.invoiceNumber || "",
       customerName: t.customerName,
-      customerType: t.customerType,
+      customerType: t.saleType === "PAD_TRAINING" ? "RETAIL" : t.customerType,
       customerCategory: t.customerCategory || "",
       customerSubType: t.customerSubType || "",
       packSize: t.packSize,
       packVariant: t.packVariant || "",
       quantitySold: t.quantitySold,
       unitPrice: t.unitPrice,
-      paymentMethod: t.paymentMethod,
-      salespersonId: t.salespersonId,
+      salespersonId: t.saleType === "GRANTS_DONATIONS" || t.saleType === "PAD_TRAINING" ? "" : t.salespersonId,
       notes: t.notes || "",
       batchRef: t.batchRef || "",
-      saleType: t.saleType || "SALE_OF_PADS",
-      materialType: t.materialType || "PUL",
+      saleType: t.accounting?.accountCode.startsWith("custom:") ? "SALE_OF_PADS" : t.saleType || "SALE_OF_PADS",
+      materialType: t.accounting?.accountCode.startsWith("custom:") ? "" : t.materialType || "PUL",
       materialQuantity: t.materialQuantity || 0,
       trainingDays: t.trainingDays || 0,
       grantAmount: t.grantAmount || 0,
     });
-    setPadsInput(!t.saleType || t.saleType === "SALE_OF_PADS" ? t.quantitySold * PACK_SIZES[t.packSize] : 0);
+    setPadsInput(t.accounting?.accountCode.startsWith("custom:") || !t.saleType || t.saleType === "SALE_OF_PADS" ? t.quantitySold * PACK_SIZES[t.packSize] : 0);
     setActiveTab("entry");
     setFormError("");
     setFormSuccess(false);
@@ -623,7 +706,7 @@ export default function SalesPage() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {(["dashboard", "calendar", "entry"] as const).map((tab) => (
+          {(["dashboard", "sales-list", "entry"] as const).map((tab) => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -633,7 +716,7 @@ export default function SalesPage() {
                   : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
               }`}
             >
-              {tab === "dashboard" ? "Dashboard" : tab === "calendar" ? "Calendar" : "New Sale"}
+              {tab === "dashboard" ? "Dashboard" : tab === "sales-list" ? "Sales List" : "New Sale"}
             </button>
           ))}
         </div>
@@ -1140,21 +1223,49 @@ export default function SalesPage() {
             )}
           </ChartCard>
 
-          {/* Sales List */}
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
-            <div className="flex items-center justify-between">
+          <ReportCard title="Sales Report" subtitle="Download a PDF summary of sales and revenue data" onGenerate={handleGenerateReport} />
+        </>
+      )}
+
+      {activeTab === "sales-list" && (
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-gray-900">Sales List</h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? "s" : ""} in this period
+                  {salesListLoading ? "Loading sales..." : `${salesListTransactions.length} transaction${salesListTransactions.length !== 1 ? "s" : ""} in this period`}
                 </p>
               </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex gap-1 bg-gray-100 rounded-lg p-1" aria-label="Sales list period">
+                  {(["day", "week", "month", "12months", "custom"] as const).map((period) => (
+                    <button
+                      key={period}
+                      type="button"
+                      onClick={() => setSalesListPeriod(period)}
+                      aria-pressed={salesListPeriod === period}
+                      className={`px-3 py-1.5 text-sm font-medium rounded-md ${salesListPeriod === period ? "bg-white shadow-sm text-gray-900" : "text-gray-500"}`}
+                    >
+                      {period === "day" ? "Daily" : period === "week" ? "Weekly" : period === "month" ? "Monthly" : period === "12months" ? "12 Months" : "Custom"}
+                    </button>
+                  ))}
+                </div>
+                {salesListPeriod === "custom" && (
+                  <div className="flex items-center gap-2">
+                    <input type="date" aria-label="Sales list start date" value={salesListCustomStart} onChange={(event) => setSalesListCustomStart(event.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-32" />
+                    <span className="text-xs text-gray-400">to</span>
+                    <input type="date" aria-label="Sales list end date" value={salesListCustomEnd} onChange={(event) => setSalesListCustomEnd(event.target.value)} className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-32" />
+                  </div>
+                )}
+              </div>
             </div>
+            {salesListError && <p role="alert" className="text-sm text-red-600">{salesListError}</p>}
             <div className="overflow-x-auto max-h-80 overflow-y-auto">
               <table className="min-w-full divide-y divide-gray-200 text-sm">
                 <thead className="bg-gray-50 sticky top-0">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Invoice Number</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sale</th>
                     <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
@@ -1165,22 +1276,23 @@ export default function SalesPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
-                  {filteredTransactions.length === 0 ? (
+                  {salesListLoading || salesListError || salesListTransactions.length === 0 ? (
                     <tr>
-                      <td colSpan={8} className="px-4 py-8 text-center text-sm text-gray-400">No transactions in this period.</td>
+                      <td colSpan={9} className="px-4 py-8 text-center text-sm text-gray-400">{salesListLoading ? "Loading sales..." : salesListError || "No transactions in this period."}</td>
                     </tr>
                   ) : (
-                    filteredTransactions.map((t) => (
+                    salesListTransactions.map((t) => (
                       <tr key={t.id} className="hover:bg-gray-50">
                         <td className="px-4 py-3 text-gray-700 whitespace-nowrap">{t.date}</td>
+                        <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{t.invoiceNumber || "—"}</td>
                         <td className="px-4 py-3 font-medium text-gray-900 whitespace-nowrap">{t.customerName}</td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                          {t.saleType === "SALE_OF_MATERIAL" ? `${t.materialType ?? "Material"} material` : t.saleType === "PAD_TRAINING" ? "Pad training" : t.saleType === "GRANTS_DONATIONS" ? "Grant / donation" : t.packSize === "HALF_DOZEN" ? "Pads — Half Dozen" : t.packSize === "DOZEN" ? "Pads — Dozen" : t.packSize === "CARTON" ? "Pads — Carton" : t.packVariant === "MAX" ? "Pads — 1 Pack Max" : "Pads — 1 Pack Std"}
+                          {t.saleType === "SALE_OF_MATERIAL" ? `${t.materialType ?? "Material"} material` : t.saleType === "PAD_TRAINING" ? "Trainings" : t.saleType === "GRANTS_DONATIONS" ? "Grant / donation" : t.packSize === "HALF_DOZEN" ? "Pads — Half Dozen" : t.packSize === "DOZEN" ? "Pads — Dozen" : t.packSize === "CARTON" ? "Pads — Carton" : t.packVariant === "MAX" ? "Pads — 1 Pack Max" : "Pads — 1 Pack Std"}
                         </td>
                         <td className="px-4 py-3 text-right text-gray-700 whitespace-nowrap">{t.quantitySold}</td>
                         <td className="px-4 py-3 text-right font-medium text-gray-900 whitespace-nowrap">UGX {t.totalAmount.toLocaleString()}</td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
-                          {t.paymentMethod === "CASH" ? "Cash" : t.paymentMethod === "MOBILE_MONEY" ? "M.Money" : "Bank Transfer"}
+                          {paymentMethodLabel(t)}
                         </td>
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{employees.find((e) => e.id === t.salespersonId)?.name || t.salespersonId}</td>
                         <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -1193,13 +1305,8 @@ export default function SalesPage() {
                 </tbody>
               </table>
             </div>
-          </div>
-
-          <ReportCard title="Sales Report" subtitle="Download a PDF summary of sales and revenue data" onGenerate={handleGenerateReport} />
-        </>
+        </div>
       )}
-
-      {activeTab === "calendar" && <SalesCalendar transactions={filteredTransactions} expenses={filteredExpenses} />}
 
       {activeTab === "entry" && (
         <form
@@ -1220,15 +1327,15 @@ export default function SalesPage() {
                   setPadsInput(0);
                   setForm({
                     date: getDateKey(),
+                    invoiceNumber: "",
                     customerName: "",
                     customerType: "RETAIL",
                     customerCategory: "",
                     customerSubType: "",
-                    packSize: "HALF_DOZEN",
-                    packVariant: "",
+                    packSize: "ONE_PACK",
+                    packVariant: "STANDARD",
                     quantitySold: 0,
-                    unitPrice: 0,
-                    paymentMethod: "CASH",
+                    unitPrice: 12000,
                     salespersonId: "",
                     notes: "",
                     batchRef: "",
@@ -1249,8 +1356,9 @@ export default function SalesPage() {
 
           <AccountingFields value={accounting} onChange={(next) => {
             setAccounting(next);
-            const saleType = SALE_TYPE_BY_ACCOUNT[next.accountCode];
-            if (saleType) setForm((current) => ({ ...current, saleType }));
+            const isCustomSale = next.accountCode.startsWith("custom:");
+            const saleType = isCustomSale ? "SALE_OF_PADS" : SALE_TYPE_BY_ACCOUNT[next.accountCode];
+            if (saleType) setForm((current) => ({ ...current, saleType, ...(saleType === "GRANTS_DONATIONS" ? { salespersonId: "", invoiceNumber: "" } : {}), ...(saleType === "PAD_TRAINING" ? { salespersonId: "", customerType: "RETAIL" } : {}), ...(isCustomSale && !accounting.accountCode.startsWith("custom:") ? { materialType: "" as const, materialQuantity: 0, trainingDays: 0, grantAmount: 0 } : {}), ...(!isCustomSale && current.materialType === "" ? { materialType: "PUL" as const } : {}) }));
           }} kind="sale" />
           {formError && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-4 rounded-xl">
@@ -1275,7 +1383,7 @@ export default function SalesPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Customer Name</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">{form.saleType === "GRANTS_DONATIONS" ? "Received From" : "Customer Name"}</label>
               <input
                 type="text"
                 value={form.customerName}
@@ -1284,7 +1392,11 @@ export default function SalesPage() {
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
               />
             </div>
-            <div>
+            {form.saleType !== "GRANTS_DONATIONS" && <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Invoice Number</label>
+              <input type="text" value={form.invoiceNumber} onChange={(event) => setForm({ ...form, invoiceNumber: event.target.value })} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100" />
+            </div>}
+            {form.saleType !== "GRANTS_DONATIONS" && form.saleType !== "PAD_TRAINING" && <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Customer Type</label>
               <select
                 value={form.customerType}
@@ -1295,7 +1407,7 @@ export default function SalesPage() {
                 <option value="BULK">Bulk</option>
                 <option value="AGENT">Agent</option>
               </select>
-            </div>
+            </div>}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Customer Sub-Type</label>
               <select
@@ -1314,9 +1426,9 @@ export default function SalesPage() {
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Material</label>
                 <select value={form.materialType} onChange={(event) => setForm({ ...form, materialType: event.target.value as MaterialType })} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100">
-                  <option value="PUL">PUL — UGX 2,000</option>
-                  <option value="FLEECE">Fleece — UGX 2,000</option>
-                  <option value="FLANNEL">Flannel — UGX 18,000</option>
+                  <option value="PUL">PUL — UGX {(originalMaterialSale?.materialType === "PUL" ? materialUnitPrice : MATERIAL_PRICES.PUL).toLocaleString()}</option>
+                  <option value="FLEECE">Fleece — UGX {(originalMaterialSale?.materialType === "FLEECE" ? materialUnitPrice : MATERIAL_PRICES.FLEECE).toLocaleString()}</option>
+                  <option value="FLANNEL">Flannel — UGX {(originalMaterialSale?.materialType === "FLANNEL" ? materialUnitPrice : MATERIAL_PRICES.FLANNEL).toLocaleString()}</option>
                 </select>
               </div>
               <div>
@@ -1325,7 +1437,7 @@ export default function SalesPage() {
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Material Unit Price (UGX)</label>
-                <input type="number" readOnly value={MATERIAL_PRICES[form.materialType]} className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500" />
+                <input type="number" readOnly value={materialUnitPrice} className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500" />
               </div>
             </>}
             {form.saleType === "PAD_TRAINING" && <div>
@@ -1350,9 +1462,6 @@ export default function SalesPage() {
                 }}
                 className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
               >
-                <option value="HALF_DOZEN">Half Dozen (6 pads/pack)</option>
-                <option value="DOZEN">Dozen (12 pads/pack)</option>
-                <option value="CARTON">Carton (120 pads/pack)</option>
                 <option value="ONE_PACK">1 Pack (3 pads/pack)</option>
               </select>
               <p className="mt-1 text-xs text-gray-500">
@@ -1443,19 +1552,7 @@ export default function SalesPage() {
                 className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500"
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Method</label>
-              <select
-                value={form.paymentMethod}
-                onChange={(event) => setForm({ ...form, paymentMethod: event.target.value as PaymentMethod })}
-                className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100"
-              >
-                <option value="CASH">Cash</option>
-                <option value="MOBILE_MONEY">Mobile Money</option>
-                <option value="BANK_TRANSFER">Bank Transfer</option>
-              </select>
-            </div>
-            <div>
+            {form.saleType !== "GRANTS_DONATIONS" && form.saleType !== "PAD_TRAINING" && <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Salesperson</label>
               <select
                 value={form.salespersonId}
@@ -1470,7 +1567,7 @@ export default function SalesPage() {
                   </option>
                 ))}
               </select>
-            </div>
+            </div>}
             {form.saleType === "SALE_OF_PADS" && <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Batch</label>
               <select

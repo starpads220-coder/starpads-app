@@ -8,6 +8,7 @@ interface ExpenseEntry {
   description: string;
   amountUgx: number;
   paidBy: string;
+  receiptRef: string;
 }
 
 interface CategoryTotal {
@@ -77,10 +78,11 @@ export function ExpensesPDF({
           <Text style={pdfStyles.sectionTitle}>Top Expenses</Text>
           <View style={pdfStyles.table}>
             <View style={pdfStyles.tableRow}>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(14) }}><Text style={pdfStyles.tableCellHeader}>Date</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(20) }}><Text style={pdfStyles.tableCellHeader}>Category</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(36) }}><Text style={pdfStyles.tableCellHeader}>Description</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(16) }}><Text style={pdfStyles.tableCellHeader}>Paid By</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>Date</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(18) }}><Text style={pdfStyles.tableCellHeader}>Category</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(24) }}><Text style={pdfStyles.tableCellHeader}>Description</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(14) }}><Text style={pdfStyles.tableCellHeader}>Paid By</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(18) }}><Text style={pdfStyles.tableCellHeader}>Payment Voucher No</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(14) }}><Text style={pdfStyles.tableCellHeader}>Amount</Text></View>
             </View>
             {topExpenses.length === 0 ? (
@@ -90,10 +92,11 @@ export function ExpensesPDF({
             ) : (
               topExpenses.map((e, i) => (
                 <View style={pdfStyles.tableRow} key={i}>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{e.date}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(20) }}><Text style={pdfStyles.tableCell}>{e.category}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(36) }}><Text style={pdfStyles.tableCell}>{e.description}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(16) }}><Text style={pdfStyles.tableCell}>{e.paidBy}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(12) }}><Text style={pdfStyles.tableCell}>{e.date}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(18) }}><Text style={pdfStyles.tableCell}>{e.category}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(24) }}><Text style={pdfStyles.tableCell}>{e.description}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{e.paidBy}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(18) }}><Text style={pdfStyles.tableCell}>{e.receiptRef || "—"}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>UGX {e.amountUgx.toLocaleString()}</Text></View>
                 </View>
               ))

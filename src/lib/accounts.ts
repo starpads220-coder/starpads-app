@@ -9,10 +9,10 @@ export const ACCOUNTS: Account[] = [
   ...group("Current Liabilities", [["2110", "Accounts Payable - Suppliers"], ["2120", "Accrued Wages and Payroll Liabilities"], ["2230", "Sales Tax / VAT Payable"], ["2240", "Short-Term Factory Loans"]]),
   ...group("Non-Current Liabilities", [["2340", "Long-Term Equipment Loans / Leases"], ["2350", "Mortgages Payable"]]),
   ...group("Equity", [["3000", "Common Stock / Capital Investment"], ["3050", "Retained Earnings"], ["3100", "Owner Drawings / Dividends"]]),
-  ...group("Income", [["4080", "Sale of Pads"], ["4081", "Sale of Material"], ["4082", "Pad Trainings"], ["4083", "Grants and Donations"], ["4084", "Wholesale Revenue - Distributors, Supermarkets and B2B"], ["4085", "Direct-to-Consumer Sales"], ["4086", "Private Label / OEM Manufacturing Revenue"], ["4087", "Sales Returns and Allowances"], ["4088", "Cash Discounts Allowed"], ["4070", "Other Income"]]),
+  ...group("Income", [["4080", "Sale of Pads"], ["4081", "Sale of Material"], ["4082", "Trainings"], ["4083", "Grants and Donations"], ["4084", "Wholesale Revenue - Distributors, Supermarkets and B2B"], ["4085", "Direct-to-Consumer Sales"], ["4086", "Private Label / OEM Manufacturing Revenue"], ["4087", "Sales Returns and Allowances"], ["4088", "Cash Discounts Allowed"], ["4070", "Other Income"]]),
   ...group("Other Income", [["6210", "Gain/Loss on Asset Disposal"], ["6220", "Interest Income"]]),
   ...group("Cost of Sales", [["5070", "Inventory Adjustment"], ["5080", "Direct Materials"], ["5090", "Direct Labour"], ["5100", "Manufacturing Overheads"]]),
-  ...group("Expenses", [["6010", "Salaries & Wages"], ["6020", "Security & Guarding"], ["6030", "Fuel & Transport"], ["6050", "Tools & Small Equipment"], ["6060", "Accounting & Audit Fees"], ["6070", "Legal & Professional Fees"], ["6080", "Office & Administration"], ["6090", "Land Lease Expense"], ["6101", "Electricity & Lighting"], ["6102", "Water"], ["6110", "Communications & Public Relations"], ["6111", "Internet & Data"], ["6112", "Marketing & Branding"], ["6120", "Insurance"], ["6130", "Repairs & Maintenance"], ["6140", "Bank Charges"], ["6141", "Mobile Money Charges"], ["6160", "Tax Penalties"], ["6170", "Operating Expenses"], ["6180", "General and Administrative Expenses"], ["6190", "Interest Expense"], ["6195", "Corporate Income Tax Expense"], ["6200", "Depreciation Expense"]]),
+  ...group("Expenses", [["6010", "Salaries & Wages"], ["6020", "Security & Guarding"], ["6030", "Fuel & Transport"], ["6050", "Tools & Small Equipment"], ["6060", "Accounting & Audit Fees"], ["6070", "Legal & Professional Fees"], ["6080", "Office & Administration"], ["6090", "Land Lease Expense"], ["6100", "Utilities"], ["6101", "Electricity & Lighting"], ["6102", "Water"], ["6110", "Communications & Public Relations"], ["6111", "Internet & Data"], ["6112", "Marketing & Branding"], ["6113", "Data and Communication Costs"], ["6120", "Insurance"], ["6130", "Repairs & Maintenance"], ["6131", "Machine Repair and Maintenance"], ["6140", "Bank Charges"], ["6141", "Mobile Money Charges"], ["6160", "Tax Penalties"], ["6170", "Operating Expenses"], ["6171", "Sundries"], ["6172", "Other Costs"], ["6180", "General and Administrative Expenses"], ["6190", "Interest Expense"], ["6195", "Corporate Income Tax Expense"], ["6200", "Depreciation Expense"]]),
 ];
 export const SALES_ENTRY_ACCOUNT_CODES = ["4080", "4081", "4082", "4083"] as const;
 export const REMOVED_ACCOUNT_CODES = new Set([
@@ -31,11 +31,31 @@ export function validateAccounting(value: AccountingSelection, kind: "sale" | "e
   const known = ACCOUNTS.find(a => a.code === value.accountCode);
   const needsDetail = kind === "expense" && ["5080", "5090"].includes(value.accountCode);
   if (!allowed.includes(value.accountGroup) || !value.accountName.trim() || (!known && !value.accountCode.startsWith("custom:")) || (known && known.group !== value.accountGroup) || !SETTLEMENT_CODES.includes(value.settlementCode) || (needsDetail && !value.accountDetail?.trim())) throw new Error(needsDetail ? "Enter the specific direct material or direct labour details." : "Select an account / subcategory and cash/bank account.");
-  return { ...value, accountName: value.accountName.trim(), accountDetail: value.accountDetail?.trim() ?? "" };
+  return { ...value, accountName: value.accountCode === "4082" ? "Trainings" : value.accountName.trim(), accountDetail: value.accountDetail?.trim() ?? "" };
 }
-export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number }
+export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number; paymentMethod?: string; description?: string; customerName?: string; category?: string; subcategory?: string }
 export interface Journal { id: string; date: string; debitCode: string; creditCode: string; amount: number; description: string }
-export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], journals: Journal[], start: string, end: string) {
+export interface ProductionCostEntry { id: string; date: string; description: string; amount: number; settlementCode: "1000" | "1030"; reference?: string; notes?: string }
+export function isRawMaterialCarriageExpense(entry: LedgerSource): boolean {
+  const accounting = resolveAccounting(entry, "expense");
+  if (accounting?.accountCode !== "6030") return false;
+  const detail = `${entry.subcategory ?? ""} ${accounting.accountDetail ?? ""} ${entry.description ?? ""}`;
+  return /\b(?:raw[\s-]*materials?|pul|fleece|flannel)\b/i.test(detail);
+}
+export function resolveAccounting(entry: LedgerSource, kind: "sale" | "expense"): AccountingSelection | null {
+  if (entry.accounting) {
+    try { return validateAccounting(entry.accounting, kind); } catch { return null; }
+  }
+  // Legacy sales recorded before accounting fields were introduced were pad sales.
+  // Map only payment methods whose cash account is unambiguous; leave unknown data visible as unclassified.
+  if (kind === "sale") {
+    const method = (entry.paymentMethod ?? "").toUpperCase();
+    const settlementCode = method === "CASH" ? "1030" : ["BANK", "BANK_TRANSFER"].includes(method) ? "1000" : "";
+    if (settlementCode) return { accountCode: "4080", accountGroup: "Income", accountName: "Sale of Pads", settlementCode, accountDetail: "" };
+  }
+  return null;
+}
+export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], journals: Journal[], start: string, end: string, productionCosts: ProductionCostEntry[] = []) {
   const catalog = new Map(ACCOUNTS.map(a => [a.code, a]));
   const balances: Record<string, number> = {}, movement: Record<string, number> = {};
   let unclassified = 0;
@@ -51,17 +71,20 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
   for (const [kind, entries] of [["sale", sales], ["expense", expenses]] as const) {
     for (const entry of entries) {
       if (entry.date > end) continue;
-      const a = entry.accounting;
-      try { if (!a) throw new Error(); validateAccounting(a, kind); }
-      catch { unclassified++; continue; }
+      const a = resolveAccounting(entry, kind);
+      if (!a) { unclassified++; continue; }
       if (!a) continue;
       const detailCode = kind === "expense" && ["5080", "5090"].includes(a.accountCode) && a.accountDetail?.trim()
         ? `detail:${a.accountCode}:${a.accountDetail.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
         : a.accountCode;
-      catalog.set(detailCode, { code: detailCode, name: a.accountDetail?.trim() ? `${a.accountName} — ${a.accountDetail.trim()}` : a.accountName, group: a.accountGroup });
-      post(entry.date, kind === "sale" ? a.settlementCode : detailCode, kind === "sale" ? detailCode : a.settlementCode, kind === "sale" ? entry.totalAmount ?? 0 : entry.amountUgx ?? 0);
+      catalog.set(detailCode, { code: detailCode, name: a.accountCode === "4082" ? "Trainings" : a.accountDetail?.trim() ? `${a.accountName} — ${a.accountDetail.trim()}` : a.accountName, group: a.accountGroup });
+      const expenseCredit = a.accountCode === "6200" ? "1830" : a.settlementCode;
+      post(entry.date, kind === "sale" ? a.settlementCode : detailCode, kind === "sale" ? detailCode : expenseCredit, kind === "sale" ? entry.totalAmount ?? 0 : entry.amountUgx ?? 0);
     }
   }
+  productionCosts.forEach(entry => {
+    if ((entry.settlementCode === "1000" || entry.settlementCode === "1030") && Number(entry.amount) > 0) post(entry.date, "5100", entry.settlementCode, Number(entry.amount));
+  });
   journals.forEach(j => post(j.date, j.debitCode, j.creditCode, j.amount));
   const rows = [...catalog.values()].map(a => {
     const creditNormal = ["Current Liabilities", "Non-Current Liabilities", "Equity", "Income", "Other Income"].includes(a.group);
