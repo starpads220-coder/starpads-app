@@ -23,7 +23,12 @@ interface StageTarget {
   defaultWageRate: number;
   unit: string;
   materialTargets?: Partial<Record<MaterialType, number>>;
+  materialMeterTargets?: Partial<Record<MaterialType, number>>;
+  activityTargets?: Partial<Record<ProductionActivity, number>>;
 }
+
+type ProductionActivity = "PINNING" | "FOLDING";
+type TargetVariant = "stage" | "materialPieces" | "materialMeters" | "activity";
 
 interface StageRow {
   stageId: StageId;
@@ -31,7 +36,13 @@ interface StageRow {
   defaultWageRate: number;
   unit: string;
   materialTargets?: Partial<Record<MaterialType, number>>;
+  materialMeterTargets?: Partial<Record<MaterialType, number>>;
+  activityTargets?: Partial<Record<ProductionActivity, number>>;
   material: MaterialType | null;
+  activity: ProductionActivity | null;
+  variant: TargetVariant;
+  label: string;
+  sourceRate?: number;
   exists: boolean;
 }
 
@@ -44,6 +55,25 @@ const MATERIAL_LABELS: Record<MaterialType, string> = {
   COMBINED: "Combined",
   MICROFIBER: "Microfiber",
 };
+
+const REVISED_TARGETS: Record<StageId, { defaultTarget: number; defaultWageRate: number; unit: string }> = {
+  "STG-01": { defaultTarget: 800, defaultWageRate: 10000, unit: "pieces" },
+  "STG-02": { defaultTarget: 500, defaultWageRate: 10000, unit: "pieces" },
+  "STG-03": { defaultTarget: 450, defaultWageRate: 10000, unit: "pieces" },
+  "STG-04": { defaultTarget: 500, defaultWageRate: 10000, unit: "pieces" },
+  "STG-05": { defaultTarget: 500, defaultWageRate: 10000, unit: "pieces" },
+  "STG-06": { defaultTarget: 500, defaultWageRate: 10000, unit: "pieces" },
+  "STG-07": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
+  "STG-08": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
+  "STG-09": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
+  "STG-10": { defaultTarget: 120, defaultWageRate: 10000, unit: "packs" },
+};
+
+const REVISED_MATERIAL_TARGETS: Record<"FLEECE" | "FLANNEL" | "PUL", number> = { FLEECE: 800, FLANNEL: 1000, PUL: 1000 };
+const REVISED_METER_TARGETS: Record<"FLEECE" | "FLANNEL" | "PUL", number> = { FLEECE: 26, FLANNEL: 50, PUL: 50 };
+const REVISED_METER_RATES: Record<"FLEECE" | "FLANNEL" | "PUL", number> = { FLEECE: 381, FLANNEL: 200, PUL: 200 };
+const REVISED_ACTIVITY_TARGETS: Record<ProductionActivity, number> = { PINNING: 500, FOLDING: 700 };
+const ACTIVITY_LABELS: Record<ProductionActivity, string> = { PINNING: "Pinning", FOLDING: "Folding" };
 
 interface WorkerTarget {
   id: string;
@@ -58,6 +88,8 @@ export default function AdminTargetsPage() {
   const queryClient = useQueryClient();
   const [editingStage, setEditingStage] = useState<string | null>(null);
   const [editingMaterial, setEditingMaterial] = useState<MaterialType | null>(null);
+  const [editingActivity, setEditingActivity] = useState<ProductionActivity | null>(null);
+  const [editingVariant, setEditingVariant] = useState<TargetVariant | null>(null);
   const [editValue, setEditValue] = useState(0);
   const [editWageRate, setEditWageRate] = useState(0);
   const [saving, setSaving] = useState(false);
@@ -82,43 +114,36 @@ export default function AdminTargetsPage() {
     orderBy("effectiveDate", "desc"),
   ], { staleTime: 5 * 60 * 1000 });
 
-  const cuttingStage = stages.find((s) => s.stageId === "STG-01");
-
   const stageRows: StageRow[] = [];
   for (const stageId of STAGE_ORDER) {
     const stage = stages.find((s) => s.stageId === stageId);
     if (!stage) {
-      stageRows.push({ stageId, defaultTarget: 0, defaultWageRate: 0, unit: "", materialTargets: undefined, material: null, exists: false });
-    } else if (stage.stageId !== "STG-01") {
-      stageRows.push({ stageId: stage.stageId, defaultTarget: stage.defaultTarget, defaultWageRate: stage.defaultWageRate, unit: stage.unit, materialTargets: stage.materialTargets, material: null, exists: true });
-    } else {
+      stageRows.push({ stageId, ...REVISED_TARGETS[stageId], material: null, activity: null, variant: "stage", label: STAGE_LABELS[stageId], exists: false });
+    } else if (stage.stageId === "STG-01") {
       for (const mat of CUTTING_MATERIALS) {
-        stageRows.push({ stageId: stage.stageId, defaultTarget: stage.defaultTarget, defaultWageRate: stage.defaultWageRate, unit: stage.unit, materialTargets: stage.materialTargets, material: mat, exists: true });
+        const material = mat as "FLEECE" | "FLANNEL" | "PUL";
+        stageRows.push({ ...stage, material, activity: null, variant: "materialPieces", unit: "pieces", label: `Cutting & Measuring — ${MATERIAL_LABELS[material]}`, exists: true });
+        stageRows.push({ ...stage, material, activity: null, variant: "materialMeters", unit: "meters", label: `Cutting in Meters — ${MATERIAL_LABELS[material]}`, sourceRate: REVISED_METER_RATES[material], exists: true });
       }
+    } else if (stage.stageId === "STG-09") {
+      for (const activity of ["PINNING", "FOLDING"] as ProductionActivity[]) stageRows.push({ ...stage, material: null, activity, variant: "activity", label: ACTIVITY_LABELS[activity], exists: true });
+    } else {
+      stageRows.push({ ...stage, material: null, activity: null, variant: "stage", label: STAGE_LABELS[stage.stageId], exists: true });
     }
   }
 
   const handleCreateStage = async (stageId: string) => {
     setSaving(true);
     try {
-      const defaults: Record<string, { defaultTarget: number; defaultWageRate: number; unit: string }> = {
-        "STG-01": { defaultTarget: 700, defaultWageRate: 10000, unit: "pieces" },
-        "STG-02": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
-        "STG-03": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
-        "STG-04": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
-        "STG-05": { defaultTarget: 250, defaultWageRate: 8000, unit: "pieces" },
-        "STG-06": { defaultTarget: 200, defaultWageRate: 10000, unit: "pieces" },
-        "STG-07": { defaultTarget: 400, defaultWageRate: 8000, unit: "pieces" },
-        "STG-08": { defaultTarget: 360, defaultWageRate: 8000, unit: "pieces" },
-        "STG-09": { defaultTarget: 360, defaultWageRate: 8000, unit: "pieces" },
-        "STG-10": { defaultTarget: 120, defaultWageRate: 12000, unit: "packs" },
-      };
-      const config = defaults[stageId] || { defaultTarget: 0, defaultWageRate: 0, unit: "pieces" };
+      const typedStageId = stageId as StageId;
+      const config = REVISED_TARGETS[typedStageId];
       await setDoc(doc(db, "productionStages", stageId), {
         stageId,
-        name: STAGE_LABELS[stageId as StageId],
+        name: STAGE_LABELS[typedStageId],
         ...config,
-        materialTargets: stageId === "STG-01" ? { FLEECE: 700, FLANNEL: 350, PUL: 350 } : null,
+        materialTargets: stageId === "STG-01" ? REVISED_MATERIAL_TARGETS : null,
+        materialMeterTargets: stageId === "STG-01" ? REVISED_METER_TARGETS : null,
+        activityTargets: stageId === "STG-09" ? REVISED_ACTIVITY_TARGETS : null,
         updatedAt: Timestamp.now(),
       });
       queryClient.invalidateQueries({ queryKey: ["productionStages"] });
@@ -133,24 +158,14 @@ export default function AdminTargetsPage() {
       for (const stageId of STAGE_ORDER) {
         const exists = stages.some((s) => s.stageId === stageId);
         if (exists) continue;
-        const defaults: Record<string, { defaultTarget: number; defaultWageRate: number; unit: string }> = {
-          "STG-01": { defaultTarget: 700, defaultWageRate: 10000, unit: "pieces" },
-          "STG-02": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
-          "STG-03": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
-          "STG-04": { defaultTarget: 350, defaultWageRate: 10000, unit: "pieces" },
-          "STG-05": { defaultTarget: 250, defaultWageRate: 8000, unit: "pieces" },
-          "STG-06": { defaultTarget: 200, defaultWageRate: 10000, unit: "pieces" },
-          "STG-07": { defaultTarget: 400, defaultWageRate: 8000, unit: "pieces" },
-          "STG-08": { defaultTarget: 360, defaultWageRate: 8000, unit: "pieces" },
-          "STG-09": { defaultTarget: 360, defaultWageRate: 8000, unit: "pieces" },
-          "STG-10": { defaultTarget: 120, defaultWageRate: 12000, unit: "packs" },
-        };
-        const config = defaults[stageId] || { defaultTarget: 0, defaultWageRate: 0, unit: "pieces" };
+        const config = REVISED_TARGETS[stageId];
         await setDoc(doc(db, "productionStages", stageId), {
           stageId,
           name: STAGE_LABELS[stageId as StageId],
           ...config,
-          materialTargets: stageId === "STG-01" ? { FLEECE: 700, FLANNEL: 350, PUL: 350 } : null,
+          materialTargets: stageId === "STG-01" ? REVISED_MATERIAL_TARGETS : null,
+          materialMeterTargets: stageId === "STG-01" ? REVISED_METER_TARGETS : null,
+          activityTargets: stageId === "STG-09" ? REVISED_ACTIVITY_TARGETS : null,
           updatedAt: Timestamp.now(),
         });
       }
@@ -160,11 +175,38 @@ export default function AdminTargetsPage() {
     }
   };
 
+  const handleApplyRevisedTargets = async () => {
+    setSaving(true);
+    try {
+      for (const stageId of STAGE_ORDER) {
+        await setDoc(doc(db, "productionStages", stageId), {
+          stageId,
+          name: STAGE_LABELS[stageId],
+          ...REVISED_TARGETS[stageId],
+          ...(stageId === "STG-01" ? { materialTargets: REVISED_MATERIAL_TARGETS, materialMeterTargets: REVISED_METER_TARGETS } : {}),
+          ...(stageId === "STG-09" ? { activityTargets: REVISED_ACTIVITY_TARGETS } : {}),
+          updatedAt: Timestamp.now(),
+        }, { merge: true });
+      }
+      queryClient.invalidateQueries({ queryKey: ["productionStages"] });
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleEdit = (row: typeof stageRows[number]) => {
     setEditingStage(row.stageId);
-    if (row.material) {
+    setEditingVariant(row.variant);
+    setEditingActivity(row.activity);
+    if (row.variant === "materialPieces" && row.material) {
       setEditingMaterial(row.material);
       setEditValue(row.materialTargets?.[row.material] ?? 0);
+    } else if (row.variant === "materialMeters" && row.material) {
+      setEditingMaterial(row.material);
+      setEditValue(row.materialMeterTargets?.[row.material] ?? 0);
+    } else if (row.variant === "activity" && row.activity) {
+      setEditingMaterial(null);
+      setEditValue(row.activityTargets?.[row.activity] ?? 0);
     } else {
       setEditingMaterial(null);
       setEditValue(row.defaultTarget);
@@ -172,21 +214,34 @@ export default function AdminTargetsPage() {
     setEditWageRate(row.defaultWageRate || 0);
   };
 
-  const handleSave = async (stageId: string, material: MaterialType | null) => {
+  const handleSave = async (row: StageRow) => {
     setSaving(true);
     try {
-      if (material) {
-        const existing = stages.find((s) => s.stageId === stageId);
-        await updateDoc(doc(db, "productionStages", stageId), {
+      const existing = stages.find((s) => s.stageId === row.stageId);
+      if (row.variant === "materialPieces" && row.material) {
+        await updateDoc(doc(db, "productionStages", row.stageId), {
           materialTargets: {
             ...existing?.materialTargets,
-            [material]: editValue,
+            [row.material]: editValue,
           },
           defaultWageRate: editWageRate,
           updatedAt: Timestamp.now(),
         });
+      } else if (row.variant === "materialMeters" && row.material) {
+        await updateDoc(doc(db, "productionStages", row.stageId), {
+          materialMeterTargets: { ...existing?.materialMeterTargets, [row.material]: editValue },
+          defaultWageRate: editWageRate,
+          updatedAt: Timestamp.now(),
+        });
+      } else if (row.variant === "activity" && row.activity) {
+        await updateDoc(doc(db, "productionStages", row.stageId), {
+          activityTargets: { ...existing?.activityTargets, [row.activity]: editValue },
+          defaultTarget: row.activity === "PINNING" ? editValue : existing?.defaultTarget,
+          defaultWageRate: editWageRate,
+          updatedAt: Timestamp.now(),
+        });
       } else {
-        await updateDoc(doc(db, "productionStages", stageId), {
+        await updateDoc(doc(db, "productionStages", row.stageId), {
           defaultTarget: editValue,
           defaultWageRate: editWageRate,
           updatedAt: Timestamp.now(),
@@ -195,6 +250,8 @@ export default function AdminTargetsPage() {
       queryClient.invalidateQueries({ queryKey: ["productionStages"] });
       setEditingStage(null);
       setEditingMaterial(null);
+      setEditingActivity(null);
+      setEditingVariant(null);
     } finally {
       setSaving(false);
     }
@@ -226,9 +283,10 @@ export default function AdminTargetsPage() {
       <h1 className="text-2xl font-bold text-gray-900">Target Configuration</h1>
 
       <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">
-          Stage Default Targets
-        </h2>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+          <div><h2 className="text-lg font-semibold text-gray-900">Revised Production Targets</h2><p className="mt-1 text-sm text-gray-500">Piece and meter targets from the approved production target schedule. Amount is the wage earned when the full target is completed.</p></div>
+          <button type="button" onClick={handleApplyRevisedTargets} disabled={saving} className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">{saving ? "Saving…" : "Apply revised targets"}</button>
+        </div>
         <div className="overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
@@ -236,19 +294,25 @@ export default function AdminTargetsPage() {
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stage</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Default Target</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Default Daily Wage (UGX)</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Price per unit</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
               {stageRows.map((row, i) => {
-                const editKey = row.material ? `${row.stageId}-${row.material}` : row.stageId;
-                const isEditing = editingStage === row.stageId && editingMaterial === row.material;
+                const editKey = `${row.stageId}-${row.variant}-${row.material ?? row.activity ?? "default"}`;
+                const isEditing = editingStage === row.stageId && editingVariant === row.variant && editingMaterial === row.material && editingActivity === row.activity;
+                const targetValue = row.variant === "materialPieces" && row.material ? row.materialTargets?.[row.material]
+                  : row.variant === "materialMeters" && row.material ? row.materialMeterTargets?.[row.material]
+                    : row.variant === "activity" && row.activity ? row.activityTargets?.[row.activity]
+                      : row.defaultTarget;
+                const usesWorkbookRate = row.variant === "materialMeters" && row.material && targetValue === REVISED_METER_TARGETS[row.material as "FLEECE" | "FLANNEL" | "PUL"] && row.defaultWageRate === 10000;
+                const pricePerUnit = usesWorkbookRate && row.sourceRate ? row.sourceRate : targetValue ? row.defaultWageRate / targetValue : 0;
                 return (
                   <tr key={editKey} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
-                      {row.stageId} — {STAGE_LABELS[row.stageId]}
-                      {row.material ? ` (${MATERIAL_LABELS[row.material]})` : ""}
+                      {row.stageId} — {row.label}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">
                       {!row.exists ? (
@@ -262,11 +326,7 @@ export default function AdminTargetsPage() {
                           className="w-24 px-2 py-1 border border-gray-300 rounded text-sm"
                           autoFocus
                         />
-                      ) : row.material ? (
-                        row.materialTargets?.[row.material]?.toLocaleString() ?? "—"
-                      ) : (
-                        row.defaultTarget.toLocaleString()
-                      )}
+                      ) : targetValue?.toLocaleString() ?? "—"}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">
                       {!row.exists ? (
@@ -283,6 +343,7 @@ export default function AdminTargetsPage() {
                         row.defaultWageRate ? `UGX ${row.defaultWageRate.toLocaleString()}` : "—"
                       )}
                     </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{row.exists && pricePerUnit ? `UGX ${pricePerUnit.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "—"}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{row.exists ? row.unit : <span className="text-gray-400 italic">—</span>}</td>
                     <td className="px-4 py-3 text-right">
                       {!row.exists ? (
@@ -296,20 +357,20 @@ export default function AdminTargetsPage() {
                       ) : isEditing ? (
                         <span className="flex justify-end gap-2">
                           <button
-                            onClick={() => handleSave(row.stageId, row.material)}
+                            onClick={() => handleSave(row)}
                             disabled={saving}
                             className="text-sm text-stock-blue hover:underline"
                           >
                             Save
                           </button>
                           <button
-                            onClick={() => { setEditingStage(null); setEditingMaterial(null); }}
+                            onClick={() => { setEditingStage(null); setEditingMaterial(null); setEditingActivity(null); setEditingVariant(null); }}
                             className="text-sm text-gray-500 hover:underline"
                           >
                             Cancel
                           </button>
                         </span>
-                      ) : row.material ? null : (
+                      ) : (
                         <button
                           onClick={() => handleEdit(row)}
                           className="text-sm text-stock-blue hover:underline"

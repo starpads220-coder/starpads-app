@@ -107,6 +107,7 @@ export default function ProductionPage() {
     employeeId: "",
     date: new Date().toISOString().split("T")[0],
     stageId: "STG-01" as StageId,
+    productionActivity: "" as "" | "PINNING" | "FOLDING",
     materialCategory: "" as MaterialCategory | "",
     materialTypes: [] as MaterialType[],
     metersInput: 0,
@@ -164,6 +165,7 @@ export default function ProductionPage() {
             employeeId: data.employeeId || "",
             date: data.date || new Date().toISOString().split("T")[0],
             stageId: data.stageId || "STG-01",
+            productionActivity: data.productionActivity || "",
             materialCategory: matCategory as MaterialCategory | "",
             materialTypes: (data.materialTypes as MaterialType[]) || (data.materialType ? [data.materialType as MaterialType] : []),
             metersInput: data.metersInput || 0,
@@ -197,10 +199,18 @@ export default function ProductionPage() {
       .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0] ?? null;
   }, [targetConfigs, form.employeeId, form.stageId, form.date]);
 
+  const cuttingMaterial = form.materialTypes[0];
+  const measuredCuttingTarget = cuttingMaterial && selectedStage?.materialMeterTargets?.[cuttingMaterial]
+    ? selectedStage.materialMeterTargets[cuttingMaterial]! * (CUTTING_RATIOS[cuttingMaterial] || 0)
+    : 0;
   const dailyTarget = activeOverride
     ? activeOverride.dailyTarget
-    : form.stageId === "STG-01" && form.materialTypes.length > 0 && selectedStage?.materialTargets?.[form.materialTypes[0]]
-      ? selectedStage.materialTargets[form.materialTypes[0]]!
+    : form.stageId === "STG-09" && form.productionActivity && selectedStage?.activityTargets?.[form.productionActivity]
+      ? selectedStage.activityTargets[form.productionActivity]!
+    : form.stageId === "STG-01" && form.inputMode === "measure" && measuredCuttingTarget
+      ? measuredCuttingTarget
+      : form.stageId === "STG-01" && cuttingMaterial && selectedStage?.materialTargets?.[cuttingMaterial]
+      ? selectedStage.materialTargets[cuttingMaterial]!
       : selectedStage
         ? selectedStage.defaultTarget
         : 0;
@@ -253,6 +263,7 @@ export default function ProductionPage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.employeeId) return;
+    if (form.stageId === "STG-09" && !form.productionActivity) return;
     if (form.stageId === "STG-10" && !form.batchRef) return;
     if (form.stageId === "STG-01") {
       if (form.inputMode === "manual" && !form.actualPieces) return;
@@ -283,6 +294,7 @@ export default function ProductionPage() {
         employeeId: form.employeeId,
         date: form.date,
         stageId: form.stageId,
+        productionActivity: form.stageId === "STG-09" ? form.productionActivity || null : null,
         materialType: form.stageId === "STG-01"
           ? (form.materialTypes[0] || null)
           : stagesWithMaterial.includes(form.stageId)
@@ -333,6 +345,7 @@ export default function ProductionPage() {
       setForm((prev) => ({
         ...prev,
         materialCategory: "" as MaterialCategory | "",
+        productionActivity: "" as "" | "PINNING" | "FOLDING",
         materialTypes: [],
         metersInput: 0,
         actualPieces: 0,
@@ -821,7 +834,7 @@ const totalPackagedPads = useMemo(
             <label className="block text-sm font-medium text-gray-700 mb-1">Stage</label>
             <select
               value={form.stageId}
-              onChange={(e) => setForm({ ...form, stageId: e.target.value as StageId, materialCategory: "", materialTypes: [] })}
+              onChange={(e) => setForm({ ...form, stageId: e.target.value as StageId, productionActivity: "", materialCategory: "", materialTypes: [], metersInput: 0, inputMode: "manual" })}
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
             >
               {(Object.entries(STAGE_LABELS) as [StageId, string][]).map(([id, label]) => (
@@ -831,7 +844,7 @@ const totalPackagedPads = useMemo(
               ))}
             </select>
           </div>
-          {(form.stageId === "STG-01" || form.stageId === "STG-09") ? (
+          {form.stageId === "STG-01" ? (
             <>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Material</label>
@@ -865,6 +878,15 @@ const totalPackagedPads = useMemo(
                 </div>
               )}
             </>
+          ) : form.stageId === "STG-09" ? (
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Activity</label>
+              <select value={form.productionActivity} onChange={(e) => setForm({ ...form, productionActivity: e.target.value as "" | "PINNING" | "FOLDING" })} required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
+                <option value="">Select activity...</option>
+                <option value="PINNING">Pinning</option>
+                <option value="FOLDING">Folding</option>
+              </select>
+            </div>
           ) : stagesWithMaterial.includes(form.stageId) ? (
             <>
               <div>
@@ -901,7 +923,7 @@ const totalPackagedPads = useMemo(
               )}
             </>
           ) : null}
-          {(form.stageId === "STG-01" || form.stageId === "STG-09") && form.inputMode === "measure" && form.materialTypes.length > 0 && (
+          {form.stageId === "STG-01" && form.inputMode === "measure" && form.materialTypes.length > 0 && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 Meters Measured

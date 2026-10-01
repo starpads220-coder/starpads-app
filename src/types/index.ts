@@ -102,6 +102,7 @@ export interface ProductionEntry {
   employeeId: string;
   date: string;
   stageId: StageId;
+  productionActivity?: "PINNING" | "FOLDING";
   actualPieces: number;
   targetPieces: number;
   earningsUgx: number;
@@ -220,6 +221,8 @@ export interface ProductionStage {
   isActive: boolean;
   stageId: StageId;
   materialTargets?: Record<MaterialType, number>;
+  materialMeterTargets?: Record<MaterialType, number>;
+  activityTargets?: Partial<Record<"PINNING" | "FOLDING", number>>;
   defaultTarget: number;
   defaultWageRate: number;
 }
