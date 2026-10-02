@@ -64,23 +64,31 @@ export function useCollectionQueryByIds<T>(
 
 export function useRealtimeCollection<T>(
   collectionName: string,
-  constraints: QueryConstraint[] = []
+  constraints: QueryConstraint[] = [],
+  includeMetadataChanges = false
 ) {
   const [data, setData] = useState<T[]>([]);
   const [loading, setLoading] = useState(!!db);
   const [error, setError] = useState<string | null>(null);
+  const [fromCache, setFromCache] = useState(true);
+  const [hasPendingWrites, setHasPendingWrites] = useState(false);
 
   useEffect(() => {
     if (!db) return;
     const q = query(collection(db, collectionName), ...constraints);
     const unsubscribe = onSnapshot(
       q,
+      { includeMetadataChanges },
       (snap) => {
         setData(snap.docs.map((d) => ({ id: d.id, ...d.data() }) as T));
+        setFromCache(snap.metadata.fromCache);
+        setHasPendingWrites(snap.metadata.hasPendingWrites);
+        setError(null);
         setLoading(false);
       },
       (err: FirestoreError) => {
         setError(err.message);
+        setFromCache(true);
         setLoading(false);
       }
     );
@@ -88,7 +96,7 @@ export function useRealtimeCollection<T>(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [collectionName, ...constraints]);
 
-  return { data, loading, error };
+  return { data, loading, error, fromCache, hasPendingWrites };
 }
 
 export function useFirestoreMutation(collectionName: string) {

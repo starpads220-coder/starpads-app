@@ -62,8 +62,15 @@ body {
   }
 
   .accounts-page > .accounts-print-header,
-  .accounts-page > .accounts-print-content {
+  .accounts-page > .accounts-print-content,
+  .accounts-page > .accounts-cash-print {
     display: block !important;
+  }
+
+  .accounts-page .accounts-cash-detail {
+    display: block !important;
+    max-height: none !important;
+    overflow: visible !important;
   }
 
   .accounts-page section,

@@ -199,6 +199,27 @@ service cloud.firestore {
     // Create: FINANCE or ADMIN
     // Update/Delete: ADMIN only
     // ============================================================
+    function validBankingJournal(data, journalId) {
+      return !data.keys().hasAny(['bankingKind'])
+        || (data.bankingKind == 'deposit'
+          && data.debitCode == '1000'
+          && !(data.creditCode in ['1000', '1010', '1020', '1030'])
+          && data.get('bankingStatus', '') == 'completed'
+          && data.get('receivedFrom', '') is string
+          && data.get('receivedFrom', '').size() > 0
+          && data.get('paymentMethod', '') in ['Cash', 'Cheque']
+          && (data.get('paymentMethod', '') != 'Cheque' || data.get('referenceNumber', '').size() > 0))
+        || (data.bankingKind == 'transfer'
+          && ((data.debitCode == '1000'
+              && data.creditCode in ['1010', '1020', '1030']
+              && data.get('bankingLinkId', '') == journalId
+              && data.get('bankingStatus', '') in ['awaiting_deposit_details', 'completed']
+              && (data.get('bankingStatus', '') != 'completed' || data.get('receivedFrom', '').size() > 0))
+            || (data.creditCode == '1000'
+              && data.debitCode in ['1010', '1020', '1030']
+              && data.get('bankingStatus', '') == 'completed')));
+    }
+
     match /accountJournals/{journalId} {
       allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF']);
       allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
@@ -206,13 +227,18 @@ service cloud.firestore {
         && request.resource.data.amount is number && request.resource.data.amount > 0
         && request.resource.data.debitCode is string && request.resource.data.creditCode is string
         && request.resource.data.debitCode != request.resource.data.creditCode
-        && request.resource.data.date is string && request.resource.data.description is string;
+        && request.resource.data.date is string && request.resource.data.description is string
+        && validBankingJournal(request.resource.data, journalId);
       allow update: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['date', 'debitCode', 'creditCode', 'amount', 'description'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['date', 'debitCode', 'creditCode', 'amount', 'description', 'bankingStatus', 'receivedFrom', 'paymentMethod', 'referenceNumber'])
         && request.resource.data.amount is number && request.resource.data.amount > 0
         && request.resource.data.debitCode is string && request.resource.data.creditCode is string
         && request.resource.data.debitCode != request.resource.data.creditCode
-        && request.resource.data.date is string && request.resource.data.description is string;
+        && request.resource.data.date is string && request.resource.data.description is string
+        && request.resource.data.get('bankingKind', '') == resource.data.get('bankingKind', '')
+        && (resource.data.get('bankingKind', '') != 'transfer'
+          || (request.resource.data.debitCode == resource.data.debitCode && request.resource.data.creditCode == resource.data.creditCode))
+        && validBankingJournal(request.resource.data, journalId);
       allow delete: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
     }
     match /productionCosts/{costId} {

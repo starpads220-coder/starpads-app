@@ -10,6 +10,7 @@ import { BalanceSheetTable, type BalanceSheetColumn } from "@/components/Balance
 import { BalanceSheetTab } from "@/components/accounts/BalanceSheetTab";
 import { balanceSheetAccountName, excludedAllowanceBalance } from "@/lib/balance-sheet-current-assets";
 import { balanceSheetGroupTotal, balanceSheetRows, balanceSheetTotals } from "@/lib/balance-sheet-sections";
+import { JOURNAL_STRUCTURE, journalLines, journalPathForCode, type JournalCategory, type JournalSection } from "@/lib/balance-sheet-journal-options";
 import { CashFlowStatementTab } from "@/components/accounts/CashFlowStatementTab";
 import { IncomeStatementTab } from "@/components/accounts/IncomeStatementTab";
 import { ACCOUNTS, ACCOUNT_GROUPS, SETTLEMENT_CODES, buildAccounts, resolveAccounting, type LedgerSource, type Journal, type ProductionCostEntry, type TaxEntry } from "@/lib/accounts";
@@ -39,6 +40,8 @@ export default function AccountsPage() {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [journal, setJournal] = useState({ date: dateKey(new Date()), debitCode: "", creditCode: "", amount: "", description: "" });
+  const [journalPaths, setJournalPaths] = useState<Record<"debitCode" | "creditCode", { category: JournalCategory | ""; section: JournalSection | "" }>>({ debitCode: { category: "", section: "" }, creditCode: { category: "", section: "" } });
+  const [cashActivityOpen, setCashActivityOpen] = useState(false);
   const [productionCost, setProductionCost] = useState({ date: dateKey(new Date()), description: "", amount: "", settlementCode: "" as "" | "1000" | "1030", reference: "", notes: "" });
   const [editingProductionCostId, setEditingProductionCostId] = useState<string | null>(null);
   const [taxEntry, setTaxEntry] = useState({ date: dateKey(new Date()), description: "", amount: "" });
@@ -66,7 +69,7 @@ export default function AccountsPage() {
     [sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data],
   );
   const accountName = (code: string) => balanceSheetAccountName(code, report.rows.find(account => account.code === code)?.name ?? ACCOUNTS.find(account => account.code === code)?.name ?? "Account");
-  const journalEntries = useMemo(() => [...journals.data].sort((a, b) => b.date.localeCompare(a.date)), [journals.data]);
+  const journalEntries = useMemo(() => journals.data.filter(entry => !entry.bankingKind).sort((a, b) => b.date.localeCompare(a.date)), [journals.data]);
   const productionCostEntries = useMemo(() => [...productionCosts.data].sort((a, b) => b.date.localeCompare(a.date)), [productionCosts.data]);
   const sortedTaxEntries = useMemo(() => [...taxEntries.data].sort((a, b) => b.date.localeCompare(a.date)), [taxEntries.data]);
   const cashActivity = useMemo(() => {
@@ -83,9 +86,13 @@ export default function AccountsPage() {
     const journalRows = journals.data.flatMap(entry => {
       const debitCash = SETTLEMENT_CODES.includes(entry.debitCode);
       const creditCash = SETTLEMENT_CODES.includes(entry.creditCode);
+      if (entry.bankingKind === "transfer" && debitCash && creditCash) return [
+        { id: `transfer-${entry.id}-out`, date: entry.date, source: entry.bankingStatus === "awaiting_deposit_details" ? "Transfer · Awaiting deposit details" : "Transfer", description: entry.description, account: cashAccountName(entry.creditCode), amount: -entry.amount },
+        { id: `transfer-${entry.id}-in`, date: entry.date, source: entry.bankingStatus === "awaiting_deposit_details" ? "Deposit · Awaiting details" : "Deposit · Linked transfer", description: entry.description, account: cashAccountName(entry.debitCode), amount: entry.amount },
+      ];
       if (debitCash === creditCash) return [];
       const code = debitCash ? entry.debitCode : entry.creditCode;
-      return [{ id: `journal-${entry.id}`, date: entry.date, source: "Journal", description: entry.description, account: cashAccountName(code), amount: debitCash ? entry.amount : -entry.amount }];
+      return [{ id: `journal-${entry.id}`, date: entry.date, source: entry.bankingKind === "deposit" ? "Deposit" : "Journal", description: entry.description, account: cashAccountName(code), amount: debitCash ? entry.amount : -entry.amount }];
     });
     return [...salesRows, ...expenseRows, ...productionRows, ...journalRows].filter(entry => entry.date <= end).sort((a, b) => b.date.localeCompare(a.date));
   }, [sales.data, expenses.data, productionCosts.data, journals.data, end]);
@@ -117,10 +124,11 @@ export default function AccountsPage() {
       });
       const totals = balanceSheetTotals(report);
       balanceSections.push({ title: "Accounting Equation", rows: [{ label: "Total assets", amount: totals.assets }, { label: "Total liabilities and equity", amount: totals.liabilities + totals.equity, emphasis: "grand" }] });
+      balanceSections.push({ title: "Cash and Bank Activity", rows: cashActivity.length ? cashActivity.map(entry => ({ label: `${entry.date} · ${entry.source} · ${entry.description} · ${entry.account}`, amount: entry.amount })) : [{ label: "No cash activity has been recorded." }] });
       return balanceSections;
     }
     return [];
-  }, [view, statements, report]);
+  }, [view, statements, report, cashActivity]);
 
   async function downloadPagelessPdf() {
     if (view === "entries" || !valid) return;
@@ -143,12 +151,15 @@ export default function AccountsPage() {
     try {
       const amount = Number(journal.amount);
       if (!canPost || !Number.isFinite(amount) || amount <= 0 || journal.debitCode === journal.creditCode || !ACCOUNTS.some(a => a.code === journal.debitCode) || !ACCOUNTS.some(a => a.code === journal.creditCode) || !journal.description.trim()) throw new Error("Enter a positive amount, description, and two different accounts.");
+      if (!editingJournalId && (!journalPaths.debitCode.category || !journalPaths.debitCode.section || !journalPaths.creditCode.category || !journalPaths.creditCode.section)) throw new Error("Select a category, section and line for both debit and credit.");
+      if (!editingJournalId && (["debitCode", "creditCode"] as const).some(side => !journalLines(report, journalPaths[side].section as JournalSection).some(line => line.accountCode === journal[side]))) throw new Error("Choose postable Balance Sheet lines for both sides of the journal.");
       if (editingJournalId) {
         await updateDoc(doc(db, "accountJournals", editingJournalId), { ...journal, amount });
       } else {
         await addDoc(collection(db, "accountJournals"), { ...journal, amount, createdAt: Timestamp.now(), createdBy: userRole?.uid });
       }
       setJournal({ date: dateKey(new Date()), debitCode: "", creditCode: "", amount: "", description: "" });
+      setJournalPaths({ debitCode: { category: "", section: "" }, creditCode: { category: "", section: "" } });
       setEditingJournalId(null);
       setMessage(editingJournalId ? "Entry updated successfully." : "Journal recorded successfully.");
     } catch (e) { setMessage(e instanceof Error ? e.message : "Unable to save journal."); }
@@ -156,8 +167,11 @@ export default function AccountsPage() {
   }
   function editJournal(entry: Journal) {
     setJournal({ date: entry.date, debitCode: entry.debitCode, creditCode: entry.creditCode, amount: String(entry.amount), description: entry.description });
+    const pathFor = (code: string) => journalPathForCode(report, code) ?? { category: "" as const, section: "" as const };
+    setJournalPaths({ debitCode: pathFor(entry.debitCode), creditCode: pathFor(entry.creditCode) });
     setEditingJournalId(entry.id);
-    setView("balance");
+    setEntriesStatement("balance");
+    setView("entries");
     setMessage("");
     window.scrollTo({ top: document.body.scrollHeight, behavior: "smooth" });
   }
@@ -169,6 +183,7 @@ export default function AccountsPage() {
       if (editingJournalId === entry.id) {
         setEditingJournalId(null);
         setJournal({ date: dateKey(new Date()), debitCode: "", creditCode: "", amount: "", description: "" });
+        setJournalPaths({ debitCode: { category: "", section: "" }, creditCode: { category: "", section: "" } });
       }
       setMessage("Entry deleted successfully.");
     } catch (e) { setMessage(e instanceof Error ? e.message : "Unable to delete entry."); }
@@ -230,6 +245,18 @@ export default function AccountsPage() {
       setMessage("Tax entry deleted successfully.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to delete tax entry."); }
   }
+  const journalSide = (side: "debitCode" | "creditCode") => {
+    const path = journalPaths[side];
+    const label = side === "debitCode" ? "Debit" : "Credit";
+    const sections = path.category ? JOURNAL_STRUCTURE[path.category] : [];
+    const lines = path.section ? journalLines(report, path.section) : [];
+    const historical = editingJournalId && journal[side] && !journalPathForCode(report, journal[side]);
+    return <fieldset key={side} className="rounded-lg border p-4"><legend className="px-1 font-semibold">{label} account</legend><div className="grid gap-3 sm:grid-cols-3">
+      <label>{label} category<select required={!historical} className={input} value={path.category} onChange={e => { const category = e.target.value as JournalCategory | ""; setJournalPaths(previous => ({ ...previous, [side]: { category, section: "" } })); setJournal(previous => ({ ...previous, [side]: "" })); }}><option value="">{historical ? "Historical account" : "Select category..."}</option>{(Object.keys(JOURNAL_STRUCTURE) as JournalCategory[]).map(category => <option key={category} value={category}>{category}</option>)}</select></label>
+      <label>{label} section<select required={!historical} className={input} value={path.section} onChange={e => { const section = e.target.value as JournalSection | ""; setJournalPaths(previous => ({ ...previous, [side]: { ...previous[side], section } })); setJournal(previous => ({ ...previous, [side]: "" })); }}><option value="">{historical ? "Historical entry" : "Select section..."}</option>{sections.map(section => <option key={section.label} value={section.label}>{section.label}</option>)}</select></label>
+      <label>{label} Balance Sheet line<select required className={input} value={journal[side]} onChange={e => setJournal(previous => ({ ...previous, [side]: e.target.value }))}><option value="">Select line...</option>{lines.map(line => <option key={line.code} value={line.accountCode ?? ""} disabled={!line.accountCode}>{line.name}{line.reason ? " — unavailable for manual posting" : ""}</option>)}{historical && <option value={journal[side]}>{accountName(journal[side])} — historical entry</option>}</select></label>
+    </div>{lines.filter(line => line.reason).map(line => <p key={line.code} className="mt-2 text-xs text-amber-800">{line.name}: {line.reason}</p>)}</fieldset>;
+  };
   return <RouteGuard><main className="accounts-page space-y-6">
     <div className="accounts-no-print"><AccountsSwitcher /></div>
     <div className="accounts-no-print"><h1 className="text-2xl font-bold">Accounts</h1><p className="text-sm text-gray-500">Live financial statements and chart of accounts · UGX</p></div>
@@ -256,15 +283,9 @@ export default function AccountsPage() {
       {view === "cashflow" && <div className="accounts-print-content"><CashFlowStatementTab statement={statements} start={start} end={end} /></div>}
       {view === "balance" && <>
       <p className="text-sm text-gray-500">Activity: {start} to {end}. Balance sheet includes all classified entries up to {end}, including prior periods.</p>
-      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">Balances reflect recorded transactions and journals only. Enter opening balances and adjustments below to include existing assets, liabilities, and capital. {report.unclassified} sales/expense entries through {end} have no valid accounting classification and are excluded.</div>
+      <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">Balances reflect recorded transactions and journals only. Enter opening balances and adjustments on Entries → Balance Sheet to include existing assets, liabilities, and capital. {report.unclassified} sales/expense entries through {end} have no valid accounting classification and are excluded.</div>
       <div className="accounts-print-content"><BalanceSheetTab statement={statements} report={report} excludedAllowance={excludedAllowanceBalance(report)}><BalanceSheetTable columns={balanceSheetColumns} /></BalanceSheetTab></div>
-      <section className="accounts-no-print overflow-hidden rounded-xl border bg-white"><div className="border-b px-5 py-4"><h2 className="font-semibold">Cash and bank activity</h2><p className="mt-1 text-sm text-gray-500">Transaction-level explanation of the cash balances shown above. Positive values increase cash; negative values reduce it.</p></div><div className="max-h-96 overflow-auto"><table className="w-full min-w-[760px] text-sm"><thead className="sticky top-0 bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Source</th><th className="p-3 text-left">Description</th><th className="p-3 text-left">Cash account</th><th className="p-3 text-right">Movement</th></tr></thead><tbody>{cashActivity.length === 0 ? <tr><td colSpan={5} className="p-8 text-center text-gray-500">No cash activity has been recorded.</td></tr> : cashActivity.map(entry => <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{entry.source}</td><td className="p-3">{entry.description}</td><td className="p-3">{entry.account}</td><td className={`p-3 text-right font-medium tabular-nums ${entry.amount < 0 ? "text-red-700" : "text-green-700"}`}>{money(entry.amount)}</td></tr>)}</tbody></table></div></section>
-      <div className="accounts-no-print contents">{ACCOUNT_GROUPS.filter(group => ["Current Assets", "Non-Current Assets", "Current Liabilities", "Non-Current Liabilities", "Equity"].includes(group)).map(group => {
-        const rows = balanceSheetRows(report, group);
-        const isActivity = ["Income", "Other Income", "Cost of Sales", "Expenses"].includes(group);
-        return <section key={group} className="rounded-xl border bg-white overflow-hidden"><h2 className="font-semibold px-5 py-4 bg-gray-50">{group}</h2><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left"><th className="p-3">Account / subcategory</th><th className="p-3 text-right">Period movement</th><th className="p-3 text-right">Balance at {end}</th></tr></thead><tbody>{rows.map(a => <tr key={a.code} className="border-t"><td className="p-3">{a.name}</td><td className="p-3 text-right tabular-nums">{money(a.movement)}</td><td className="p-3 text-right tabular-nums">{money(a.balance)}</td></tr>)}</tbody><tfoot><tr className="border-t font-semibold"><td className="p-3">Total {group}{isActivity ? " (income statement)" : ""}</td><td className="p-3 text-right">{money(balanceSheetGroupTotal(report, group, "movement"))}</td><td className="p-3 text-right">{money(balanceSheetGroupTotal(report, group))}</td></tr></tfoot></table></div></section>;
-      })}</div>
-      <section className="accounts-no-print rounded-xl border bg-white p-5 space-y-3"><h2 className="font-semibold">Journal history — selected period</h2>{journals.data.filter(j => j.date >= start && j.date <= end).map(j => <p key={j.id} className="text-sm border-b py-2">{j.date} · {j.description} · Debit {accountName(j.debitCode)} / Credit {accountName(j.creditCode)} · {money(j.amount)}</p>)}</section>
+      <section className="accounts-cash-print overflow-hidden rounded-xl border bg-white"><button type="button" aria-expanded={cashActivityOpen} aria-controls="cash-bank-activity-detail" onClick={() => setCashActivityOpen(open => !open)} className="flex w-full items-center justify-between border-b px-5 py-4 text-left"><span><span className="block font-semibold">Cash and bank activity</span><span className="mt-1 block text-sm text-gray-500">Transaction-level explanation of the cash balances shown above. Positive values increase cash; negative values reduce it.</span></span><span className="accounts-no-print ml-3 text-xl" aria-hidden="true">{cashActivityOpen ? "⌃" : "⌄"}</span></button><div id="cash-bank-activity-detail" className={`${cashActivityOpen ? "" : "hidden"} accounts-cash-detail max-h-96 overflow-auto`}><table className="w-full min-w-[760px] text-sm"><thead className="sticky top-0 bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Source</th><th className="p-3 text-left">Description</th><th className="p-3 text-left">Cash account</th><th className="p-3 text-right">Movement</th></tr></thead><tbody>{cashActivity.length === 0 ? <tr><td colSpan={5} className="p-8 text-center text-gray-500">No cash activity has been recorded.</td></tr> : cashActivity.map(entry => <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{entry.source}</td><td className="p-3">{entry.description}</td><td className="p-3">{entry.account}</td><td className={`p-3 text-right font-medium tabular-nums ${entry.amount < 0 ? "text-red-700" : "text-green-700"}`}>{money(entry.amount)}</td></tr>)}</tbody></table></div></section>
       </>}
     </>)}
     {view === "entries" && error && <p role="alert" className="accounts-no-print rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">Account entries could not be fully loaded: {error}. Check the published Firestore rules.</p>}
@@ -293,6 +314,6 @@ export default function AccountsPage() {
       <section className="accounts-no-print overflow-hidden rounded-xl border bg-white"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Tax Entries</h2></div><div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Description</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>{sortedTaxEntries.length === 0 ? <tr><td colSpan={canPost ? 4 : 3} className="p-8 text-center text-gray-500">No tax entries have been recorded.</td></tr> : sortedTaxEntries.map(entry => <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{entry.description || "—"}</td><td className="p-3 text-right tabular-nums">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" onClick={() => editTaxEntry(entry)} className="mr-3 text-blue-700 hover:underline">Edit</button><button type="button" onClick={() => removeTaxEntry(entry)} className="text-red-700 hover:underline">Delete</button></td>}</tr>)}</tbody></table></div></section>
     </>}
     {view === "entries" && entriesStatement === "balance" && <section className="accounts-no-print rounded-xl border bg-white overflow-hidden"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Account Entries</h2><p className="text-sm text-gray-500">All entries recorded from the Accounts form.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Description</th><th className="p-3 text-left">Debit account</th><th className="p-3 text-left">Credit account</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>{journalEntries.length === 0 ? <tr><td className="p-8 text-center text-gray-500" colSpan={canPost ? 6 : 5}>No account entries have been recorded.</td></tr> : journalEntries.map(entry => <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{entry.description}</td><td className="p-3">{accountName(entry.debitCode)}</td><td className="p-3">{accountName(entry.creditCode)}</td><td className="p-3 text-right tabular-nums">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" onClick={() => editJournal(entry)} className="mr-3 text-blue-700 hover:underline">Edit</button><button type="button" onClick={() => removeJournal(entry)} className="text-red-700 hover:underline">Delete</button></td>}</tr>)}</tbody></table></div></section>}
-    {canPost && view === "balance" && <form onSubmit={saveJournal} className="accounts-no-print rounded-xl border bg-white p-5 space-y-4"><div className="flex items-center justify-between gap-3"><h2 className="font-semibold">{editingJournalId ? "Edit account entry" : "Opening balances and adjustments"}</h2>{editingJournalId && <button type="button" onClick={() => { setEditingJournalId(null); setJournal({ date: dateKey(new Date()), debitCode: "", creditCode: "", amount: "", description: "" }); setMessage(""); }} className="text-sm text-gray-600 hover:underline">Cancel edit</button>}</div><p className="text-sm text-gray-500">Record an equal debit and credit. Use this for opening assets, loans, capital, transfers, and non-cash adjustments. Sales and expenses are included automatically through their own entry forms; do not enter them again here.</p><div className="grid sm:grid-cols-2 gap-4"><label>Date<input required type="date" className={input} value={journal.date} onChange={e => setJournal({ ...journal, date: e.target.value })} /></label>{(["debitCode", "creditCode"] as const).map(key => <label key={key}>{key === "debitCode" ? "Debit account" : "Credit account"}<select required className={input} value={journal[key]} onChange={e => setJournal({ ...journal, [key]: e.target.value })}><option value="">Select...</option>{ACCOUNTS.filter(a => !["Income", "Other Income", "Cost of Sales", "Expenses"].includes(a.group)).map(a => <option key={a.code} value={a.code}>{balanceSheetAccountName(a.code, a.name)}</option>)}</select></label>)}<label>Amount (UGX)<input required type="number" min="0.01" step="0.01" className={input} value={journal.amount} onChange={e => setJournal({ ...journal, amount: e.target.value })} /></label><label className="sm:col-span-2">Description<input required className={input} value={journal.description} onChange={e => setJournal({ ...journal, description: e.target.value })} /></label></div><button disabled={saving} className="rounded-lg bg-gray-900 text-white px-4 py-2 disabled:opacity-50">{saving ? "Saving..." : editingJournalId ? "Update entry" : "Record journal"}</button><p role="status">{message}</p></form>}
+    {canPost && view === "entries" && entriesStatement === "balance" && <form onSubmit={saveJournal} className="accounts-no-print rounded-xl border bg-white p-5 space-y-4"><div className="flex items-center justify-between gap-3"><h2 className="font-semibold">{editingJournalId ? "Edit account entry" : "Record Journal"}</h2>{editingJournalId && <button type="button" onClick={() => { setEditingJournalId(null); setJournal({ date: dateKey(new Date()), debitCode: "", creditCode: "", amount: "", description: "" }); setJournalPaths({ debitCode: { category: "", section: "" }, creditCode: { category: "", section: "" } }); setMessage(""); }} className="text-sm text-gray-600 hover:underline">Cancel edit</button>}</div><p className="text-sm text-gray-500">Record an equal debit and credit. Choose a Balance Sheet category, section and line for each side. Sales and expenses are included automatically through their own entry forms; do not enter them again here.</p><div className="grid gap-4 sm:grid-cols-2"><label>Date<input required type="date" className={input} value={journal.date} onChange={e => setJournal({ ...journal, date: e.target.value })} /></label><label>Amount (UGX)<input required type="number" min="0.01" step="0.01" className={input} value={journal.amount} onChange={e => setJournal({ ...journal, amount: e.target.value })} /></label></div>{journalSide("debitCode")}{journalSide("creditCode")}<label className="block">Description<input required className={input} value={journal.description} onChange={e => setJournal({ ...journal, description: e.target.value })} /></label><button disabled={saving} className="rounded-lg bg-gray-900 text-white px-4 py-2 disabled:opacity-50">{saving ? "Saving..." : editingJournalId ? "Update entry" : "Record journal"}</button><p role="status">{message}</p></form>}
   </main></RouteGuard>;
 }

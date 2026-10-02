@@ -34,7 +34,20 @@ export function validateAccounting(value: AccountingSelection, kind: "sale" | "e
   return { ...value, accountName: value.accountCode === "4082" ? "Trainings" : value.accountName.trim(), accountDetail: value.accountDetail?.trim() ?? "" };
 }
 export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number; paymentMethod?: string; description?: string; customerName?: string; category?: string; subcategory?: string }
-export interface Journal { id: string; date: string; debitCode: string; creditCode: string; amount: number; description: string }
+export interface Journal {
+  id: string;
+  date: string;
+  debitCode: string;
+  creditCode: string;
+  amount: number;
+  description: string;
+  bankingKind?: "deposit" | "transfer";
+  bankingLinkId?: string;
+  bankingStatus?: "awaiting_deposit_details" | "completed";
+  receivedFrom?: string;
+  paymentMethod?: "Cash" | "Cheque";
+  referenceNumber?: string;
+}
 export interface ProductionCostEntry { id: string; date: string; description: string; amount: number; settlementCode: "1000" | "1030"; reference?: string; notes?: string }
 export interface TaxEntry { id: string; date: string; description: string; amount: number }
 export function isRawMaterialCarriageExpense(entry: LedgerSource): boolean {
