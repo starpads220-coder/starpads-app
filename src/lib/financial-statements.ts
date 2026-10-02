@@ -1,6 +1,7 @@
-import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, resolveAccounting, type Journal, type LedgerSource, type ProductionCostEntry, type buildAccounts } from "@/lib/accounts";
+import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, resolveAccounting, type Journal, type LedgerSource, type ProductionCostEntry, type TaxEntry, type buildAccounts } from "@/lib/accounts";
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
+const OPERATING_EXPENSE_NAMES = ["Office and Administration", "Legal and Professional Fees", "Salaries and Wages", "Fuel and Transport", "Data and Communication Costs", "Utilities", "Machine Repair and Maintenance", "Sundries", "Other Costs"];
 export interface ConfirmedLaborPayment { id: string; paidDate: string; status?: string; grossAmount?: number; totalAmount?: number; amountUgx?: number }
 
 export interface FinancialStatements {
@@ -18,6 +19,9 @@ export interface FinancialStatements {
   otherProductionCosts: number;
   grossProfit: number;
   operatingExpenses: number;
+  operatingExpenseLines: Array<{ name: string; amount: number }>;
+  incomeBeforeTaxes: number;
+  taxDeductions: number;
   netIncome: number;
   cashInflows: number;
   cashOutflows: number;
@@ -50,9 +54,15 @@ export function buildFinancialStatements(
   end: string,
   payments: ConfirmedLaborPayment[] = [],
   productionCosts: ProductionCostEntry[] = [],
+  taxEntries: TaxEntry[] = [],
 ): FinancialStatements {
   const periodSales = sales.filter(entry => entry.date >= start && entry.date <= end && resolveAccounting(entry, "sale"));
-  const periodExpenses = expenses.filter(entry => entry.date >= start && entry.date <= end && resolveAccounting(entry, "expense"));
+  const periodExpenses = expenses.filter(entry => entry.date >= start && entry.date <= end);
+  const expenseCode = (entry: LedgerSource) => resolveAccounting(entry, "expense")?.accountCode ?? entry.accounting?.accountCode ?? "";
+  const isRawMaterialPurchase = (entry: LedgerSource) => expenseCode(entry) === "5080" || (!entry.accounting && entry.category === "RAW_MATERIALS");
+  const isDirectLaborExpense = (entry: LedgerSource) => expenseCode(entry) === "5090" || (!entry.accounting && entry.category === "LABOUR");
+  const isOtherProductionExpense = (entry: LedgerSource) => entry.accounting?.accountGroup === "Cost of Sales" && !isRawMaterialPurchase(entry) && !isDirectLaborExpense(entry);
+  const isTaxExpense = (entry: LedgerSource) => expenseCode(entry) === "6195";
   const revenue = periodSales.reduce((sum, entry) => sum + saleAmount(entry), 0);
   let salesOfPads = 0;
   let salesOfMaterials = 0;
@@ -81,16 +91,27 @@ export function buildFinancialStatements(
   }
   const customIncome = [...customTotals.values()].sort((a, b) => a.name.localeCompare(b.name));
   const otherIncome = revenue - salesOfPads;
-  const purchasesOfRawMaterials = periodExpenses.filter(entry => resolveAccounting(entry, "expense")?.accountCode === "5080").reduce((sum, entry) => sum + expenseAmount(entry), 0);
+  const purchasesOfRawMaterials = periodExpenses.filter(isRawMaterialPurchase).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const carriageInwards = periodExpenses.filter(isRawMaterialCarriageExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const directLabor = payments.filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0), 0);
   const recordedOtherCosts = productionCosts.filter(entry => entry.date >= start && entry.date <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
-  const legacyOtherCosts = periodExpenses.filter(entry => ["5070", "5100"].includes(resolveAccounting(entry, "expense")?.accountCode ?? "")).reduce((sum, entry) => sum + expenseAmount(entry), 0);
+  const legacyOtherCosts = periodExpenses.filter(isOtherProductionExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const otherProductionCosts = recordedOtherCosts + legacyOtherCosts;
   const costOfProduction = purchasesOfRawMaterials + carriageInwards + directLabor + otherProductionCosts;
-  const operatingExpenses = periodExpenses.filter(entry => resolveAccounting(entry, "expense")?.accountGroup !== "Cost of Sales" && !isRawMaterialCarriageExpense(entry)).reduce((sum, entry) => sum + expenseAmount(entry), 0);
+  const operatingExpenseEntries = periodExpenses.filter(entry => !isRawMaterialPurchase(entry) && !isRawMaterialCarriageExpense(entry) && !isDirectLaborExpense(entry) && !isOtherProductionExpense(entry) && !isTaxExpense(entry));
+  const operatingTotals = new Map(OPERATING_EXPENSE_NAMES.map(name => [name.toLocaleLowerCase(), { name, amount: 0 }]));
+  for (const entry of operatingExpenseEntries) {
+    const name = entry.accounting?.accountName?.trim() || entry.subcategory?.trim() || entry.category?.trim() || "Uncategorised expenses";
+    const key = name.toLocaleLowerCase();
+    const previous = operatingTotals.get(key);
+    operatingTotals.set(key, { name: previous?.name ?? name, amount: (previous?.amount ?? 0) + expenseAmount(entry) });
+  }
+  const operatingExpenseLines = [...operatingTotals.values()];
+  const operatingExpenses = operatingExpenseLines.reduce((sum, line) => sum + line.amount, 0);
   const grossProfit = revenue - costOfProduction;
-  const netIncome = grossProfit - operatingExpenses;
+  const incomeBeforeTaxes = grossProfit - operatingExpenses;
+  const taxDeductions = periodExpenses.filter(isTaxExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0) + taxEntries.filter(entry => entry.date >= start && entry.date <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const netIncome = incomeBeforeTaxes - taxDeductions;
 
   const cashInflows = revenue;
   const cashOutflows = periodExpenses.reduce((sum, entry) => sum + expenseAmount(entry), 0) + recordedOtherCosts;
@@ -138,6 +159,9 @@ export function buildFinancialStatements(
     otherProductionCosts,
     grossProfit,
     operatingExpenses,
+    operatingExpenseLines,
+    incomeBeforeTaxes,
+    taxDeductions,
     netIncome,
     cashInflows,
     cashOutflows,

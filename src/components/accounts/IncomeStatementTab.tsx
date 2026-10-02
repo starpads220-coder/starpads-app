@@ -5,6 +5,7 @@ import { formatUgx } from "@/components/accounts/StatementTable";
 
 export function IncomeStatementTab({ statement, start, end }: { statement: FinancialStatements; start: string; end: string }) {
   const [otherIncomeOpen, setOtherIncomeOpen] = useState(false);
+  const [operatingExpensesOpen, setOperatingExpensesOpen] = useState(false);
   const line = (label: string, amount: number, key = label, className = "") => <tr key={key} className={`border-t border-gray-100 ${className}`}><td className="px-5 py-3 pl-8 text-gray-700">{label}</td><td className="px-5 py-3 text-right tabular-nums">{formatUgx(amount)}</td></tr>;
   const section = (label: string) => <tr key={label} className="bg-gray-50"><th colSpan={2} className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-gray-600">{label}</th></tr>;
   const total = (label: string, amount: number, grand = false) => <tr key={label} className={grand ? "border-y-4 border-double border-gray-900 font-bold" : "border-t-2 border-gray-500 font-semibold"}><td className="px-5 py-3 text-gray-900">{label}</td><td className="px-5 py-3 text-right tabular-nums">{formatUgx(amount)}</td></tr>;
@@ -27,7 +28,10 @@ export function IncomeStatementTab({ statement, start, end }: { statement: Finan
       {total("Total Cost of Production", statement.costOfProduction)}
       {total("Gross profit", statement.grossProfit)}
       {section("Operating Expenses")}
-      {line("Operating expenses", statement.operatingExpenses)}
+      <tr className="border-t border-gray-100"><td className="px-5 py-3 pl-8"><button type="button" aria-expanded={operatingExpensesOpen} onClick={() => setOperatingExpensesOpen(open => !open)} className="accounts-no-print font-medium text-blue-700 hover:underline">Operating Expenses <span aria-hidden="true">{operatingExpensesOpen ? "▴" : "▾"}</span></button><span className="hidden print:inline">Operating Expenses</span></td><td className="px-5 py-3 text-right tabular-nums">{formatUgx(statement.operatingExpenses)}</td></tr>
+      {statement.operatingExpenseLines.map(entry => line(entry.name, entry.amount, `operating-${entry.name}`, operatingExpensesOpen ? "" : "hidden print:table-row"))}
+      {total("Income Before Taxes", statement.incomeBeforeTaxes)}
+      {line("Tax Deductions", statement.taxDeductions)}
       {total("Net income", statement.netIncome, true)}
     </tbody></table></div>
   </section>;

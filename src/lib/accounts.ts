@@ -5,10 +5,10 @@ const group = (group: AccountGroup, rows: [string, string][]): Account[] => rows
 // Reference account codes retained. The reference repeats 6150; use a distinct ID for each row.
 export const ACCOUNTS: Account[] = [
   ...group("Current Assets", [["1000", "Cash in Bank - Operating Bank"], ["1010", "Mobile Money - MTN"], ["1020", "Mobile Money - Airtel"], ["1030", "Petty Cash"], ["1100", "Accounts Receivable"], ["1110", "Allowance for Doubtful Accounts"], ["1240", "Inventory - Raw Materials"], ["1250", "Inventory - Work in Progress"], ["1260", "Inventory - Finished Goods"], ["1270", "Inventory - Packaging Material"], ["1320", "Prepaid Expenses - Insurance and Factory Rent"]]),
-  ...group("Non-Current Assets", [["1540", "Factory Land and Buildings"], ["1630", "Machinery and Equipment"], ["1640", "Warehouse Equipment"], ["1650", "Quality Control and Laboratory"], ["1660", "Office Equipment and IT Infrastructure"], ["1830", "Accumulated Depreciation of Machinery"]]),
-  ...group("Current Liabilities", [["2110", "Accounts Payable - Suppliers"], ["2120", "Accrued Wages and Payroll Liabilities"], ["2230", "Sales Tax / VAT Payable"], ["2240", "Short-Term Factory Loans"]]),
+  ...group("Non-Current Assets", [["1540", "Factory Land and Buildings"], ["1630", "Machinery and Equipment"], ["1640", "Warehouse Equipment"], ["1650", "Quality Control and Laboratory"], ["1660", "Office Equipment and IT Infrastructure"], ["1661", "Office Furniture and Fittings"], ["1662", "Computers"], ["1830", "Accumulated Depreciation of Machinery"]]),
+  ...group("Current Liabilities", [["2110", "Accounts Payable - Suppliers"], ["2120", "Accrued Wages and Payroll Liabilities"], ["2130", "Accrued Rent"], ["2230", "Sales Tax / VAT Payable"], ["2240", "Short-Term Factory Loans"], ["2250", "Income Tax Payable"]]),
   ...group("Non-Current Liabilities", [["2340", "Long-Term Equipment Loans / Leases"], ["2350", "Mortgages Payable"]]),
-  ...group("Equity", [["3000", "Common Stock / Capital Investment"], ["3050", "Retained Earnings"], ["3100", "Owner Drawings / Dividends"]]),
+  ...group("Equity", [["3000", "Capital Investments"], ["3050", "Retained Earnings"], ["3060", "Owner's Equity"], ["3100", "Dividends"]]),
   ...group("Income", [["4080", "Sale of Pads"], ["4081", "Sale of Material"], ["4082", "Trainings"], ["4083", "Grants and Donations"], ["4084", "Wholesale Revenue - Distributors, Supermarkets and B2B"], ["4085", "Direct-to-Consumer Sales"], ["4086", "Private Label / OEM Manufacturing Revenue"], ["4087", "Sales Returns and Allowances"], ["4088", "Cash Discounts Allowed"], ["4070", "Other Income"]]),
   ...group("Other Income", [["6210", "Gain/Loss on Asset Disposal"], ["6220", "Interest Income"]]),
   ...group("Cost of Sales", [["5070", "Inventory Adjustment"], ["5080", "Direct Materials"], ["5090", "Direct Labour"], ["5100", "Manufacturing Overheads"]]),
@@ -36,10 +36,12 @@ export function validateAccounting(value: AccountingSelection, kind: "sale" | "e
 export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number; paymentMethod?: string; description?: string; customerName?: string; category?: string; subcategory?: string }
 export interface Journal { id: string; date: string; debitCode: string; creditCode: string; amount: number; description: string }
 export interface ProductionCostEntry { id: string; date: string; description: string; amount: number; settlementCode: "1000" | "1030"; reference?: string; notes?: string }
+export interface TaxEntry { id: string; date: string; description: string; amount: number }
 export function isRawMaterialCarriageExpense(entry: LedgerSource): boolean {
   const accounting = resolveAccounting(entry, "expense");
-  if (accounting?.accountCode !== "6030") return false;
-  const detail = `${entry.subcategory ?? ""} ${accounting.accountDetail ?? ""} ${entry.description ?? ""}`;
+  const isTransport = (accounting?.accountCode ?? entry.accounting?.accountCode) === "6030" || (!entry.accounting && entry.category === "TRANSPORT");
+  if (!isTransport) return false;
+  const detail = `${entry.subcategory ?? ""} ${accounting?.accountDetail ?? entry.accounting?.accountDetail ?? ""} ${entry.description ?? ""}`;
   return /\b(?:raw[\s-]*materials?|pul|fleece|flannel)\b/i.test(detail);
 }
 export function resolveAccounting(entry: LedgerSource, kind: "sale" | "expense"): AccountingSelection | null {
@@ -55,7 +57,7 @@ export function resolveAccounting(entry: LedgerSource, kind: "sale" | "expense")
   }
   return null;
 }
-export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], journals: Journal[], start: string, end: string, productionCosts: ProductionCostEntry[] = []) {
+export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], journals: Journal[], start: string, end: string, productionCosts: ProductionCostEntry[] = [], taxEntries: TaxEntry[] = []) {
   const catalog = new Map(ACCOUNTS.map(a => [a.code, a]));
   const balances: Record<string, number> = {}, movement: Record<string, number> = {};
   let unclassified = 0;
@@ -84,6 +86,9 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
   }
   productionCosts.forEach(entry => {
     if ((entry.settlementCode === "1000" || entry.settlementCode === "1030") && Number(entry.amount) > 0) post(entry.date, "5100", entry.settlementCode, Number(entry.amount));
+  });
+  taxEntries.forEach(entry => {
+    if (Number(entry.amount) > 0) post(entry.date, "6195", "2250", Number(entry.amount));
   });
   journals.forEach(j => post(j.date, j.debitCode, j.creditCode, j.amount));
   const rows = [...catalog.values()].map(a => {
