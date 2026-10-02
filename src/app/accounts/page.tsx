@@ -9,6 +9,7 @@ import { AccountsSwitcher } from "@/components/AccountsSwitcher";
 import { BalanceSheetTable, type BalanceSheetColumn } from "@/components/BalanceSheetTable";
 import { BalanceSheetTab } from "@/components/accounts/BalanceSheetTab";
 import { balanceSheetAccountName, balanceSheetAssets, currentAssetLines, excludedAllowanceBalance } from "@/lib/balance-sheet-current-assets";
+import { balanceSheetGroupTotal, balanceSheetRows, balanceSheetTotals } from "@/lib/balance-sheet-sections";
 import { CashFlowStatementTab } from "@/components/accounts/CashFlowStatementTab";
 import { IncomeStatementTab } from "@/components/accounts/IncomeStatementTab";
 import { ACCOUNTS, ACCOUNT_GROUPS, REMOVED_ACCOUNT_CODES, SETTLEMENT_CODES, buildAccounts, resolveAccounting, type LedgerSource, type Journal, type ProductionCostEntry, type TaxEntry } from "@/lib/accounts";
@@ -111,11 +112,11 @@ export default function AccountsPage() {
       const balanceSections: AccountsPdfSection[] = [...ACCOUNT_GROUPS]
       .filter(group => ["Current Assets", "Non-Current Assets", "Current Liabilities", "Non-Current Liabilities", "Equity"].includes(group))
       .map(group => {
-        const rows = group === "Current Assets" ? currentAssetLines(report) : report.rows.filter(row => row.group === group && !REMOVED_ACCOUNT_CODES.has(row.code));
-        const total = group === "Equity" ? statements.equity : group === "Current Assets" ? report.rows.filter(row => row.group === group).reduce((sum, row) => sum + row.balance, 0) - excludedAllowanceBalance(report) : rows.reduce((sum, row) => sum + row.balance, 0);
-        return { title: group, rows: [...rows.map(row => ({ label: row.name, amount: row.balance })), ...(group === "Equity" ? [{ label: "Accumulated profit / loss", amount: statements.retainedEarnings }] : []), { label: `Total ${group}`, amount: total, emphasis: "total" as const }] };
+        const rows = balanceSheetRows(report, group);
+        return { title: group, rows: [...rows.map(row => ({ label: row.name, amount: row.balance })), { label: `Total ${group}`, amount: balanceSheetGroupTotal(report, group), emphasis: "total" as const }] };
       });
-      balanceSections.push({ title: "Accounting Equation", rows: [{ label: "Total assets", amount: balanceSheetAssets(report) }, { label: "Total liabilities and equity", amount: statements.liabilities + statements.equity, emphasis: "grand" }] });
+      const totals = balanceSheetTotals(report);
+      balanceSections.push({ title: "Accounting Equation", rows: [{ label: "Total assets", amount: totals.assets }, { label: "Total liabilities and equity", amount: totals.liabilities + totals.equity, emphasis: "grand" }] });
       return balanceSections;
     }
     return [];
@@ -256,15 +257,13 @@ export default function AccountsPage() {
       {view === "balance" && <>
       <p className="text-sm text-gray-500">Activity: {start} to {end}. Balance sheet includes all classified entries up to {end}, including prior periods.</p>
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm">Balances reflect recorded transactions and journals only. Enter opening balances and adjustments below to include existing assets, liabilities, and capital. {report.unclassified} sales/expense entries through {end} have no valid accounting classification and are excluded.</div>
-      <div className="accounts-print-content"><BalanceSheetTab statement={statements} excludedAllowance={excludedAllowanceBalance(report)}><BalanceSheetTable columns={balanceSheetColumns} /></BalanceSheetTab></div>
+      <div className="accounts-print-content"><BalanceSheetTab statement={statements} report={report} excludedAllowance={excludedAllowanceBalance(report)}><BalanceSheetTable columns={balanceSheetColumns} /></BalanceSheetTab></div>
       <section className="accounts-no-print overflow-hidden rounded-xl border bg-white"><div className="border-b px-5 py-4"><h2 className="font-semibold">Cash and bank activity</h2><p className="mt-1 text-sm text-gray-500">Transaction-level explanation of the cash balances shown above. Positive values increase cash; negative values reduce it.</p></div><div className="max-h-96 overflow-auto"><table className="w-full min-w-[760px] text-sm"><thead className="sticky top-0 bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Source</th><th className="p-3 text-left">Description</th><th className="p-3 text-left">Cash account</th><th className="p-3 text-right">Movement</th></tr></thead><tbody>{cashActivity.length === 0 ? <tr><td colSpan={5} className="p-8 text-center text-gray-500">No cash activity has been recorded.</td></tr> : cashActivity.map(entry => <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{entry.source}</td><td className="p-3">{entry.description}</td><td className="p-3">{entry.account}</td><td className={`p-3 text-right font-medium tabular-nums ${entry.amount < 0 ? "text-red-700" : "text-green-700"}`}>{money(entry.amount)}</td></tr>)}</tbody></table></div></section>
       <div className="accounts-no-print contents">{ACCOUNT_GROUPS.filter(group => ["Current Assets", "Non-Current Assets", "Current Liabilities", "Non-Current Liabilities", "Equity"].includes(group)).map(group => {
         const groupRows = report.rows.filter(a => a.group === group);
-        const rows = group === "Current Assets" ? currentAssetLines(report) : groupRows.filter(a => !REMOVED_ACCOUNT_CODES.has(a.code));
-        const allowanceMovement = group === "Current Assets" ? groupRows.find(a => a.code === "1110")?.movement ?? 0 : 0;
-        const allowanceBalance = group === "Current Assets" ? excludedAllowanceBalance(report) : 0;
+        const rows = balanceSheetRows(report, group);
         const isActivity = ["Income", "Other Income", "Cost of Sales", "Expenses"].includes(group);
-        return <section key={group} className="rounded-xl border bg-white overflow-hidden"><h2 className="font-semibold px-5 py-4 bg-gray-50">{group}</h2><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left"><th className="p-3">Account / subcategory</th><th className="p-3 text-right">Period movement</th><th className="p-3 text-right">Balance at {end}</th></tr></thead><tbody>{rows.map(a => <tr key={a.code} className="border-t"><td className="p-3">{a.name}</td><td className="p-3 text-right tabular-nums">{money(a.movement)}</td><td className="p-3 text-right tabular-nums">{money(a.balance)}</td></tr>)}</tbody><tfoot><tr className="border-t font-semibold"><td className="p-3">Total {group}{isActivity ? " (income statement)" : ""}</td><td className="p-3 text-right">{money(groupRows.reduce((s,a) => s+a.movement,0) - allowanceMovement)}</td><td className="p-3 text-right">{money(groupRows.reduce((s,a) => s+a.balance,0) - allowanceBalance)}</td></tr></tfoot></table></div></section>;
+        return <section key={group} className="rounded-xl border bg-white overflow-hidden"><h2 className="font-semibold px-5 py-4 bg-gray-50">{group}</h2><div className="overflow-x-auto"><table className="w-full text-sm"><thead><tr className="text-left"><th className="p-3">Account / subcategory</th><th className="p-3 text-right">Period movement</th><th className="p-3 text-right">Balance at {end}</th></tr></thead><tbody>{rows.map(a => <tr key={a.code} className="border-t"><td className="p-3">{a.name}</td><td className="p-3 text-right tabular-nums">{money(a.movement)}</td><td className="p-3 text-right tabular-nums">{money(a.balance)}</td></tr>)}</tbody><tfoot><tr className="border-t font-semibold"><td className="p-3">Total {group}{isActivity ? " (income statement)" : ""}</td><td className="p-3 text-right">{money(balanceSheetGroupTotal(report, group, "movement"))}</td><td className="p-3 text-right">{money(balanceSheetGroupTotal(report, group))}</td></tr></tfoot></table></div></section>;
       })}</div>
       <section className="accounts-no-print rounded-xl border bg-white p-5 space-y-3"><h2 className="font-semibold">Journal history — selected period</h2>{journals.data.filter(j => j.date >= start && j.date <= end).map(j => <p key={j.id} className="text-sm border-b py-2">{j.date} · {j.description} · Debit {accountName(j.debitCode)} / Credit {accountName(j.creditCode)} · {money(j.amount)}</p>)}</section>
       </>}
