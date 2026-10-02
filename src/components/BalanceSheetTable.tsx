@@ -1,6 +1,6 @@
 import { Fragment } from "react";
-import { REMOVED_ACCOUNT_CODES, type buildAccounts } from "@/lib/accounts";
-import { balanceSheetAssets, currentAssetLines, excludedAllowanceBalance } from "@/lib/balance-sheet-current-assets";
+import type { buildAccounts } from "@/lib/accounts";
+import { balanceSheetGroupTotal, balanceSheetRows, balanceSheetTotals } from "@/lib/balance-sheet-sections";
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
 
@@ -16,20 +16,14 @@ const amount = (value: number) => value === 0
   : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
 export function BalanceSheetTable({ columns }: { columns: BalanceSheetColumn[] }) {
-  const accountRows = [...new Map(columns.flatMap(column => column.report.rows).map(row => [row.code, row])).values()];
-  const rowsFor = (group: string) => group === "Current Assets"
-    ? [...new Map(columns.flatMap(column => currentAssetLines(column.report)).map(row => [row.code, row])).values()]
-    : accountRows.filter(row => row.group === group && !REMOVED_ACCOUNT_CODES.has(row.code));
-  const balance = (column: BalanceSheetColumn, code: string) => (code.startsWith("balance-")
-    ? currentAssetLines(column.report)
-    : column.report.rows).find(row => row.code === code)?.balance ?? 0;
-  const groupTotal = (column: BalanceSheetColumn, group: string) => column.report.rows.filter(row => row.group === group).reduce((sum, row) => sum + row.balance, 0)
-    - (group === "Current Assets" ? excludedAllowanceBalance(column.report) : 0);
+  const rowsFor = (group: string) => [...new Map(columns.flatMap(column => balanceSheetRows(column.report, group)).map(row => [row.code, row])).values()];
+  const balance = (column: BalanceSheetColumn, group: string, code: string) => balanceSheetRows(column.report, group).find(row => row.code === code)?.balance ?? 0;
+  const groupTotal = (column: BalanceSheetColumn, group: string) => balanceSheetGroupTotal(column.report, group);
 
-  const accountLine = (code: string, name: string, indent = true) => (
+  const accountLine = (group: string, code: string, name: string, indent = true) => (
     <tr key={code} className="border-b border-gray-100">
       <td className={`px-4 py-2 ${indent ? "pl-8" : ""}`}>{name}</td>
-      {columns.map(column => <td key={column.label} className="px-4 py-2 text-right tabular-nums text-blue-700">{amount(balance(column, code))}</td>)}
+      {columns.map(column => <td key={column.label} className="px-4 py-2 text-right tabular-nums text-blue-700">{amount(balance(column, group, code))}</td>)}
     </tr>
   );
   const totalLine = (label: string, values: number[], strong = false) => (
@@ -42,7 +36,7 @@ export function BalanceSheetTable({ columns }: { columns: BalanceSheetColumn[] }
     <tr className="bg-gray-100 font-bold"><td className="px-4 py-3" colSpan={columns.length + 1}>{title}</td></tr>
     {groups.map(({ group, label }) => <Fragment key={group}>
       <tr className="font-semibold text-gray-700"><td className="px-4 pt-3 pb-1" colSpan={columns.length + 1}>{label}</td></tr>
-      {rowsFor(group).map(row => accountLine(row.code, row.name))}
+      {rowsFor(group).map(row => accountLine(group, row.code, row.name))}
       {totalLine(`Total ${label.toLowerCase()}`, columns.map(column => groupTotal(column, group)))}
     </Fragment>)}
     {totalLine(totalLabel, columns.map(column => groups.reduce((sum, item) => sum + groupTotal(column, item.group), 0)), true)}
@@ -66,11 +60,10 @@ export function BalanceSheetTable({ columns }: { columns: BalanceSheetColumn[] }
             {section("Assets", [{ group: "Current Assets", label: "Current assets" }, { group: "Non-Current Assets", label: "Fixed assets" }], "Total assets")}
             {section("Liabilities", [{ group: "Current Liabilities", label: "Current liabilities" }, { group: "Non-Current Liabilities", label: "Long-term liabilities" }], "Total liabilities")}
             <tr className="bg-gray-100 font-bold"><td className="px-4 py-3" colSpan={columns.length + 1}>Equity</td></tr>
-            {rowsFor("Equity").map(row => accountLine(row.code, row.name))}
-            <tr className="border-b border-gray-100"><td className="px-4 py-2 pl-8">Accumulated profit / loss</td>{columns.map(column => <td key={column.label} className="px-4 py-2 text-right tabular-nums text-blue-700">{amount(column.report.accumulatedProfit)}</td>)}</tr>
-            {totalLine("Total equity", columns.map(column => column.report.equity), true)}
-            {totalLine("Total liabilities and equity", columns.map(column => column.report.liabilities + column.report.equity), true)}
-            <tr className="border-t-2 border-gray-900 font-bold"><td className="px-4 py-3">Balance check (assets − liabilities − equity)</td>{columns.map(column => { const difference = balanceSheetAssets(column.report) - column.report.liabilities - column.report.equity; return <td key={column.label} className={`px-4 py-3 text-right tabular-nums ${Math.abs(difference) < 0.01 ? "text-green-700" : "text-red-700"}`}>{amount(difference)}</td>; })}</tr>
+            {rowsFor("Equity").map(row => accountLine("Equity", row.code, row.name))}
+            {totalLine("Total equity", columns.map(column => balanceSheetTotals(column.report).equity), true)}
+            {totalLine("Total liabilities and equity", columns.map(column => { const totals = balanceSheetTotals(column.report); return totals.liabilities + totals.equity; }), true)}
+            <tr className="border-t-2 border-gray-900 font-bold"><td className="px-4 py-3">Balance check (assets − liabilities − equity)</td>{columns.map(column => { const difference = balanceSheetTotals(column.report).difference; return <td key={column.label} className={`px-4 py-3 text-right tabular-nums ${Math.abs(difference) < 0.01 ? "text-green-700" : "text-red-700"}`}>{amount(difference)}</td>; })}</tr>
           </tbody>
         </table>
       </div>
