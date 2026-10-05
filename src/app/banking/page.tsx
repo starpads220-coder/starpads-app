@@ -8,6 +8,7 @@ import { useRealtimeCollection } from "@/hooks/use-firestore-query";
 import { db } from "@/lib/firebase";
 import { ACCOUNTS, REMOVED_ACCOUNT_CODES, SETTLEMENT_CODES, buildAccounts, type Journal, type LedgerSource, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
 import { bankAccounts, bankingAccountName, cashAccounts, isBankCode, isCashCode, isCashToBank, transferDirection, validateTransfer } from "@/lib/banking";
+import { todayInEat } from "@/lib/account-period";
 
 type AccountType = "Bank" | "Cash";
 type BankingTab = "deposits" | "transfers";
@@ -48,11 +49,15 @@ export default function BankingPage() {
   const linkedDeposit = selectedDeposit?.bankingKind === "transfer" && isCashToBank(selectedDeposit);
   const editingTransfer = journals.data.find(entry => entry.id === editingTransferId);
   const balanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", transfer.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, transfer.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
+  const currentBalanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", todayInEat(), productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
   const accountBalance = (code: string) => balanceReport.rows.find(row => row.code === code)?.balance ?? 0;
+  const currentAccountBalance = (code: string) => currentBalanceReport.rows.find(row => row.code === code)?.balance ?? 0;
   const fromBalance = accountBalance(transfer.fromCode);
   const toBalance = accountBalance(transfer.toCode);
   const availableFrom = fromBalance + (editingTransfer && editingTransfer.date <= transfer.date && editingTransfer.creditCode === transfer.fromCode ? editingTransfer.amount : 0);
   const combinedCashBalance = cashAccounts.reduce((sum, account) => sum + accountBalance(account.code), 0);
+  const currentBankBalance = bankAccounts.reduce((sum, account) => sum + currentAccountBalance(account.code), 0);
+  const currentCashBalance = cashAccounts.reduce((sum, account) => sum + currentAccountBalance(account.code), 0);
 
   function chooseDeposit(entry: Journal) {
     setSelectedDepositId(entry.id);
@@ -153,6 +158,7 @@ export default function BankingPage() {
 
   return <RouteGuard><div className="space-y-6">
     <header><h1 className="text-2xl font-bold">Banking</h1><p className="text-sm text-gray-500">Deposits and transfers linked to the existing Bank and Cash accounts.</p></header>
+    <section className="overflow-hidden rounded-xl border bg-white" aria-labelledby="banking-balances-title"><div className="border-b px-5 py-4"><h2 id="banking-balances-title" className="font-semibold">Current Balances</h2><p className="mt-1 text-sm text-gray-500">Live balances as at today from all recorded sales, expenses, payroll, deposits, transfers and account entries.</p></div><div className="grid sm:grid-cols-2"><div className="border-b p-5 sm:border-b-0 sm:border-r"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Bank</p><p className="mt-2 text-2xl font-bold tabular-nums">{loading ? "—" : error ? "Unavailable" : money(currentBankBalance)}</p></div><div className="p-5"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cash</p><p className="mt-2 text-2xl font-bold tabular-nums">{loading ? "—" : error ? "Unavailable" : money(currentCashBalance)}</p><p className="mt-1 text-xs text-gray-500">Physical Cash + Mobile Money [MTN] + Mobile Money [Airtel]</p></div></div></section>
     <div role="tablist" aria-label="Banking sections" className="grid overflow-hidden rounded-xl border bg-white sm:grid-cols-2">{(["deposits", "transfers"] as const).map(value => <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => { setTab(value); setMessage(""); }} className={`min-h-12 px-4 py-3 text-sm font-semibold ${tab === value ? "bg-gray-900 text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>{value === "deposits" ? "Deposits" : "Transfers"}</button>)}</div>
     {loading && <p className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">Loading account balances and banking entries…</p>}
     {!loading && !error && !serverConfirmed && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Firestore is offline or still syncing. Saved records may be shown from cache, but banking entries are paused until the server confirms the balances. Check your connection; this screen will resume automatically.</p>}
