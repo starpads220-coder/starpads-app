@@ -20,9 +20,9 @@ interface PaymentEntry {
   actualPieces: number;
   earningsUgx: number;
   status: string;
-  nssfEmployee: number;
-  payeeTax: number;
-  netPay: number;
+  nssfEmployee: number | null;
+  payeeTax: number | null;
+  netPay: number | null;
 }
 
 interface PaymentsPDFProps {
@@ -54,6 +54,7 @@ export function PaymentsPDF({
 
         <View style={pdfStyles.summaryBox}>
           <Text style={pdfStyles.summaryTitle}>Payments Summary</Text>
+          <Text style={{ fontSize: 9, color: "#666", marginBottom: 5 }}>Earnings use production dates; deductions and net paid use confirmed payment dates in the selected period.</Text>
           <View style={pdfStyles.summaryRow}>
             <Text style={pdfStyles.summaryLabel}>Total Due</Text>
             <Text style={pdfStyles.summaryValue}>UGX {totalDue.toLocaleString()}</Text>
@@ -85,7 +86,7 @@ export function PaymentsPDF({
               <Text style={{ fontSize: 11, fontWeight: "bold", color: "#2563eb" }}>UGX {totalNssfBusiness.toLocaleString()}</Text>
             </View>
             <View style={pdfStyles.summaryRow}>
-              <Text style={pdfStyles.summaryLabel}>Total PAYEE Tax</Text>
+              <Text style={pdfStyles.summaryLabel}>Total PAYE Tax</Text>
               <Text style={{ fontSize: 11, fontWeight: "bold", color: "#dc2626" }}>UGX {totalPayee.toLocaleString()}</Text>
             </View>
           </View>
@@ -100,8 +101,8 @@ export function PaymentsPDF({
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(13) }}><Text style={pdfStyles.tableCellHeader}>Gross (UGX)</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>NSSF Emp</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>NSSF Bus</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>PAYEE</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>Net Pay</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>PAYE</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>Net Paid</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(10) }}><Text style={pdfStyles.tableCellHeader}>Status</Text></View>
             </View>
             {workerBreakdown.length === 0 ? (
@@ -135,8 +136,8 @@ export function PaymentsPDF({
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(10) }}><Text style={pdfStyles.tableCellHeader}>Pieces</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(13) }}><Text style={pdfStyles.tableCellHeader}>Earnings</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(10) }}><Text style={pdfStyles.tableCellHeader}>NSSF Emp</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(10) }}><Text style={pdfStyles.tableCellHeader}>PAYEE</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(10) }}><Text style={pdfStyles.tableCellHeader}>Net Pay</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(10) }}><Text style={pdfStyles.tableCellHeader}>PAYE</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(10) }}><Text style={pdfStyles.tableCellHeader}>Net Paid</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(10) }}><Text style={pdfStyles.tableCellHeader}>Status</Text></View>
             </View>
             {entries.length === 0 ? (
@@ -151,9 +152,9 @@ export function PaymentsPDF({
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(16) }}><Text style={pdfStyles.tableCell}>{e.stageId}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(10) }}><Text style={pdfStyles.tableCell}>{e.actualPieces}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(13) }}><Text style={pdfStyles.tableCell}>UGX {e.earningsUgx.toLocaleString()}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(10) }}><Text style={pdfStyles.tableCell}>{e.nssfEmployee.toLocaleString()}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(10) }}><Text style={pdfStyles.tableCell}>{e.payeeTax.toLocaleString()}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(10) }}><Text style={pdfStyles.tableCell}>UGX {e.netPay.toLocaleString()}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(10) }}><Text style={pdfStyles.tableCell}>{e.nssfEmployee?.toLocaleString() ?? "—"}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(10) }}><Text style={pdfStyles.tableCell}>{e.payeeTax?.toLocaleString() ?? "—"}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(10) }}><Text style={pdfStyles.tableCell}>{e.netPay == null ? "—" : `UGX ${e.netPay.toLocaleString()}`}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(10) }}><Text style={pdfStyles.tableCell}>{e.status}</Text></View>
                 </View>
               ))

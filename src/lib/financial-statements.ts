@@ -1,8 +1,8 @@
-import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, resolveAccounting, type Journal, type LedgerSource, type ProductionCostEntry, type TaxEntry, type buildAccounts } from "@/lib/accounts";
+import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, resolveAccounting, type Journal, type LedgerSource, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type buildAccounts } from "@/lib/accounts";
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
 const OPERATING_EXPENSE_NAMES = ["Office and Administration", "Legal and Professional Fees", "Salaries and Wages", "Fuel and Transport", "Data and Communication Costs", "Utilities", "Machine Repair and Maintenance", "Sundries", "Other Costs"];
-export interface ConfirmedLaborPayment { id: string; paidDate: string; status?: string; grossAmount?: number; totalAmount?: number; amountUgx?: number }
+export interface ConfirmedLaborPayment { id: string; paidDate: string; status?: string; grossAmount?: number; totalAmount?: number; amountUgx?: number; payrollVersion?: number; netPayAmount?: number }
 
 export interface FinancialStatements {
   revenue: number;
@@ -55,6 +55,7 @@ export function buildFinancialStatements(
   payments: ConfirmedLaborPayment[] = [],
   productionCosts: ProductionCostEntry[] = [],
   taxEntries: TaxEntry[] = [],
+  payrollEntries: PayrollProductionEntry[] = [],
 ): FinancialStatements {
   const periodSales = sales.filter(entry => entry.date >= start && entry.date <= end && resolveAccounting(entry, "sale"));
   const periodExpenses = expenses.filter(entry => entry.date >= start && entry.date <= end);
@@ -93,7 +94,10 @@ export function buildFinancialStatements(
   const otherIncome = revenue - salesOfPads;
   const purchasesOfRawMaterials = periodExpenses.filter(isRawMaterialPurchase).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const carriageInwards = periodExpenses.filter(isRawMaterialCarriageExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
-  const directLabor = payments.filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0), 0);
+  const newPaymentIds = new Set(payments.filter(payment => payment.payrollVersion === 2).map(payment => payment.id));
+  const accruedLabor = payrollEntries.filter(entry => entry.date >= start && entry.date <= end && (entry.paymentStatus !== "paid" || newPaymentIds.has(entry.paymentId ?? ""))).reduce((sum, entry) => sum + (Number(entry.earningsUgx) || 0), 0);
+  const legacyPaidLabor = payments.filter(entry => entry.payrollVersion !== 2 && entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0), 0);
+  const directLabor = accruedLabor + legacyPaidLabor;
   const recordedOtherCosts = productionCosts.filter(entry => entry.date >= start && entry.date <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   const legacyOtherCosts = periodExpenses.filter(isOtherProductionExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const otherProductionCosts = recordedOtherCosts + legacyOtherCosts;
@@ -114,7 +118,8 @@ export function buildFinancialStatements(
   const netIncome = incomeBeforeTaxes - taxDeductions;
 
   const cashInflows = revenue;
-  const cashOutflows = periodExpenses.reduce((sum, entry) => sum + expenseAmount(entry), 0) + recordedOtherCosts;
+  const cashOutflows = periodExpenses.reduce((sum, entry) => sum + expenseAmount(entry), 0) + recordedOtherCosts
+    + payments.filter(entry => entry.payrollVersion === 2 && entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.netPayAmount) || 0), 0);
   const cashAdjustments = journals.filter(entry => entry.date >= start && entry.date <= end).reduce((sum, entry) => {
     const debitCash = SETTLEMENT_CODES.includes(entry.debitCode) ? entry.amount : 0;
     const creditCash = SETTLEMENT_CODES.includes(entry.creditCode) ? entry.amount : 0;

@@ -48,6 +48,7 @@ import { StandardBarChart } from "@/components/charts/StandardBarChart";
 import { palette, chartColors } from "@/components/charts";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
+import { activeEmployeeOptions, isEmployeeActive } from "@/lib/employees";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
 
@@ -118,9 +119,13 @@ export default function ProductionPage() {
   });
 
   const { data: employees = [] } = useCollectionQuery<Employee>("employees", [
-    where("isActive", "==", true),
     orderBy("name"),
   ], { staleTime: 10 * 60 * 1000 });
+  const selectableEmployees = useMemo(() => {
+    const active = activeEmployeeOptions(employees);
+    const selected = employees.find(employee => employee.id === form.employeeId);
+    return selected && !isEmployeeActive(selected) && editingEntryId ? [...active, selected] : active;
+  }, [employees, form.employeeId, editingEntryId]);
 
   const { data: stages = [], loading: stagesLoading } = useRealtimeCollection<ProductionStage>("productionStages");
 
@@ -263,6 +268,8 @@ export default function ProductionPage() {
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     if (!form.employeeId) return;
+    const selectedEmployee = employees.find(employee => employee.id === form.employeeId);
+    if (!editingEntryId && selectedEmployee && !isEmployeeActive(selectedEmployee)) return;
     if (form.stageId === "STG-09" && !form.productionActivity) return;
     if (form.stageId === "STG-10" && !form.batchRef) return;
     if (form.stageId === "STG-01") {
@@ -813,9 +820,9 @@ const totalPackagedPads = useMemo(
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
             >
               <option value="">Select worker...</option>
-              {employees.map((emp) => (
+              {selectableEmployees.map((emp) => (
                 <option key={emp.id} value={emp.id}>
-                  {emp.name}
+                  {emp.name}{!isEmployeeActive(emp) ? " (Deactivated)" : ""}
                 </option>
               ))}
             </select>

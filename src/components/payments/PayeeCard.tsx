@@ -1,164 +1,40 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ChartCard } from "@/components/ui/ChartCard";
 import { palette } from "@/components/charts";
-import { computePayeeTax, getPayeeBracket } from "@/lib/deductions";
+import type { Employee, Payment } from "@/types";
 
-interface PayeeEmployeeData {
-  employeeName: string;
-  employeeId: string;
-  grossAmount: number;
-  payeeTax: number;
-  bracketLabel: string;
-  bracketRate: number;
-  isTaxFree: boolean;
-}
-
-interface PayeeCardProps {
-  employeePayments: {
-    employeeId: string;
-    employeeName: string;
-    dueAmount: number;
-    paidAmount: number;
-  }[];
-}
-
-export function PayeeCard({ employeePayments }: PayeeCardProps) {
+export function PayeeCard({ payments, employees }: { payments: Payment[]; employees: Employee[] }) {
   const [expanded, setExpanded] = useState(false);
+  const rows = useMemo(() => {
+    const byEmployee = new Map<string, { id: string; name: string; gross: number; paye: number; net: number }>();
+    for (const payment of payments) {
+      const previous = byEmployee.get(payment.employeeId) ?? {
+        id: payment.employeeId,
+        name: employees.find(employee => employee.id === payment.employeeId)?.name ?? payment.employeeId,
+        gross: 0, paye: 0, net: 0,
+      };
+      const gross = payment.grossAmount ?? payment.totalAmount ?? payment.amountUgx ?? 0;
+      const paye = payment.payeeTax ?? 0;
+      previous.gross += gross;
+      previous.paye += paye;
+      previous.net += payment.netPayAmount ?? (gross - (payment.nssfEmployeeDeduction ?? 0) - paye);
+      byEmployee.set(payment.employeeId, previous);
+    }
+    return [...byEmployee.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }, [payments, employees]);
+  const total = rows.reduce((sum, row) => sum + row.paye, 0);
 
-  const payeeData = useMemo(() => {
-    return employeePayments
-      .filter((ep) => ep.dueAmount + ep.paidAmount > 0)
-      .map((ep) => {
-        const gross = ep.dueAmount + ep.paidAmount;
-        const tax = computePayeeTax(gross);
-        const bracket = getPayeeBracket(gross);
-        return {
-          employeeName: ep.employeeName,
-          employeeId: ep.employeeId,
-          grossAmount: gross,
-          payeeTax: tax,
-          bracketLabel: bracket.label,
-          bracketRate: bracket.rate,
-          isTaxFree: bracket.rate === 0,
-        };
-      });
-  }, [employeePayments]);
-
-  const totalPayee = useMemo(
-    () => payeeData.reduce((s, d) => s + d.payeeTax, 0),
-    [payeeData]
-  );
-
-  const taxFreeCount = useMemo(
-    () => payeeData.filter((d) => d.isTaxFree).length,
-    [payeeData]
-  );
-
-  const taxableCount = useMemo(
-    () => payeeData.length - taxFreeCount,
-    [payeeData, taxFreeCount]
-  );
-
-  return (
-    <ChartCard
-      title="PAYEE"
-      subtitle="Pay As You Earn"
-      variant="gradient"
-      accentColor={palette.orange}
-      headerDivider={false}
-      action={
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="text-xs text-gray-500 hover:text-gray-900 font-medium flex items-center gap-1"
-        >
-          {expanded ? "Hide Details" : "Show Details"}
-          <span className={`transition-transform ${expanded ? "rotate-180" : ""}`}>▼</span>
-        </button>
-      }
-    >
-      <div className="flex flex-col h-full">
-        <div className="grid grid-cols-3 gap-2 mb-4">
-          <div className="text-center p-3 bg-orange-50 rounded-lg">
-            <div className="text-xs text-orange-600 font-medium">Total PAYEE</div>
-            <div className="text-lg font-bold text-orange-700">
-              UGX {totalPayee.toLocaleString()}
-            </div>
-          </div>
-          <div className="text-center p-3 bg-gray-50 rounded-lg">
-            <div className="text-xs text-gray-500 font-medium">Taxable</div>
-            <div className="text-lg font-bold text-gray-700">{taxableCount}</div>
-          </div>
-          <div className="text-center p-3 bg-green-50 rounded-lg">
-            <div className="text-xs text-green-600 font-medium">Tax Free</div>
-            <div className="text-lg font-bold text-green-700">{taxFreeCount}</div>
-          </div>
-        </div>
-
-        {expanded && (
-          <div className="mt-2 border-t border-gray-100 pt-3">
-            <div className="max-h-48 overflow-y-auto">
-              <table className="min-w-full text-xs">
-                <thead>
-                  <tr className="text-left text-gray-500 border-b border-gray-200">
-                    <th className="pb-1 pr-2">Employee</th>
-                    <th className="pb-1 pr-2 text-right">Gross (UGX)</th>
-                    <th className="pb-1 pr-2 text-right">Bracket</th>
-                    <th className="pb-1 pr-2 text-right">Rate</th>
-                    <th className="pb-1 pr-2 text-right">PAYEE (UGX)</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {payeeData.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="pt-2 text-center text-gray-400">
-                        No data for this period.
-                      </td>
-                    </tr>
-                  ) : (
-                    payeeData.map((d) => (
-                      <tr key={d.employeeId} className="border-b border-gray-100">
-                        <td className="py-1.5 pr-2 text-gray-700">{d.employeeName}</td>
-                        <td className="py-1.5 pr-2 text-right text-gray-700">
-                          {d.grossAmount.toLocaleString()}
-                        </td>
-                        <td className="py-1.5 pr-2 text-right text-gray-500">
-                          {d.bracketLabel}
-                        </td>
-                        <td className="py-1.5 pr-2 text-right">
-                          {d.isTaxFree ? (
-                            <span className="text-green-600 font-medium">Tax Free</span>
-                          ) : (
-                            <span className="text-gray-700">{d.bracketRate}%</span>
-                          )}
-                        </td>
-                        <td className={`py-1.5 pr-2 text-right font-medium ${
-                          d.isTaxFree ? "text-green-600" : "text-red-600"
-                        }`}>
-                          {d.isTaxFree ? "0" : d.payeeTax.toLocaleString()}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-                <tfoot>
-                  <tr className="border-t border-gray-300 font-semibold">
-                    <td className="pt-1.5 pr-2 text-gray-900">Total</td>
-                    <td className="pt-1.5 pr-2 text-right text-gray-900">
-                      {payeeData.reduce((s, d) => s + d.grossAmount, 0).toLocaleString()}
-                    </td>
-                    <td colSpan={2} />
-                    <td className="pt-1.5 pr-2 text-right text-red-700">
-                      {totalPayee.toLocaleString()}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          </div>
-        )}
+  return <ChartCard title="PAYE" subtitle="Confirmed deductions in the selected period" variant="gradient" accentColor={palette.orange} headerDivider={false}
+    action={<button type="button" onClick={() => setExpanded(!expanded)} className="text-xs text-gray-500 hover:text-gray-900 font-medium">{expanded ? "Hide Details ▲" : "Show Details ▼"}</button>}>
+    <div className="flex flex-col h-full">
+      <div className="grid grid-cols-3 gap-2 mb-4">
+        <div className="text-center p-3 bg-orange-50 rounded-lg"><div className="text-xs text-orange-600 font-medium">Total PAYE</div><div className="text-lg font-bold text-orange-700">UGX {total.toLocaleString()}</div></div>
+        <div className="text-center p-3 bg-gray-50 rounded-lg"><div className="text-xs text-gray-500 font-medium">Employees paid</div><div className="text-lg font-bold text-gray-700">{rows.length}</div></div>
+        <div className="text-center p-3 bg-green-50 rounded-lg"><div className="text-xs text-green-600 font-medium">No PAYE withheld</div><div className="text-lg font-bold text-green-700">{rows.filter(row => row.paye === 0).length}</div></div>
       </div>
-    </ChartCard>
-  );
+      {expanded && <div className="overflow-x-auto max-h-48 overflow-y-auto border-t pt-3"><table className="min-w-full text-xs"><thead><tr className="text-left text-gray-500 border-b"><th className="pb-2">Employee</th><th className="pb-2 text-right">Gross</th><th className="pb-2 text-right">PAYE</th><th className="pb-2 text-right">Net</th></tr></thead><tbody>{rows.length ? rows.map(row => <tr key={row.id} className="border-b"><td className="py-2">{row.name}</td><td className="py-2 text-right">{row.gross.toLocaleString()}</td><td className="py-2 text-right">{row.paye.toLocaleString()}</td><td className="py-2 text-right">{row.net.toLocaleString()}</td></tr>) : <tr><td colSpan={4} className="py-3 text-center text-gray-400">No confirmed payments for this period.</td></tr>}</tbody></table></div>}
+    </div>
+  </ChartCard>;
 }

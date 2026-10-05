@@ -17,10 +17,12 @@ interface PayeePDFProps {
   totalPayee: number;
   taxableCount: number;
   taxFreeCount: number;
+  remittances?: Array<{ paymentDate: string; returnPeriod: string; uraReference: string; paymentSource: string; amount: number }>;
+  totalRemitted?: number;
 }
 
 export function PayeePDF({
-  title, period, rows, totalPayee, taxableCount, taxFreeCount,
+  title, period, rows, totalPayee, taxableCount, taxFreeCount, remittances = [], totalRemitted = 0,
 }: PayeePDFProps) {
   return (
     <Document>
@@ -31,10 +33,18 @@ export function PayeePDF({
         </View>
 
         <View style={pdfStyles.summaryBox}>
-          <Text style={pdfStyles.summaryTitle}>PAYEE Summary</Text>
+          <Text style={pdfStyles.summaryTitle}>PAYE Summary</Text>
           <View style={pdfStyles.summaryRow}>
-            <Text style={pdfStyles.summaryLabel}>Total PAYEE Collected</Text>
+            <Text style={pdfStyles.summaryLabel}>Total PAYE Withheld</Text>
             <Text style={{ fontSize: 11, fontWeight: "bold", color: "#dc2626" }}>UGX {totalPayee.toLocaleString()}</Text>
+          </View>
+          <View style={pdfStyles.summaryRow}>
+            <Text style={pdfStyles.summaryLabel}>PAYE Remitted to URA</Text>
+            <Text style={pdfStyles.summaryValue}>UGX {totalRemitted.toLocaleString()}</Text>
+          </View>
+          <View style={pdfStyles.summaryRow}>
+            <Text style={pdfStyles.summaryLabel}>Period Movement Outstanding</Text>
+            <Text style={pdfStyles.summaryValue}>UGX {(totalPayee - totalRemitted).toLocaleString()}</Text>
           </View>
           <View style={pdfStyles.summaryRow}>
             <Text style={pdfStyles.summaryLabel}>Taxable Employees</Text>
@@ -51,18 +61,40 @@ export function PayeePDF({
         </View>
 
         <View style={pdfStyles.section}>
-          <Text style={pdfStyles.sectionTitle}>Employee PAYEE Breakdown</Text>
+          <Text style={pdfStyles.sectionTitle}>PAYE Remittances to URA</Text>
+          <View style={pdfStyles.table}>
+            <View style={pdfStyles.tableRow}>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(17) }}><Text style={pdfStyles.tableCellHeader}>Date</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(18) }}><Text style={pdfStyles.tableCellHeader}>Return Period</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(29) }}><Text style={pdfStyles.tableCellHeader}>URA Reference / PRN</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(14) }}><Text style={pdfStyles.tableCellHeader}>Source</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(22) }}><Text style={pdfStyles.tableCellHeader}>Amount</Text></View>
+            </View>
+            {remittances.length === 0 ? <View style={pdfStyles.tableRow}><View style={{ ...pdfStyles.tableCol, width: "100%" }}><Text style={pdfStyles.tableCell}>No PAYE remittances found.</Text></View></View> : remittances.map((entry, index) => (
+              <View style={pdfStyles.tableRow} key={index}>
+                <View style={{ ...pdfStyles.tableCol, width: colWidth(17) }}><Text style={pdfStyles.tableCell}>{entry.paymentDate}</Text></View>
+                <View style={{ ...pdfStyles.tableCol, width: colWidth(18) }}><Text style={pdfStyles.tableCell}>{entry.returnPeriod}</Text></View>
+                <View style={{ ...pdfStyles.tableCol, width: colWidth(29) }}><Text style={pdfStyles.tableCell}>{entry.uraReference}</Text></View>
+                <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{entry.paymentSource}</Text></View>
+                <View style={{ ...pdfStyles.tableCol, width: colWidth(22) }}><Text style={pdfStyles.tableCell}>UGX {entry.amount.toLocaleString()}</Text></View>
+              </View>
+            ))}
+          </View>
+        </View>
+
+        <View style={pdfStyles.section}>
+          <Text style={pdfStyles.sectionTitle}>Employee PAYE Breakdown</Text>
           <View style={pdfStyles.table}>
             <View style={pdfStyles.tableRow}>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(20) }}><Text style={pdfStyles.tableCellHeader}>Employee</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(18) }}><Text style={pdfStyles.tableCellHeader}>Gross (UGX)</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(24) }}><Text style={pdfStyles.tableCellHeader}>Tax Bracket</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(14) }}><Text style={pdfStyles.tableCellHeader}>Rate</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(24) }}><Text style={pdfStyles.tableCellHeader}>PAYEE (UGX)</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(24) }}><Text style={pdfStyles.tableCellHeader}>PAYE (UGX)</Text></View>
             </View>
             {rows.length === 0 ? (
               <View style={pdfStyles.tableRow}>
-                <View style={{ ...pdfStyles.tableCol, width: "100%" }}><Text style={pdfStyles.tableCell}>No PAYEE data found.</Text></View>
+                <View style={{ ...pdfStyles.tableCol, width: "100%" }}><Text style={pdfStyles.tableCell}>No PAYE data found.</Text></View>
               </View>
             ) : (
               rows.map((r, i) => (
@@ -70,7 +102,7 @@ export function PayeePDF({
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(20) }}><Text style={pdfStyles.tableCell}>{r.employeeName}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(18) }}><Text style={pdfStyles.tableCell}>UGX {r.grossAmount.toLocaleString()}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(24) }}><Text style={pdfStyles.tableCell}>{r.bracketLabel}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{r.bracketRate === 0 ? "Tax Free" : `${r.bracketRate}%`}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{r.payeeTax === 0 ? "No PAYE" : r.bracketRate === 0 ? "Saved" : `${r.bracketRate}%`}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(24) }}><Text style={pdfStyles.tableCell}>{r.payeeTax === 0 ? "0 (Tax Free)" : `UGX ${r.payeeTax.toLocaleString()}`}</Text></View>
                 </View>
               ))

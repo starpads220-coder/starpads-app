@@ -7,6 +7,7 @@ import {
   updateDoc,
   doc,
   Timestamp,
+  serverTimestamp,
   orderBy,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
@@ -15,7 +16,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Employee, EmployeeRole, Department } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
+import { showToast } from "@/components/ui/Toast";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
+import { isEmployeeActive } from "@/lib/employees";
 
 const defaultForm: Omit<Employee, "id" | "dailyWageRate"> = {
   name: "",
@@ -23,6 +26,7 @@ const defaultForm: Omit<Employee, "id" | "dailyWageRate"> = {
   department: "PRODUCTION" as Department,
   startDate: new Date().toISOString().split("T")[0],
   isActive: true,
+  payeApplicable: true,
 };
 
 const roleOptions: EmployeeRole[] = [
@@ -38,12 +42,13 @@ const departmentOptions: Department[] = ["PRODUCTION", "STORAGE", "SALES"];
 
 export default function AdminEmployeesPage() {
   const queryClient = useQueryClient();
-  const { userRole } = useAuth();
+  const { user, userRole } = useAuth();
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState(defaultForm);
   const [saving, setSaving] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [statusSavingId, setStatusSavingId] = useState<string | null>(null);
 
   const { data: employees = [], isLoading } = useCollectionQuery<Employee>("employees", [
     orderBy("name"),
@@ -57,26 +62,27 @@ export default function AdminEmployeesPage() {
   const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
   const isAdmin = userRole?.role === "ADMIN";
   const isFinancialManager = userRole?.role === "FINANCIAL_MANAGER";
+  const isSalesManager = userRole?.role === "SALES_MANAGER";
   // Create & edit: admin, supervisor, financial manager.
   const canManageEmployees = isAdmin || isSupervisor || isFinancialManager;
-  // Deactivate / reactivate ("delete"): admin only.
-  const canToggleActive = isAdmin;
+  const canToggleActive = isAdmin || isSupervisor || isFinancialManager || isSalesManager;
 
   const visibleEmployees = useMemo(() => {
     if (isAdmin || isFinancialManager) return employees;
     if (isSupervisor && supervisorDepartment) {
       return employees.filter((e) => e.department === supervisorDepartment);
     }
+    if (isSalesManager) return employees.filter((e) => e.department === "SALES");
     return [];
-  }, [employees, isAdmin, isFinancialManager, isSupervisor, supervisorDepartment]);
+  }, [employees, isAdmin, isFinancialManager, isSupervisor, isSalesManager, supervisorDepartment]);
 
   const activeEmployees = useMemo(
-    () => visibleEmployees.filter((e) => e.isActive ?? e.active ?? true),
+    () => visibleEmployees.filter(isEmployeeActive),
     [visibleEmployees],
   );
 
   const deactivatedEmployees = useMemo(
-    () => visibleEmployees.filter((e) => !(e.isActive ?? e.active ?? true)),
+    () => visibleEmployees.filter((e) => !isEmployeeActive(e)),
     [visibleEmployees],
   );
 
@@ -111,6 +117,7 @@ export default function AdminEmployeesPage() {
       department: emp.department,
       startDate: emp.startDate,
       isActive: emp.isActive ?? emp.active ?? true,
+      payeApplicable: emp.payeApplicable ?? true,
     });
     setEditingId(emp.id);
     setShowForm(true);
@@ -135,12 +142,33 @@ export default function AdminEmployeesPage() {
     }
   };
 
-  const handleToggleActive = async (emp: Employee) => {
-    await updateDoc(doc(db, "employees", emp.id), {
-      isActive: !emp.isActive,
-    });
-    queryClient.invalidateQueries({ queryKey: ["employees"] });
-    setDeleteTarget(null);
+  const handleToggleActive = async (emp: Employee, nextActive: boolean) => {
+    if (!canToggleActive || !user || statusSavingId) return;
+    setStatusSavingId(emp.id);
+    try {
+      await updateDoc(doc(db, "employees", emp.id), {
+        isActive: nextActive,
+        statusChangedAt: serverTimestamp(),
+        statusChangedBy: user.uid,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["employees"] });
+      setDeleteTarget(null);
+      showToast(`${emp.name} was ${nextActive ? "reactivated" : "deactivated"}.`, "success");
+    } catch (error) {
+      showToast(`Could not ${nextActive ? "reactivate" : "deactivate"} ${emp.name}: ${error instanceof Error ? error.message : "Unknown error"}`, "error");
+    } finally {
+      setStatusSavingId(null);
+    }
+  };
+
+  const handleTogglePaye = async (emp: Employee) => {
+    try {
+      await updateDoc(doc(db, "employees", emp.id), { payeApplicable: emp.payeApplicable === false });
+      queryClient.invalidateQueries({ queryKey: ["employees"] });
+      showToast(`PAYE applicability updated for ${emp.name}.`, "success");
+    } catch (error) {
+      showToast(`Could not update PAYE applicability: ${error instanceof Error ? error.message : "Unknown error"}`, "error");
+    }
   };
 
   return (
@@ -203,6 +231,11 @@ export default function AdminEmployeesPage() {
                 <input type="date" value={form.startDate} onChange={(e) => setForm({ ...form, startDate: e.target.value })}
                   required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-stock-blue" />
               </div>
+              <label className="flex items-center gap-2 text-sm font-medium text-gray-700">
+                <input type="checkbox" checked={form.payeApplicable !== false}
+                  onChange={(e) => setForm({ ...form, payeApplicable: e.target.checked })} />
+                PAYE applicable
+              </label>
             </div>
             <div className="flex justify-end gap-3">
               <button type="button" onClick={resetForm}
@@ -226,12 +259,13 @@ export default function AdminEmployeesPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Department</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">PAYE</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
                 {activeEmployees.length === 0 ? (
-                  <tr><td colSpan={5} className="px-4 py-8 text-center text-gray-400">No employees found.</td></tr>
+                  <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">No employees found.</td></tr>
                 ) : activeEmployees.map((emp, i) => (
                   <tr key={emp.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">{emp.name}</td>
@@ -240,16 +274,17 @@ export default function AdminEmployeesPage() {
                       {emp.department ? emp.department.charAt(0) + emp.department.slice(1).toLowerCase() : "—"}
                     </td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${(emp.isActive ?? emp.active) ? "bg-performance-green/10 text-performance-green" : "bg-gray-100 text-gray-500"}`}>
-                        {(emp.isActive ?? emp.active) ? "Active" : "Inactive"}
+                      <span className="inline-flex px-2 py-0.5 rounded-full text-xs font-medium bg-performance-green/10 text-performance-green">
+                        Active
                       </span>
                     </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{emp.payeApplicable === false ? "Not applicable" : "Applicable"}{isFinancialManager && <button type="button" onClick={() => handleTogglePaye(emp)} className="ml-2 text-xs text-blue-700 hover:underline">Change</button>}</td>
                     <td className="px-4 py-3 text-right">
                       {canManageEmployees && (
                         <button onClick={() => handleEdit(emp)} className="text-sm text-stock-blue hover:underline mr-3">Edit</button>
                       )}
                       {canToggleActive && (
-                        <button onClick={() => setDeleteTarget(emp.id)} className="text-sm text-performance-red hover:underline">
+                        <button disabled={statusSavingId !== null} onClick={() => setDeleteTarget(emp.id)} className="text-sm text-performance-red hover:underline disabled:opacity-50">
                           Deactivate
                         </button>
                       )}
@@ -261,45 +296,43 @@ export default function AdminEmployeesPage() {
           </div>
         )}
 
-        {deactivatedEmployees.length > 0 && (
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-4">
             <div className="flex items-center justify-between mb-3">
               <h2 className="text-sm font-semibold text-gray-900">Deactivated Employees</h2>
               <span className="text-xs text-gray-500">{deactivatedEmployees.length} deactivated</span>
             </div>
             <div className="space-y-2">
-              {deactivatedEmployees.map((emp) => (
+              {deactivatedEmployees.length === 0 ? <p className="py-4 text-center text-sm text-gray-400">No deactivated employees.</p> : deactivatedEmployees.map((emp) => (
                 <div key={emp.id} className="flex items-center justify-between rounded-md bg-gray-50 border border-gray-100 px-3 py-2">
                   <div>
                     <span className="text-sm font-medium text-gray-700">{emp.name}</span>
                     <span className="text-xs text-gray-400 ml-2">{emp.role.replace(/_/g, " ")}</span>
+                    <div className="mt-1 text-xs text-gray-500">
+                      {emp.department ? emp.department.replace(/_/g, " ") : "No department"} · Started {emp.startDate || "—"} · PAYE {emp.payeApplicable === false ? "not applicable" : "applicable"}
+                    </div>
                   </div>
                   {canToggleActive && (
                     <button
-                      onClick={() => setDeleteTarget(emp.id)}
-                      className="text-sm text-stock-blue hover:underline"
+                      disabled={statusSavingId !== null}
+                      onClick={() => handleToggleActive(emp, true)}
+                      className="text-sm text-stock-blue hover:underline disabled:opacity-50"
                     >
-                      Reactivate
+                      {statusSavingId === emp.id ? "Reactivating..." : "Reactivate"}
                     </button>
                   )}
                 </div>
               ))}
             </div>
           </div>
-        )}
 
         <ConfirmDialog
           open={deleteTarget !== null}
-          title={(employees.find((e) => e.id === deleteTarget)?.isActive ?? employees.find((e) => e.id === deleteTarget)?.active) ? "Deactivate Employee" : "Reactivate Employee"}
-          message={
-            (employees.find((e) => e.id === deleteTarget)?.isActive ?? employees.find((e) => e.id === deleteTarget)?.active)
-              ? "This employee will no longer appear in production entry forms and other active selections, but all their records will be preserved. You can reactivate them later."
-              : "This employee will reappear in production entry forms and become active again."
-          }
-          confirmLabel={(employees.find((e) => e.id === deleteTarget)?.isActive ?? employees.find((e) => e.id === deleteTarget)?.active) ? "Deactivate" : "Reactivate"}
+          title="Deactivate Employee"
+          message="This employee will no longer appear in production entry forms and other active selections, but all their records will be preserved. You can reactivate them later."
+          confirmLabel="Deactivate"
           onConfirm={async () => {
             const emp = employees.find((e) => e.id === deleteTarget);
-            if (emp) await handleToggleActive(emp);
+            if (emp) await handleToggleActive(emp, false);
           }}
           onCancel={() => setDeleteTarget(null)}
           variant="warning"

@@ -13,7 +13,7 @@ import { NssfPDF } from "@/components/reports/NssfPDF";
 import { PayeePDF } from "@/components/reports/PayeePDF";
 import type { ProductionEntry, SaleTransaction, Expense, StockIn, StockOut, Batch, Employee, Payment } from "@/types";
 import type { StageId } from "@/types";
-import { computeNssfEmployee, computeNssfBusiness, computePayeeTax, getPayeeBracket } from "@/lib/deductions";
+import { computeNssfEmployee, computeNssfBusiness } from "@/lib/deductions";
 
 const VALID_SCREENS = ["production", "storage", "sales", "expenses", "analytics", "payments", "worker", "nssf", "payee"] as const;
 type Screen = (typeof VALID_SCREENS)[number];
@@ -325,6 +325,8 @@ export async function GET(request: NextRequest) {
           .get();
 
         const prodEntries = entriesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductionEntry));
+        const paymentSnap = await db.collection("payments").where("paidDate", ">=", startDate).where("paidDate", "<=", endDate).limit(2000).get();
+        const savedPayments = paymentSnap.docs.map(doc => doc.data()).filter(payment => payment.status === "paid");
 
         let totalDue = 0;
         let totalPaid = 0;
@@ -349,11 +351,12 @@ export async function GET(request: NextRequest) {
           }
         });
 
-        const workerBreakdown = Object.entries(workerMap).map(([, w]) => {
-          const gross = w.due + w.paid;
-          const nssfEmp = computeNssfEmployee(gross);
-          const nssfBus = computeNssfBusiness(gross);
-          const payee = computePayeeTax(gross);
+        const workerBreakdown = Object.entries(workerMap).map(([employeeKey, w]) => {
+          const employeePayments = savedPayments.filter(payment => payment.employeeId === employeeKey);
+          const nssfEmp = employeePayments.reduce((sum, payment) => sum + Number(payment.nssfEmployeeDeduction ?? 0), 0);
+          const nssfBus = employeePayments.reduce((sum, payment) => sum + Number(payment.nssfBusinessContribution ?? 0), 0);
+          const payee = employeePayments.reduce((sum, payment) => sum + Number(payment.payeeTax ?? 0), 0);
+          const netPaid = employeePayments.reduce((sum, payment) => sum + Number(payment.netPayAmount ?? ((payment.grossAmount ?? payment.totalAmount ?? 0) - (payment.nssfEmployeeDeduction ?? 0) - (payment.payeeTax ?? 0))), 0);
           totalNssfEmployee += nssfEmp;
           totalNssfBusiness += nssfBus;
           totalPayee += payee;
@@ -365,14 +368,12 @@ export async function GET(request: NextRequest) {
             nssfEmployee: nssfEmp,
             nssfBusiness: nssfBus,
             payeeTax: payee,
-            netPay: gross - nssfEmp - payee,
+            netPay: netPaid,
           };
         });
 
         const entries = prodEntries.map((e) => {
           const gross = e.earningsUgx || 0;
-          const nssfEmp = computeNssfEmployee(gross);
-          const payee = computePayeeTax(gross);
           return {
             date: e.date,
             employeeName: employees[e.employeeId] || e.employeeId,
@@ -380,9 +381,9 @@ export async function GET(request: NextRequest) {
             actualPieces: e.actualPieces || 0,
             earningsUgx: gross,
             status: e.paymentStatus === "paid" ? "Paid" : "Due",
-            nssfEmployee: nssfEmp,
-            payeeTax: payee,
-            netPay: gross - nssfEmp - payee,
+            nssfEmployee: null,
+            payeeTax: null,
+            netPay: null,
           };
         });
 
@@ -461,28 +462,20 @@ export async function GET(request: NextRequest) {
           .map(([sid, value]) => ({ label: sid, value }))
           .sort((a, b) => b.value - a.value);
 
-        const paymentHistory = prodEntries.map((e) => {
-          const gross = e.earningsUgx || 0;
-          const nssfEmp = computeNssfEmployee(gross);
-          const nssfBus = computeNssfBusiness(gross);
-          const payee = computePayeeTax(gross);
+        const paymentHistory = paymentsList.filter(payment => payment.status === "paid" && payment.paidDate >= startDate && payment.paidDate <= endDate).map(payment => {
+          const gross = payment.grossAmount ?? payment.totalAmount ?? payment.amountUgx ?? 0;
+          const nssfEmp = payment.nssfEmployeeDeduction ?? 0;
+          const nssfBus = payment.nssfBusinessContribution ?? 0;
+          const payee = payment.payeeTax ?? 0;
           totalNssfEmployee += nssfEmp;
           totalNssfBusiness += nssfBus;
           totalPayee += payee;
-          return {
-            date: e.date,
-            stageId: e.stageId,
-            actualPieces: e.actualPieces || 0,
-            earningsUgx: gross,
-            status: e.paymentStatus === "paid" ? "Paid" : "Due",
-            nssfEmployee: nssfEmp,
-            nssfBusiness: nssfBus,
-            payeeTax: payee,
-            netPay: gross - nssfEmp - payee,
-          };
+          return { date: payment.paidDate, receiptNumber: payment.receiptNumber ?? "—", earningsUgx: gross,
+            nssfEmployee: nssfEmp, payeeTax: payee,
+            netPay: payment.netPayAmount ?? (gross - nssfEmp - payee) };
         });
 
-        const totalNetPay = totalEarnings - totalNssfEmployee - totalPayee;
+        const totalNetPay = paymentHistory.reduce((sum, payment) => sum + payment.netPay, 0);
 
         pdfElement = React.createElement(WorkerPDF, {
           title,
@@ -551,40 +544,45 @@ export async function GET(request: NextRequest) {
       }
 
       case "payee": {
-        let queryPayee: FirebaseFirestore.Query = db
-          .collection("productionEntries")
-          .where("date", ">=", startDate)
-          .where("date", "<=", endDate);
-        if (employeeId) {
-          queryPayee = queryPayee.where("employeeId", "==", employeeId);
-        }
-        const entriesSnapPayee = await queryPayee.orderBy("date", "asc").limit(2000).get();
-
-        const prodEntriesPayee = entriesSnapPayee.docs.map((d) => ({ id: d.id, ...d.data() } as ProductionEntry));
-
-        const payeeWorkerMap: Record<string, { gross: number; name: string }> = {};
-        prodEntriesPayee.forEach((e) => {
-          if (!payeeWorkerMap[e.employeeId]) {
-            payeeWorkerMap[e.employeeId] = { gross: 0, name: employees[e.employeeId] || e.employeeId };
+        const [savedPayments, savedRemittances] = await Promise.all([
+          db.collection("payments").where("paidDate", ">=", startDate).where("paidDate", "<=", endDate).limit(2000).get(),
+          db.collection("payeRemittances").where("paymentDate", ">=", startDate).where("paymentDate", "<=", endDate).limit(2000).get(),
+        ]);
+        const payeeWorkerMap: Record<string, { gross: number; name: string; tax: number; bracketLabel: string; bracketRate: number }> = {};
+        savedPayments.docs.forEach(doc => {
+          const payment = doc.data();
+          if (payment.status !== "paid" || (employeeId && payment.employeeId !== employeeId)) return;
+          const id = String(payment.employeeId);
+          const row = payeeWorkerMap[id] ?? { gross: 0, name: employees[id] || id, tax: 0, bracketLabel: "Saved deductions", bracketRate: 0 };
+          row.gross += Number(payment.grossAmount ?? payment.totalAmount ?? 0);
+          row.tax += Number(payment.payeeTax ?? 0);
+          const bands = payment.payeBandBreakdown as Array<{ ratePercent: number; taxableAmount: number }> | undefined;
+          if (bands?.length) {
+            const highest = [...bands].reverse().find(band => band.taxableAmount > 0);
+            row.bracketRate = highest?.ratePercent ?? 0;
+            row.bracketLabel = "Progressive PAYE";
           }
-          payeeWorkerMap[e.employeeId].gross += e.earningsUgx || 0;
+          payeeWorkerMap[id] = row;
         });
-
-        const payeeRows = Object.entries(payeeWorkerMap).map(([, w]) => {
-          const bracket = getPayeeBracket(w.gross);
-          const tax = computePayeeTax(w.gross);
-          return {
-            employeeName: w.name,
-            grossAmount: w.gross,
-            bracketLabel: bracket.label,
-            bracketRate: bracket.rate,
-            payeeTax: tax,
-          };
-        });
+        const payeeRows = Object.values(payeeWorkerMap).map(row => ({
+          employeeName: row.name, grossAmount: row.gross, bracketLabel: row.bracketLabel,
+          bracketRate: row.bracketRate, payeeTax: row.tax,
+        }));
 
         const totalPayeeCollected = payeeRows.reduce((s, r) => s + r.payeeTax, 0);
         const taxableCount = payeeRows.filter((r) => r.payeeTax > 0).length;
         const taxFreeCount = payeeRows.length - taxableCount;
+        const remittances = savedRemittances.docs.map(document => {
+          const entry = document.data();
+          return {
+            paymentDate: String(entry.paymentDate ?? ""),
+            returnPeriod: String(entry.returnPeriod ?? ""),
+            uraReference: String(entry.uraReference ?? ""),
+            paymentSource: entry.paymentSourceCode === "1000" ? "Bank" : "Cash",
+            amount: Number(entry.amount) || 0,
+          };
+        }).sort((a, b) => a.paymentDate.localeCompare(b.paymentDate));
+        const totalRemitted = remittances.reduce((sum, entry) => sum + entry.amount, 0);
 
         pdfElement = React.createElement(PayeePDF, {
           title,
@@ -593,6 +591,8 @@ export async function GET(request: NextRequest) {
           totalPayee: totalPayeeCollected,
           taxableCount,
           taxFreeCount,
+          remittances,
+          totalRemitted,
         });
         break;
       }
@@ -604,7 +604,7 @@ export async function GET(request: NextRequest) {
         );
     }
 
-    const stream = await renderToStream(pdfElement as React.ReactElement<any>);
+    const stream = await renderToStream(pdfElement as Parameters<typeof renderToStream>[0]);
 
     return new NextResponse(stream as unknown as ReadableStream, {
       headers: {

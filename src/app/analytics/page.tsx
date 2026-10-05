@@ -27,6 +27,7 @@ import { RouteGuard } from "@/components/auth/RouteGuard";
 import { KpiCard } from "@/components/ui/KpiCard";
 import { ChartCard } from "@/components/ui/ChartCard";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
+import { isEmployeeActive } from "@/lib/employees";
 import { ComboBarLineChart } from "@/components/charts/ComboBarLineChart";
 import { GradientHorizontalBarChart } from "@/components/charts/GradientHorizontalBarChart";
 import { RadialBarChart } from "@/components/charts/RadialBarChart";
@@ -422,7 +423,7 @@ export default function AnalyticsPage() {
     const ms = `${monthStart.getFullYear()}-${String(monthStart.getMonth() + 1).padStart(2, "0")}-01`;
     const perf: { label: string; value: number; color: string }[] = [];
     employees
-      .filter((e) => e.active)
+      .filter(isEmployeeActive)
       .slice(0, 10)
       .forEach((emp) => {
         const workerEntries = entries.filter((e) => e.employeeId === emp.id && e.date >= ms);

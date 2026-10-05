@@ -40,6 +40,7 @@ import { useCollectionQuery } from "@/hooks/use-firestore-query";
 import { ReportCard } from "@/components/reports/ReportCard";
 import { ChartCard } from "@/components/ui/ChartCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
+import { isEmployeeActive } from "@/lib/employees";
 
 const SalesCharts = dynamic(() => import("@/components/sales/SalesCharts"), {
   ssr: false,
@@ -233,10 +234,9 @@ export default function SalesPage() {
     salespersonName: string;
   } | null>(null);
 
-  // Keep this aligned with the active worker source used by Production. The
-  // Salesperson dropdown is still restricted to the three approved names.
+  // Load the full directory so historical sales retain employee names. Only
+  // active employees are offered for new sales below.
   const { data: employees = [] } = useCollectionQuery<{ id: string; name: string; role: string; department: string; isActive?: boolean; active?: boolean }>("employees", [
-    where("isActive", "==", true),
     orderBy("name"),
   ], { staleTime: 10 * 60 * 1000 });
 
@@ -498,7 +498,8 @@ export default function SalesPage() {
   const formDiscountPercent = expectedTotal > 0 ? (formDiscountAmount / expectedTotal) * 100 : 0;
 
   const salespersonEmployees = employees.filter((employee) =>
-    SALES_PERSON_NAME_KEYS.has(normalizeEmployeeName(employee.name)),
+    SALES_PERSON_NAME_KEYS.has(normalizeEmployeeName(employee.name))
+      && (isEmployeeActive(employee) || (!!editingId && employee.id === form.salespersonId)),
   );
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {

@@ -167,6 +167,9 @@ interface PaymentReceiptPDFProps {
   nssfEmployeeDeduction: number;
   nssfBusinessContribution: number;
   payeeTax: number;
+  payeBandBreakdown?: Array<{ ratePercent: number; taxableAmount: number; taxAmount: number }>;
+  payePreviouslyWithheld?: number;
+  paymentSourceCode?: "1000" | "1030";
   netPayAmount: number;
   totalAmount: number;
 }
@@ -183,8 +186,10 @@ export const PaymentReceiptPDF = ({
   nssfEmployeeDeduction,
   nssfBusinessContribution,
   payeeTax,
+  payeBandBreakdown,
+  payePreviouslyWithheld,
+  paymentSourceCode,
   netPayAmount,
-  totalAmount,
 }: PaymentReceiptPDFProps) => (
   <Document>
     <Page size="A4" style={styles.page}>
@@ -211,6 +216,7 @@ export const PaymentReceiptPDF = ({
           <Text style={styles.infoLabel}>Date Paid:</Text>
           <Text style={styles.infoValue}>{paidDate}</Text>
         </View>
+        {paymentSourceCode && <View style={styles.infoRow}><Text style={styles.infoLabel}>Paid from:</Text><Text style={styles.infoValue}>{paymentSourceCode === "1000" ? "Bank" : "Cash"}</Text></View>}
       </View>
 
       <View style={styles.table}>
@@ -244,9 +250,11 @@ export const PaymentReceiptPDF = ({
           <Text style={{ fontSize: 11, fontWeight: "bold", color: "#dc2626" }}>- UGX {nssfEmployeeDeduction.toLocaleString()}</Text>
         </View>
         <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}>
-          <Text style={{ fontSize: 11, color: "#666" }}>PAYEE Tax</Text>
+          <Text style={{ fontSize: 11, color: "#666" }}>PAYE Tax</Text>
           <Text style={{ fontSize: 11, fontWeight: "bold", color: "#dc2626" }}>- UGX {payeeTax.toLocaleString()}</Text>
         </View>
+        {payeBandBreakdown?.filter(band => band.taxableAmount > 0).map((band, index) => <View key={index} style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 3 }}><Text style={{ fontSize: 9, color: "#666" }}>{band.ratePercent}% of UGX {band.taxableAmount.toLocaleString()} (monthly cumulative)</Text><Text style={{ fontSize: 9, color: "#666" }}>UGX {Math.round(band.taxAmount).toLocaleString()}</Text></View>)}
+        {(payePreviouslyWithheld ?? 0) > 0 && <View style={{ flexDirection: "row", justifyContent: "space-between", marginBottom: 4 }}><Text style={{ fontSize: 9, color: "#666" }}>Already withheld this month</Text><Text style={{ fontSize: 9, color: "#666" }}>- UGX {payePreviouslyWithheld?.toLocaleString()}</Text></View>}
         <View style={{ borderTopWidth: 1, borderTopColor: "#111", paddingTop: 4, marginTop: 2, flexDirection: "row", justifyContent: "space-between" }}>
           <Text style={{ fontSize: 13, fontWeight: "bold" }}>Net Pay</Text>
           <Text style={{ fontSize: 13, fontWeight: "bold", color: "#059669" }}>UGX {netPayAmount.toLocaleString()}</Text>
@@ -258,7 +266,7 @@ export const PaymentReceiptPDF = ({
       </View>
 
       <Text style={styles.amountPaid}>
-        Total Paid: UGX {totalAmount.toLocaleString()}
+        Total Paid: UGX {netPayAmount.toLocaleString()}
       </Text>
 
       <View style={styles.signature}>

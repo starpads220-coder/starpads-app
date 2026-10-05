@@ -27,6 +27,7 @@ import { palette } from "@/components/charts";
 import { showToast } from "@/components/ui/Toast";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
+import { activeEmployeeOptions } from "@/lib/employees";
 
 const PADS_PER_PACK = 3;
 
@@ -400,11 +401,9 @@ export default function StoragePage() {
     setSaving(true);
     try {
       // ── Sequential batch enforcement ──────────────────────────────────────
-      // Determine the oldest ACTIVE batch at submit time (freshest from state)
-      const activeBatches = batches.filter((b) => b.status === "ACTIVE");
-      const oldestActive = activeBatches.length > 0
-        ? activeBatches.reduce((oldest, b) => b.startDate < oldest.startDate ? b : oldest)
-        : null;
+      // Use the same eligible active batch shown by the form. Completed-capacity
+      // ACTIVE records must not block stock going into the current batch.
+      const oldestActive = oldestActiveBatch;
 
       if (oldestActive && stockInForm.batchRef !== oldestActive.id) {
         const batchNum = oldestActive.batchNumber;
@@ -926,7 +925,7 @@ export default function StoragePage() {
               <select value={stockInForm.receivedBy} onChange={(e) => setStockInForm({ ...stockInForm, receivedBy: e.target.value })}
                 required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                 <option value="">Select...</option>
-                {employees.filter((e) => e.isActive !== false && e.active !== false).map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
+                {activeEmployeeOptions(employees).map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
               </select>
             </div>
             <div>
@@ -1099,7 +1098,7 @@ export default function StoragePage() {
               <select value={stockOutForm.dispatchedBy} onChange={(e) => setStockOutForm({ ...stockOutForm, dispatchedBy: e.target.value })}
                 required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
                 <option value="">Select...</option>
-                {employees.filter((e) => e.isActive !== false && e.active !== false).map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
+                {activeEmployeeOptions(employees).map((e) => (<option key={e.id} value={e.id}>{e.name}</option>))}
               </select>
             </div>
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, FormEvent } from "react";
+import { useState, useMemo, FormEvent } from "react";
 import {
   collection,
   addDoc,
@@ -15,6 +15,7 @@ import { db } from "@/lib/firebase";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { STAGE_LABELS, STAGE_ORDER, StageId, MaterialType } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
+import { isEmployeeActive } from "@/lib/employees";
 
 interface StageTarget {
   id?: string;
@@ -106,9 +107,17 @@ export default function AdminTargetsPage() {
     orderBy("stageId"),
   ], { staleTime: 10 * 60 * 1000 });
 
-  const { data: employees = [] } = useCollectionQuery<{ id: string; name: string }>("workers", [
+  const { data: workers = [] } = useCollectionQuery<{ id: string; name: string }>("workers", [
     orderBy("name"),
   ], { staleTime: 10 * 60 * 1000 });
+  const { data: employeeDirectory = [] } = useCollectionQuery<{ id: string; name: string; isActive?: boolean; active?: boolean }>("employees", [
+    orderBy("name"),
+  ], { staleTime: 10 * 60 * 1000 });
+  const employees = useMemo(() => workers.filter(worker => {
+    const normalized = worker.name.trim().toLowerCase();
+    const employee = employeeDirectory.find(item => item.id === worker.id || item.name.trim().toLowerCase() === normalized);
+    return !employee || isEmployeeActive(employee);
+  }), [workers, employeeDirectory]);
 
   const { data: workerTargets = [], isLoading } = useCollectionQuery<WorkerTarget>("targetConfigs", [
     orderBy("effectiveDate", "desc"),

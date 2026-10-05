@@ -8,13 +8,14 @@ import {
   query,
   orderBy,
   onSnapshot,
-  writeBatch,
+  runTransaction,
   doc,
   deleteDoc,
   Timestamp,
   limit,
   where,
-  getDocs,
+  getDocsFromServer,
+  getDocFromServer,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
@@ -36,13 +37,20 @@ import { palette } from "@/components/charts";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import {
-  computeAllDeductions,
   computeNssfEmployee,
   computeNssfBusiness,
-  computePayeeTax,
+  calculateProgressivePaye,
+  type PayeBand,
+  type PayeBandResult,
 } from "@/lib/deductions";
+import { usePayeSettings } from "@/hooks/use-paye-settings";
+import { PAYE_SETTINGS_REF } from "@/hooks/use-paye-settings";
+import { DEFAULT_PAYE_BANDS } from "@/lib/deductions";
+import { useRealtimeCollection } from "@/hooks/use-firestore-query";
 import { NssfCard } from "@/components/payments/NssfCard";
 import { PayeeCard } from "@/components/payments/PayeeCard";
+import { PayeRemittanceCard } from "@/components/payments/PayeRemittanceCard";
+import { isEmployeeActive } from "@/lib/employees";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
 type ActiveTab = "employees" | "dates";
@@ -76,28 +84,33 @@ function getMonthBounds(dateStr: string) {
 async function getCumulativePayeeForEmployee(
   employeeId: string,
   currentPaymentGross: number,
-  todayStr: string
-): Promise<number> {
+  todayStr: string,
+  bands: PayeBand[],
+  applicable: boolean,
+): Promise<{ tax: number; breakdown: PayeBandResult[]; previousWithheld: number }> {
+  if (!applicable) return { tax: 0, breakdown: [], previousWithheld: 0 };
   const { monthStart, monthEnd } = getMonthBounds(todayStr);
-  const existingPaymentsSnap = await getDocs(
+  const existingPaymentsSnap = await getDocsFromServer(
     query(
       collection(db, "payments"),
       where("employeeId", "==", employeeId),
       where("paidDate", ">=", monthStart),
-      where("paidDate", "<=", monthEnd)
+      where("paidDate", "<=", monthEnd),
+      orderBy("paidDate", "desc")
     )
   );
-  const alreadyPaidPayee = existingPaymentsSnap.docs.reduce(
-    (sum, d) => sum + ((d.data().payeeTax as number) || 0),
+  const confirmed = existingPaymentsSnap.docs.filter(d => d.data().status === "paid" && d.data().payeApplicable !== false);
+  const alreadyPaidPayee = confirmed.reduce(
+    (sum, d) => sum + (Number(d.data().payeeTax) || 0),
     0
   );
-  const existingGross = existingPaymentsSnap.docs.reduce(
-    (sum, d) => sum + ((d.data().grossAmount as number) || 0),
+  const existingGross = confirmed.reduce(
+    (sum, d) => sum + (Number(d.data().grossAmount ?? d.data().totalAmount) || 0),
     0
   );
   const totalMonthlyGross = existingGross + currentPaymentGross;
-  const totalPayeeDue = computePayeeTax(totalMonthlyGross);
-  return totalPayeeDue - alreadyPaidPayee;
+  const calculated = calculateProgressivePaye(totalMonthlyGross, bands);
+  return { tax: Math.max(0, calculated.tax - alreadyPaidPayee), breakdown: calculated.breakdown, previousWithheld: alreadyPaidPayee };
 }
 
 async function getNextReceiptNumber(): Promise<string> {
@@ -147,7 +160,10 @@ export default function PaymentsPage() {
 
   const [payEmployeeId, setPayEmployeeId] = useState<string | null>(null);
   const [payProcessing, setPayProcessing] = useState(false);
-  const [modalPayeeTax, setModalPayeeTax] = useState<number | null>(null);
+  const [modalPayePreview, setModalPayePreview] = useState<{ key: string; tax: number; breakdown: PayeBandResult[]; previousWithheld: number } | null>(null);
+  const [paymentSourceCode, setPaymentSourceCode] = useState<"" | "1000" | "1030">("");
+  const { bands: payeBands, loading: payeSettingsLoading, error: payeSettingsError } = usePayeSettings();
+  const confirmedPayments = useRealtimeCollection<Payment>("payments");
 
   const { data: employees = [] } = useCollectionQuery<Employee>("employees", [
     orderBy("name"),
@@ -174,6 +190,20 @@ export default function PaymentsPage() {
     entries.filter((e) => e.date >= start && e.date <= end),
     [entries, start, end]
   );
+  const periodConfirmedPayments = useMemo(() => confirmedPayments.data.filter(payment => payment.status === "paid" && payment.paidDate >= start && payment.paidDate <= end), [confirmedPayments.data, start, end]);
+  const confirmedTotalsByEmployee = useMemo(() => {
+    const totals = new Map<string, { gross: number; paye: number; net: number }>();
+    for (const payment of periodConfirmedPayments) {
+      const row = totals.get(payment.employeeId) ?? { gross: 0, paye: 0, net: 0 };
+      const gross = payment.grossAmount ?? payment.totalAmount ?? payment.amountUgx ?? 0;
+      const paye = payment.payeeTax ?? 0;
+      row.gross += gross;
+      row.paye += paye;
+      row.net += payment.netPayAmount ?? (gross - (payment.nssfEmployeeDeduction ?? 0) - paye);
+      totals.set(payment.employeeId, row);
+    }
+    return totals;
+  }, [periodConfirmedPayments]);
 
   const supervisorDepartment = useMemo(() =>
     userRole?.role === "PRODUCTION_SUPERVISOR" && userRole?.employeeId
@@ -182,9 +212,11 @@ export default function PaymentsPage() {
     [userRole, employees]
   );
 
+  // Keep inactive workers in payment records so earned/unpaid amounts and all
+  // historical totals remain visible. Payment confirmation is blocked below.
   const productionEmployees = useMemo(() =>
     employees.filter(
-      (e) => (supervisorDepartment ? e.department === supervisorDepartment : e.department === "PRODUCTION") && (e.isActive !== false && e.active !== false)
+      (e) => supervisorDepartment ? e.department === supervisorDepartment : e.department === "PRODUCTION"
     ),
     [employees, supervisorDepartment]
   );
@@ -330,47 +362,68 @@ export default function PaymentsPage() {
       await deleteDoc(doc(db, "productionEntries", entryId));
       showToast("Entry deleted successfully.", "success");
       setDeleteConfirmEntryId(null);
-    } catch (err: any) {
-      showToast(`Failed to delete entry: ${err?.message || "Unknown error"}`, "error");
+    } catch (err: unknown) {
+      showToast(`Failed to delete entry: ${err instanceof Error ? err.message : "Unknown error"}`, "error");
     }
   };
 
   const payEmployee = employeePayments.find((e) => e.employeeId === payEmployeeId);
+  const payeApplicable = employees.find(e => e.id === payEmployeeId)?.payeApplicable !== false;
+  const previewEmployeeId = payEmployee?.employeeId;
+  const previewGross = payEmployee?.dueAmount;
+  const payePreviewKey = `${previewEmployeeId ?? ""}|${previewGross ?? ""}|${payeApplicable}|${JSON.stringify(payeBands)}`;
+  const modalPayeeTax = modalPayePreview?.key === payePreviewKey ? modalPayePreview.tax : null;
+  const modalPayeBreakdown = modalPayePreview?.key === payePreviewKey ? modalPayePreview.breakdown : [];
+  const modalPreviouslyWithheld = modalPayePreview?.key === payePreviewKey ? modalPayePreview.previousWithheld : 0;
 
   useEffect(() => {
+    if (!previewEmployeeId || !previewGross) return;
     let cancelled = false;
-    if (!payEmployee || payEmployee.dueEntries.length === 0) {
-      setModalPayeeTax(null);
-      return;
-    }
     const todayStr = new Date().toISOString().split("T")[0];
-    getCumulativePayeeForEmployee(payEmployee.employeeId, payEmployee.dueAmount, todayStr)
-      .then((v) => { if (!cancelled) setModalPayeeTax(v); })
-      .catch(() => { if (!cancelled) setModalPayeeTax(computePayeeTax(payEmployee.dueAmount)); });
+    getCumulativePayeeForEmployee(previewEmployeeId, previewGross, todayStr, payeBands, payeApplicable)
+      .then((result) => { if (!cancelled) setModalPayePreview({ key: payePreviewKey, ...result }); })
+      .catch(() => { if (!cancelled) setModalPayePreview(null); });
     return () => { cancelled = true; };
-  }, [payEmployee?.employeeId, payEmployee?.dueAmount]);
+  }, [previewEmployeeId, previewGross, payeBands, payeApplicable, payePreviewKey]);
 
   const handlePayConfirm = async () => {
-    if (!payEmployee || payEmployee.dueEntries.length === 0) return;
+    if (!payEmployee || payEmployee.dueEntries.length === 0 || payProcessing) return;
+    if (!paymentSourceCode) { showToast("Select Cash or Bank before confirming payment.", "error"); return; }
+    if (payeSettingsLoading || payeSettingsError || modalPayeeTax === null) { showToast("PAYE could not be verified. Please wait or check settings before confirming.", "error"); return; }
     setPayProcessing(true);
     try {
       const receiptNumber = await getNextReceiptNumber();
       const todayStr = new Date().toISOString().split("T")[0];
+      const [currentEmployee, currentSettings] = await Promise.all([
+        getDocFromServer(doc(db, "employees", payEmployee.employeeId)),
+        getDocFromServer(doc(db, "payeSettings", PAYE_SETTINGS_REF)),
+      ]);
+      if (!currentEmployee.exists()) throw new Error("Employee record no longer exists.");
+      const currentApplicable = currentEmployee.data().payeApplicable !== false;
+      if (!isEmployeeActive(currentEmployee.data())) {
+        throw new Error("This employee is deactivated. Reactivate them before confirming a new payment.");
+      }
+      const currentBands = (currentSettings.data()?.bands as PayeBand[] | undefined) ?? DEFAULT_PAYE_BANDS;
+      calculateProgressivePaye(0, currentBands);
+      if (currentApplicable !== payeApplicable || JSON.stringify(currentBands) !== JSON.stringify(payeBands)) {
+        throw new Error("PAYE settings or employee eligibility changed. Review the updated calculation before confirming.");
+      }
 
       const grossAmount = payEmployee.dueAmount;
       const nssfEmployeeDeduction = computeNssfEmployee(grossAmount);
       const nssfBusinessContribution = computeNssfBusiness(grossAmount);
-      const payeeTax = await getCumulativePayeeForEmployee(
+      const payeResult = await getCumulativePayeeForEmployee(
         payEmployee.employeeId,
         grossAmount,
-        todayStr
+        todayStr,
+        currentBands,
+        currentApplicable,
       );
+      const payeeTax = payeResult.tax;
       const netPayAmount = grossAmount - nssfEmployeeDeduction - payeeTax;
 
-      const batch = writeBatch(db);
       const paymentRef = doc(collection(db, "payments"));
-
-      batch.set(paymentRef, {
+      const paymentRecord = {
         employeeId: payEmployee.employeeId,
         periodStart: start,
         periodEnd: end,
@@ -379,6 +432,12 @@ export default function PaymentsPage() {
         nssfEmployeeDeduction,
         nssfBusinessContribution,
         payeeTax,
+        payeBandBreakdown: payeResult.breakdown,
+        payePreviouslyWithheld: payeResult.previousWithheld,
+        payeBandsApplied: currentBands,
+        payeApplicable: currentApplicable,
+        paymentSourceCode,
+        payrollVersion: 2,
         netPayAmount,
         status: "paid",
         paidDate: todayStr,
@@ -386,20 +445,19 @@ export default function PaymentsPage() {
         notes: "",
         createdAt: Timestamp.now(),
         createdBy: userRole?.uid ?? "",
+      };
+      await runTransaction(db, async transaction => {
+        const entryRefs = payEmployee.dueEntries.map(entry => doc(db, "productionEntries", entry.id));
+        const snapshots = await Promise.all(entryRefs.map(ref => transaction.get(ref)));
+        if (snapshots.some((snap, index) => !snap.exists() || snap.data()?.paymentStatus === "paid" || snap.data()?.paymentId || snap.data()?.earningsUgx !== payEmployee.dueEntries[index].earningsUgx)) {
+          throw new Error("One or more production entries changed or were already paid. Refresh the page before retrying.");
+        }
+        transaction.set(paymentRef, paymentRecord);
+        entryRefs.forEach(ref => transaction.update(ref, { paymentStatus: "paid", paymentId: paymentRef.id }));
       });
-
-      payEmployee.dueEntries.forEach((entry) => {
-        const entryRef = doc(db, "productionEntries", entry.id);
-        batch.update(entryRef, {
-          paymentStatus: "paid",
-          paymentId: paymentRef.id,
-        });
-      });
-
-      await batch.commit();
 
       showToast(
-        `Payment of UGX ${grossAmount.toLocaleString()} to ${payEmployee.employeeName} — Receipt: ${receiptNumber}`,
+        `Net payment of UGX ${netPayAmount.toLocaleString()} to ${payEmployee.employeeName} — Receipt: ${receiptNumber}`,
         "success"
       );
 
@@ -424,6 +482,9 @@ export default function PaymentsPage() {
             nssfEmployeeDeduction={nssfEmployeeDeduction}
             nssfBusinessContribution={nssfBusinessContribution}
             payeeTax={payeeTax}
+            payeBandBreakdown={payeResult.breakdown}
+            payePreviouslyWithheld={payeResult.previousWithheld}
+            paymentSourceCode={paymentSourceCode}
             netPayAmount={netPayAmount}
             totalAmount={grossAmount}
           />
@@ -441,9 +502,10 @@ export default function PaymentsPage() {
       }
 
       setPayEmployeeId(null);
-    } catch (err: any) {
+      setPaymentSourceCode("");
+    } catch (err: unknown) {
       console.error("Payment error:", err);
-      const msg = err?.message || "";
+      const msg = err instanceof Error ? err.message : "";
       if (msg.includes("index") || msg.includes("FAILED_PRECONDITION")) {
         showToast(
           `Payment failed — missing database index. Please create the required index and try again: ${msg}`,
@@ -550,7 +612,7 @@ export default function PaymentsPage() {
     <RouteGuard>
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-gray-900">Payments</h1>
+        <div className="flex items-center gap-3"><h1 className="text-2xl font-bold text-gray-900">Payments</h1>{["ADMIN", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "") && <Link href="/payments/paye-settings" className="text-sm text-blue-700 hover:underline">PAYE Settings</Link>}</div>
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
           {(["today", "week", "month", "12months", "custom"] as const).map((tw) => (
             <button
@@ -699,13 +761,15 @@ export default function PaymentsPage() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
         <NssfCard employeePayments={employeePayments} />
-        <PayeeCard employeePayments={employeePayments} />
+        <PayeeCard payments={periodConfirmedPayments} employees={employees} />
       </div>
+
+      <PayeRemittanceCard />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <ReportCard title="Payments Report" subtitle="Download a PDF summary of payment data" onGenerate={handleGenerateReport} />
         <ReportCard title="NSSF Report" subtitle="Download NSSF deductions report" onGenerate={handleGenerateNssfReport} />
-        <ReportCard title="PAYEE Report" subtitle="Download PAYEE tax report" onGenerate={handleGeneratePayeeReport} />
+        <ReportCard title="PAYE Report" subtitle="Download PAYE tax report" onGenerate={handleGeneratePayeeReport} />
       </div>
 
       <div className="flex gap-4 border-b border-gray-200">
@@ -745,6 +809,9 @@ export default function PaymentsPage() {
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pieces</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Amount</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paid Amount</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gross paid (paid date)</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">PAYE withheld (paid date)</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Net paid (paid date)</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avg/Day</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Perf.</th>
@@ -765,6 +832,7 @@ export default function PaymentsPage() {
                           className="text-sm font-medium text-stock-blue hover:underline"
                         >
                           {emp.employeeName}
+                          {!isEmployeeActive(employees.find(employee => employee.id === emp.employeeId) ?? {}) && <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-500">Deactivated</span>}
                         </Link>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-700">
@@ -776,6 +844,9 @@ export default function PaymentsPage() {
                       <td className="px-4 py-3 text-sm font-medium text-ugx">
                         {emp.paidAmount > 0 ? `UGX ${emp.paidAmount.toLocaleString()}` : "—"}
                       </td>
+                      <td className="px-4 py-3 text-sm text-gray-700">UGX {(confirmedTotalsByEmployee.get(emp.employeeId)?.gross ?? 0).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-sm text-red-700">UGX {(confirmedTotalsByEmployee.get(emp.employeeId)?.paye ?? 0).toLocaleString()}</td>
+                      <td className="px-4 py-3 text-sm text-green-700">UGX {(confirmedTotalsByEmployee.get(emp.employeeId)?.net ?? 0).toLocaleString()}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">{emp.daysWorked}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">
                         UGX {Math.round((emp.dueAmount + emp.paidAmount) / emp.daysWorked).toLocaleString()}
@@ -785,13 +856,15 @@ export default function PaymentsPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {emp.dueAmount > 0 ? (
+                          {emp.dueAmount > 0 && isEmployeeActive(employees.find(employee => employee.id === emp.employeeId) ?? {}) ? (
                             <button
                               onClick={(e) => { e.stopPropagation(); setPayEmployeeId(emp.employeeId); }}
                               className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-md hover:bg-gray-800"
                             >
                               Pay Due
                             </button>
+                          ) : emp.dueAmount > 0 ? (
+                            <span className="text-xs font-medium text-gray-500">Due retained · Reactivate to pay</span>
                           ) : (
                             <span className="text-xs text-green-600 font-medium">✓ Paid</span>
                           )}
@@ -1157,13 +1230,16 @@ export default function PaymentsPage() {
                   <span className="font-semibold text-red-600">- UGX {computeNssfEmployee(payEmployee.dueAmount).toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600">PAYEE Tax (20% for qualifying employees)</span>
-                  <span className="font-semibold text-red-600">- UGX {(modalPayeeTax ?? computePayeeTax(payEmployee.dueAmount)).toLocaleString()}</span>
+                  <span className="text-gray-600">PAYE {payeApplicable ? "(progressive monthly bands)" : "(not applicable)"}</span>
+                  <span className="font-semibold text-red-600">- UGX {modalPayeeTax === null ? "Calculating…" : modalPayeeTax.toLocaleString()}</span>
                 </div>
+                {modalPayeBreakdown.some(band => band.taxableAmount > 0) && <p className="text-xs font-medium text-gray-500">Calendar-month cumulative bands</p>}
+                {modalPayeBreakdown.filter(band => band.taxableAmount > 0).map((band, index) => <div key={index} className="flex justify-between text-xs text-gray-500"><span>{band.ratePercent}% on UGX {band.taxableAmount.toLocaleString()}</span><span>UGX {Math.round(band.taxAmount).toLocaleString()}</span></div>)}
+                {modalPreviouslyWithheld > 0 && <div className="flex justify-between text-xs text-gray-500"><span>PAYE already withheld this month</span><span>- UGX {modalPreviouslyWithheld.toLocaleString()}</span></div>}
                 <div className="border-t border-gray-200 pt-2 flex justify-between items-center text-sm">
                   <span className="font-semibold text-gray-800">Net Pay to Employee</span>
                   <span className="text-lg font-bold text-green-600">
-                    UGX {(payEmployee.dueAmount - computeNssfEmployee(payEmployee.dueAmount) - (modalPayeeTax ?? computePayeeTax(payEmployee.dueAmount))).toLocaleString()}
+                    {modalPayeeTax === null ? "Calculating…" : `UGX ${(payEmployee.dueAmount - computeNssfEmployee(payEmployee.dueAmount) - modalPayeeTax).toLocaleString()}`}
                   </span>
                 </div>
                 <div className="border-t border-dashed border-gray-200 pt-2 flex justify-between items-center text-sm">
@@ -1171,6 +1247,13 @@ export default function PaymentsPage() {
                   <span className="font-semibold text-blue-600">UGX {computeNssfBusiness(payEmployee.dueAmount).toLocaleString()}</span>
                 </div>
               </div>
+              <label className="block text-sm font-medium text-gray-700 mb-4">Pay from
+                <select required value={paymentSourceCode} onChange={event => setPaymentSourceCode(event.target.value as "" | "1000" | "1030")} className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2">
+                  <option value="">Select Cash or Bank...</option><option value="1030">Cash</option><option value="1000">Bank</option>
+                </select>
+              </label>
+              {timeWindow !== "month" && <p className="mb-4 rounded-md bg-amber-50 p-3 text-xs text-amber-800">PAYE still follows the existing calendar-month cumulative calculation; this {timeWindow} view only controls which unpaid production entries are selected. No proration is applied.</p>}
+              {payeSettingsError && <p role="alert" className="mb-4 text-sm text-red-700">PAYE settings could not be loaded: {payeSettingsError}</p>}
 
               <table className="min-w-full text-sm">
                 <thead>
@@ -1214,7 +1297,7 @@ export default function PaymentsPage() {
               </button>
               <button
                 onClick={handlePayConfirm}
-                disabled={payProcessing}
+                disabled={payProcessing || !paymentSourceCode || modalPayeeTax === null || payeSettingsLoading || !!payeSettingsError}
                 className="py-2 px-6 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 disabled:opacity-50 flex items-center gap-2"
               >
                 {payProcessing ? (

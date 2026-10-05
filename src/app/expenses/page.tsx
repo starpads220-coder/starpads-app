@@ -23,6 +23,7 @@ import { BubbleChart } from "@/components/charts/BubbleChart";
 import { palette } from "@/components/charts";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
+import { isEmployeeActive } from "@/lib/employees";
 
 type AnalyticsPeriod = "day" | "week" | "month" | "12months" | "custom";
 
@@ -123,12 +124,12 @@ export default function ExpensesPage() {
     ? form.labourTotalPayments
     : form.unitCost * form.itemCount;
 
-  const { data: employees = [] } = useCollectionQuery<{ id: string; name: string }>(
+  const { data: employees = [] } = useCollectionQuery<{ id: string; name: string; isActive?: boolean; active?: boolean }>(
     "employees", [orderBy("name")], { staleTime: 10 * 60 * 1000 }
   );
-  const expensePayers = useMemo(() => APPROVED_EXPENSE_PAYERS.map(name => {
+  const expensePayers = useMemo(() => APPROVED_EXPENSE_PAYERS.flatMap(name => {
     const employee = employees.find(item => item.name.trim().toLowerCase() === name.toLowerCase());
-    return { id: employee?.id ?? name, name };
+    return employee && isEmployeeActive(employee) ? [{ id: employee.id, name: String(name) }] : [];
   }), [employees]);
 
   const today = new Date().toISOString().split("T")[0];

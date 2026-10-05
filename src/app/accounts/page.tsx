@@ -13,7 +13,7 @@ import { balanceSheetGroupTotal, balanceSheetRows, balanceSheetTotals } from "@/
 import { JOURNAL_STRUCTURE, journalLines, journalPathForCode, type JournalCategory, type JournalSection } from "@/lib/balance-sheet-journal-options";
 import { CashFlowStatementTab } from "@/components/accounts/CashFlowStatementTab";
 import { IncomeStatementTab } from "@/components/accounts/IncomeStatementTab";
-import { ACCOUNTS, ACCOUNT_GROUPS, SETTLEMENT_CODES, buildAccounts, resolveAccounting, type LedgerSource, type Journal, type ProductionCostEntry, type TaxEntry } from "@/lib/accounts";
+import { ACCOUNTS, ACCOUNT_GROUPS, SETTLEMENT_CODES, buildAccounts, resolveAccounting, type LedgerSource, type Journal, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
 import { buildFinancialStatements, type ConfirmedLaborPayment } from "@/lib/financial-statements";
 import type { AccountsPdfSection } from "@/components/reports/AccountsStatementPDF";
 
@@ -53,7 +53,9 @@ export default function AccountsPage() {
   const sales = useRealtimeCollection<LedgerSource>("saleTransactions");
   const expenses = useRealtimeCollection<LedgerSource>("expenses");
   const journals = useRealtimeCollection<Journal>("accountJournals");
-  const payments = useRealtimeCollection<ConfirmedLaborPayment>("payments");
+  const payments = useRealtimeCollection<ConfirmedLaborPayment & PayrollPaymentEntry>("payments");
+  const payeRemittances = useRealtimeCollection<PayeRemittanceEntry>("payeRemittances");
+  const payrollEntries = useRealtimeCollection<PayrollProductionEntry>("productionEntries");
   const productionCosts = useRealtimeCollection<ProductionCostEntry>("productionCosts");
   const taxEntries = useRealtimeCollection<TaxEntry>("taxEntries");
   const end = period === "custom" ? customEnd : dateKey(new Date());
@@ -63,10 +65,10 @@ export default function AccountsPage() {
   else { startDate.setMonth(startDate.getMonth() - 11); startDate.setDate(1); }
   const start = period === "custom" ? customStart : dateKey(startDate);
   const valid = !!start && !!end && start <= end;
-  const report = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, start, end, productionCosts.data, taxEntries.data), [sales.data, expenses.data, journals.data, start, end, productionCosts.data, taxEntries.data]);
+  const report = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, start, end, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, start, end, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
   const statements = useMemo(
-    () => buildFinancialStatements(sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data),
-    [sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data],
+    () => buildFinancialStatements(sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data, payrollEntries.data),
+    [sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data, payrollEntries.data],
   );
   const accountName = (code: string) => balanceSheetAccountName(code, report.rows.find(account => account.code === code)?.name ?? ACCOUNTS.find(account => account.code === code)?.name ?? "Account");
   const journalEntries = useMemo(() => journals.data.filter(entry => !entry.bankingKind).sort((a, b) => b.date.localeCompare(a.date)), [journals.data]);
@@ -83,6 +85,8 @@ export default function AccountsPage() {
       return accounting ? [{ id: `expense-${entry.id}`, date: entry.date, source: "Expense", description: entry.description || accounting.accountName, account: cashAccountName(accounting.settlementCode), amount: -(Number(entry.amountUgx) || 0) }] : [];
     });
     const productionRows = productionCosts.data.map(entry => ({ id: `production-${entry.id}`, date: entry.date, source: "Production cost", description: entry.description, account: cashAccountName(entry.settlementCode), amount: -(Number(entry.amount) || 0) }));
+    const payrollRows = payments.data.filter(payment => payment.payrollVersion === 2 && payment.status === "paid" && payment.paymentSourceCode).map(payment => ({ id: `payroll-${payment.id}`, date: payment.paidDate, source: "Payroll", description: "Net wages paid", account: cashAccountName(payment.paymentSourceCode!), amount: -(Number(payment.netPayAmount) || 0) }));
+    const payeRows = payeRemittances.data.map(remittance => ({ id: `paye-${remittance.id}`, date: remittance.paymentDate, source: "PAYE remittance", description: "PAYE paid to URA", account: cashAccountName(remittance.paymentSourceCode), amount: -(Number(remittance.amount) || 0) }));
     const journalRows = journals.data.flatMap(entry => {
       const debitCash = SETTLEMENT_CODES.includes(entry.debitCode);
       const creditCash = SETTLEMENT_CODES.includes(entry.creditCode);
@@ -94,12 +98,12 @@ export default function AccountsPage() {
       const code = debitCash ? entry.debitCode : entry.creditCode;
       return [{ id: `journal-${entry.id}`, date: entry.date, source: entry.bankingKind === "deposit" ? "Deposit" : "Journal", description: entry.description, account: cashAccountName(code), amount: debitCash ? entry.amount : -entry.amount }];
     });
-    return [...salesRows, ...expenseRows, ...productionRows, ...journalRows].filter(entry => entry.date <= end).sort((a, b) => b.date.localeCompare(a.date));
-  }, [sales.data, expenses.data, productionCosts.data, journals.data, end]);
+    return [...salesRows, ...expenseRows, ...productionRows, ...payrollRows, ...payeRows, ...journalRows].filter(entry => entry.date <= end).sort((a, b) => b.date.localeCompare(a.date));
+  }, [sales.data, expenses.data, productionCosts.data, payments.data, payeRemittances.data, journals.data, end]);
   const ranges = useMemo(() => comparisonRanges(period, customStart, customEnd), [period, customStart, customEnd]);
-  const balanceSheetColumns = useMemo<BalanceSheetColumn[]>(() => ranges.map(range => ({ ...range, report: buildAccounts(sales.data, expenses.data, journals.data, range.start, range.end, productionCosts.data, taxEntries.data) })), [ranges, sales.data, expenses.data, journals.data, productionCosts.data, taxEntries.data]);
-  const error = sales.error || expenses.error || journals.error || payments.error || productionCosts.error || taxEntries.error;
-  const loading = sales.loading || expenses.loading || journals.loading || payments.loading || productionCosts.loading || taxEntries.loading;
+  const balanceSheetColumns = useMemo<BalanceSheetColumn[]>(() => ranges.map(range => ({ ...range, report: buildAccounts(sales.data, expenses.data, journals.data, range.start, range.end, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data) })), [ranges, sales.data, expenses.data, journals.data, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
+  const error = sales.error || expenses.error || journals.error || payments.error || productionCosts.error || taxEntries.error || payrollEntries.error || payeRemittances.error;
+  const loading = sales.loading || expenses.loading || journals.loading || payments.loading || productionCosts.loading || taxEntries.loading || payrollEntries.loading || payeRemittances.loading;
   const canPost = ["ADMIN", "FINANCE", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
   const input = "w-full border border-gray-300 rounded-md px-3 py-2 text-sm";
   const reportTitle = view === "income" ? "Income Statement (Profit & Loss)" : view === "balance" ? "Balance Sheet" : "Cash Flow Statement";
@@ -194,7 +198,7 @@ export default function AccountsPage() {
       const amount = Number(productionCost.amount);
       const description = productionCost.description.trim();
       if (!canPost || !/^\d{4}-\d{2}-\d{2}$/.test(productionCost.date) || !description || !Number.isFinite(amount) || amount <= 0 || !["1000", "1030"].includes(productionCost.settlementCode)) throw new Error("Enter a date, cost name, positive amount, and Cash or Bank payment method.");
-      if (/\bdirect\s*labou?r\b/i.test(description)) throw new Error("Direct Labor comes only from confirmed Payments and cannot be entered here.");
+      if (/\bdirect\s*labou?r\b/i.test(description)) throw new Error("Direct Labor comes from production earnings, including accrued unpaid wages, and cannot be entered here.");
       const entry = { date: productionCost.date, description, amount, settlementCode: productionCost.settlementCode, reference: productionCost.reference.trim(), notes: productionCost.notes.trim() };
       if (editingProductionCostId) await updateDoc(doc(db, "productionCosts", editingProductionCostId), entry);
       else await addDoc(collection(db, "productionCosts"), { ...entry, createdAt: Timestamp.now(), createdBy: userRole?.uid });
@@ -293,7 +297,7 @@ export default function AccountsPage() {
     {view === "entries" && entriesStatement === "income" && <>
       {canPost && <form onSubmit={saveProductionCost} className="accounts-no-print rounded-xl border bg-white p-5 space-y-4">
         <div className="flex items-center justify-between"><h2 className="font-semibold">{editingProductionCostId ? "Edit Cost of Production" : "Add Cost of Production"}</h2>{editingProductionCostId && <button type="button" className="text-sm text-gray-600 hover:underline" onClick={() => { setEditingProductionCostId(null); setProductionCost({ date: dateKey(new Date()), description: "", amount: "", settlementCode: "", reference: "", notes: "" }); setMessage(""); }}>Cancel edit</button>}</div>
-        <p className="text-sm text-gray-500">Record Other Costs here. Direct Labor is calculated only from confirmed payments.</p>
+        <p className="text-sm text-gray-500">Record Other Costs here. Direct Labor is calculated from production earnings, including accrued unpaid wages.</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <label>Date<input required type="date" className={input} value={productionCost.date} onChange={e => setProductionCost({ ...productionCost, date: e.target.value })} /></label>
           <label>Amount (UGX)<input required type="number" min="0.01" step="0.01" className={input} value={productionCost.amount} onChange={e => setProductionCost({ ...productionCost, amount: e.target.value })} /></label>

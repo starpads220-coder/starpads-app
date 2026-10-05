@@ -215,6 +215,9 @@ export interface Employee {
   startDate?: string;
   active?: boolean;
   isActive?: boolean;
+  payeApplicable?: boolean;
+  statusChangedAt?: unknown;
+  statusChangedBy?: string;
 }
 
 export interface ProductionStage {
@@ -241,10 +244,27 @@ export interface Payment {
   nssfEmployeeDeduction?: number;
   nssfBusinessContribution?: number;
   payeeTax?: number;
+  payeBandBreakdown?: import("@/lib/deductions").PayeBandResult[];
+  payePreviouslyWithheld?: number;
+  payeBandsApplied?: import("@/lib/deductions").PayeBand[];
+  paymentSourceCode?: "1000" | "1030";
+  payrollVersion?: 2;
   netPayAmount?: number;
   totalAmount?: number;
   receiptNumber?: string;
   status?: "due" | "paid";
+}
+
+export interface PayeRemittance {
+  id: string;
+  paymentDate: string;
+  returnPeriod: string;
+  amount: number;
+  paymentSourceCode: "1000" | "1030";
+  uraReference: string;
+  notes?: string;
+  createdBy: string;
+  createdAt?: unknown;
 }
 
 export interface TargetConfig {

@@ -38,7 +38,7 @@ import {
 } from "date-fns";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
-import { getPayeeBracket, computeNssfEmployee, computeNssfBusiness, computePayeeTax } from "@/lib/deductions";
+import { computeNssfEmployee, computeNssfBusiness } from "@/lib/deductions";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
 type DetailTab = "calendar" | "breakdown" | "history" | "nssf" | "payee";
@@ -246,14 +246,13 @@ export default function EmployeePaymentDetailPage() {
   }, [dueAmount, paidAmount]);
 
   const payeeSummary = useMemo(() => {
-    const gross = dueAmount + paidAmount;
-    const totalPayee = computePayeeTax(gross);
-    const bracket = getPayeeBracket(gross);
-    const isTaxFree = bracket.rate === 0;
-    const taxableCount = isTaxFree ? 0 : 1;
-    const taxFreeCount = isTaxFree ? 1 : 0;
-    return { totalPayee, taxableCount, taxFreeCount, gross, hasPayee: totalPayee > 0, bracketLabel: bracket.label, bracketRate: bracket.rate };
-  }, [dueAmount, paidAmount]);
+    const confirmed = filteredPayments.filter(payment => payment.status === "paid");
+    const gross = confirmed.reduce((sum, payment) => sum + (payment.grossAmount ?? payment.totalAmount ?? payment.amountUgx ?? 0), 0);
+    const totalPayee = confirmed.reduce((sum, payment) => sum + (payment.payeeTax ?? 0), 0);
+    const taxableCount = confirmed.filter(payment => (payment.payeeTax ?? 0) > 0).length;
+    const taxFreeCount = confirmed.length - taxableCount;
+    return { totalPayee, taxableCount, taxFreeCount, gross, hasPayee: totalPayee > 0 };
+  }, [filteredPayments]);
 
   const handleDownloadReceipt = async (paymentId: string) => {
     try {
@@ -273,7 +272,7 @@ export default function EmployeePaymentDetailPage() {
       const nssfEmp = payment.nssfEmployeeDeduction || 0;
       const nssfBus = payment.nssfBusinessContribution || 0;
       const payee = payment.payeeTax || 0;
-      const netPay = payment.netPayAmount || (gross - nssfEmp - payee);
+      const netPay = payment.netPayAmount ?? (gross - nssfEmp - payee);
 
       const { pdf } = await import("@react-pdf/renderer");
       const { PaymentReceiptPDF } = await import("@/components/payments/PaymentReceiptPDF");
@@ -290,6 +289,9 @@ export default function EmployeePaymentDetailPage() {
           nssfEmployeeDeduction={nssfEmp}
           nssfBusinessContribution={nssfBus}
           payeeTax={payee}
+          payeBandBreakdown={payment.payeBandBreakdown}
+          payePreviouslyWithheld={payment.payePreviouslyWithheld}
+          paymentSourceCode={payment.paymentSourceCode}
           netPayAmount={netPay}
           totalAmount={gross}
         />
@@ -559,28 +561,28 @@ export default function EmployeePaymentDetailPage() {
           </div>
         </ChartCard>
 
-        <ChartCard title="PAYEE" subtitle="Pay As You Earn" variant="gradient" accentColor={palette.orange}>
+        <ChartCard title="PAYE" subtitle="Pay As You Earn" variant="gradient" accentColor={palette.orange}>
           <div className="flex flex-col h-full justify-center">
             <div className="grid grid-cols-3 gap-2 mb-3">
               <div className="text-center p-2 bg-orange-50 rounded-lg">
-                <div className="text-xs text-orange-600 font-medium">Total PAYEE</div>
+                <div className="text-xs text-orange-600 font-medium">Total PAYE</div>
                 <div className="text-lg font-bold text-orange-700">
                   UGX {payeeSummary.totalPayee.toLocaleString()}
                 </div>
               </div>
               <div className="text-center p-2 bg-gray-50 rounded-lg">
-                <div className="text-xs text-gray-500 font-medium">Taxable</div>
+                <div className="text-xs text-gray-500 font-medium">Payments with PAYE</div>
                 <div className="text-lg font-bold text-gray-700">{payeeSummary.taxableCount}</div>
               </div>
               <div className="text-center p-2 bg-green-50 rounded-lg">
-                <div className="text-xs text-green-600 font-medium">Tax Free</div>
+                <div className="text-xs text-green-600 font-medium">Payments without PAYE</div>
                 <div className="text-lg font-bold text-green-700">{payeeSummary.taxFreeCount}</div>
               </div>
             </div>
             <div className="text-center text-xs text-gray-500">
               {payeeSummary.hasPayee
-                ? `Based on gross earnings of UGX ${payeeSummary.gross.toLocaleString()} — ${payeeSummary.bracketLabel} bracket`
-                : `No PAYEE — ${payeeSummary.bracketLabel} bracket (${payeeSummary.gross.toLocaleString()} UGX)`}
+                ? `Withheld from confirmed payments totaling UGX ${payeeSummary.gross.toLocaleString()} gross`
+                : "No PAYE withheld from confirmed payments in this period"}
             </div>
           </div>
         </ChartCard>
@@ -589,7 +591,7 @@ export default function EmployeePaymentDetailPage() {
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <ReportCard title="Worker Report" subtitle="Download a PDF summary of worker payment data" onGenerate={handleGenerateReport} />
         <ReportCard title="NSSF Report" subtitle="Download NSSF deductions report for this employee" onGenerate={handleGenerateNssfReport} />
-        <ReportCard title="PAYEE Report" subtitle="Download PAYEE tax report for this employee" onGenerate={handleGeneratePayeeReport} />
+        <ReportCard title="PAYE Report" subtitle="Download PAYE tax report for this employee" onGenerate={handleGeneratePayeeReport} />
       </div>
 
       {/* Tabs */}
@@ -604,7 +606,7 @@ export default function EmployeePaymentDetailPage() {
                 : "text-gray-500 border-transparent hover:text-gray-700"
             }`}
           >
-            {tab === "calendar" ? "Calendar View" : tab === "breakdown" ? "Daily Breakdown" : tab === "history" ? "Payment History" : tab === "nssf" ? "NSSF" : "PAYEE"}
+            {tab === "calendar" ? "Calendar View" : tab === "breakdown" ? "Daily Breakdown" : tab === "history" ? "Payment History" : tab === "nssf" ? "NSSF" : "PAYE"}
           </button>
         ))}
       </div>
@@ -857,7 +859,10 @@ export default function EmployeePaymentDetailPage() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Amount</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gross</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">PAYE</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Net pay</th>
+                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paid from</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paid Date</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Receipt #</th>
@@ -873,6 +878,9 @@ export default function EmployeePaymentDetailPage() {
                     <td className="px-4 py-3 text-sm font-medium text-ugx">
                       UGX {((p.totalAmount ?? 0) || p.amountUgx).toLocaleString()}
                     </td>
+                    <td className="px-4 py-3 text-sm text-red-700">UGX {(p.payeeTax ?? 0).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-green-700">UGX {(p.netPayAmount ?? ((p.grossAmount ?? p.totalAmount ?? p.amountUgx ?? 0) - (p.nssfEmployeeDeduction ?? 0) - (p.payeeTax ?? 0))).toLocaleString()}</td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{p.paymentSourceCode === "1000" ? "Bank" : p.paymentSourceCode === "1030" ? "Cash" : "—"}</td>
                     <td className="px-4 py-3">
                       <span
                         className={`inline-block px-2 py-0.5 text-xs font-medium rounded-full ${
@@ -958,17 +966,17 @@ export default function EmployeePaymentDetailPage() {
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-x-auto">
           {payeeSummary.gross === 0 ? (
             <div className="p-8 text-center text-gray-400">
-              No PAYEE records found for this employee in the selected period.
+              No confirmed PAYE records found for this employee in the selected period.
             </div>
           ) : (
             <>
               <div className="p-4 bg-orange-50 border-b border-orange-200">
                 <div className="text-sm text-orange-800">
-                  <span className="font-semibold">Total PAYEE: </span>
+                  <span className="font-semibold">Total PAYE: </span>
                   UGX {payeeSummary.totalPayee.toLocaleString()}
                   <span className="mx-4">|</span>
-                  <span className="font-semibold">Bracket: </span>
-                  {payeeSummary.bracketLabel} ({payeeSummary.bracketRate}%)
+                  <span className="font-semibold">Source: </span>
+                  Saved confirmed payments
                   <span className="mx-4">|</span>
                   <span className="font-semibold">Gross: </span>
                   UGX {payeeSummary.gross.toLocaleString()}
@@ -978,9 +986,9 @@ export default function EmployeePaymentDetailPage() {
                 <thead className="bg-gray-50">
                   <tr>
                     <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Period Gross (UGX)</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Tax Bracket</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Rate</th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">PAYEE (UGX)</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Payments</th>
+                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">PAYE (UGX)</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-200">
@@ -989,14 +997,10 @@ export default function EmployeePaymentDetailPage() {
                       UGX {payeeSummary.gross.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-500">
-                      {payeeSummary.bracketLabel}
+                      Confirmed
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      {payeeSummary.bracketRate === 0 ? (
-                        <span className="text-green-600 font-medium">Tax Free</span>
-                      ) : (
-                        <span className="text-gray-700">{payeeSummary.bracketRate}%</span>
-                      )}
+                      {filteredPayments.filter(payment => payment.status === "paid").length}
                     </td>
                     <td className={`px-4 py-3 text-sm font-medium ${payeeSummary.totalPayee > 0 ? "text-red-600" : "text-green-600"}`}>
                       {payeeSummary.totalPayee > 0 ? `UGX ${payeeSummary.totalPayee.toLocaleString()}` : "0 (Tax Free)"}

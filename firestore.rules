@@ -48,13 +48,23 @@ service cloud.firestore {
     // ============================================================
     // employees - Staff directory
     // All authenticated users can read
-    // Create/Update: ADMIN or PRODUCTION_SUPERVISOR (own department only)
+    // Create/Edit: ADMIN or PRODUCTION_SUPERVISOR (own department only).
+    // Users who can access the Employees page may make status-only updates
+    // within the employee scope visible to their role.
     // Delete: ADMIN only
     // ============================================================
     match /employees/{employeeId} {
       allow read: if isAuthenticated();
       allow create: if isAdmin() || (hasRole('PRODUCTION_SUPERVISOR') && request.resource.data.department == getSupervisorDepartment());
-      allow update: if isAdmin() || (hasRole('PRODUCTION_SUPERVISOR') && resource.data.department == getSupervisorDepartment() && request.resource.data.department == resource.data.department);
+      allow update: if isAdmin()
+        || (hasRole('PRODUCTION_SUPERVISOR') && resource.data.department == getSupervisorDepartment() && request.resource.data.department == resource.data.department)
+        || (hasRole('FINANCIAL_MANAGER') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['payeApplicable']))
+        || (hasAnyRole(['FINANCIAL_MANAGER', 'SALES_MANAGER'])
+          && (hasRole('FINANCIAL_MANAGER') || resource.data.department == 'SALES')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['isActive', 'statusChangedAt', 'statusChangedBy'])
+          && request.resource.data.isActive is bool
+          && request.resource.data.statusChangedAt is timestamp
+          && request.resource.data.statusChangedBy == request.auth.uid);
       allow delete: if isAdmin();
     }
 
@@ -138,6 +148,40 @@ service cloud.firestore {
       allow read: if isAuthenticated();
       allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
       allow update, delete: if false;
+    }
+
+    // PAYE schedule is shared by payroll and editable by finance/admin only.
+    match /payeSettings/{settingId} {
+      allow read: if isAuthenticated();
+      allow create, update: if settingId == 'current' && hasAnyRole(['ADMIN', 'FINANCIAL_MANAGER']);
+      allow delete: if false;
+    }
+
+    // PAYE remittances are immutable tax-liability settlements. The balance
+    // control document is updated in the same transaction to prevent overpayment.
+    match /payeRemittances/{remittanceId} {
+      allow read: if isAuthenticated();
+      allow create: if hasAnyRole(['ADMIN', 'FINANCIAL_MANAGER'])
+        && request.resource.data.keys().hasOnly(['paymentDate', 'returnPeriod', 'amount', 'paymentSourceCode', 'uraReference', 'notes', 'createdBy', 'createdAt'])
+        && request.resource.data.paymentDate is string
+        && request.resource.data.returnPeriod is string
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.paymentSourceCode in ['1000', '1030']
+        && request.resource.data.uraReference is string
+        && request.resource.data.uraReference.size() > 0
+        && request.resource.data.createdBy == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /payeLiabilityBalances/{balanceId} {
+      allow read: if isAuthenticated();
+      allow create, update: if balanceId.matches('^[0-9]{4}-[0-9]{2}$') && hasAnyRole(['ADMIN', 'FINANCIAL_MANAGER'])
+        && request.resource.data.keys().hasOnly(['totalRemitted', 'updatedAt', 'updatedBy'])
+        && request.resource.data.totalRemitted is number
+        && request.resource.data.totalRemitted >= 0
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if false;
     }
 
 

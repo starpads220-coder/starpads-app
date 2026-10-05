@@ -1,8 +1,6 @@
 import React from "react";
 import { Page, Text, View, Document } from "@react-pdf/renderer";
 import { pdfStyles, colWidth } from "./PDFStyles";
-import { STAGE_LABELS } from "@/types";
-import type { StageId } from "@/types";
 
 interface WorkerStageData {
   label: string;
@@ -11,12 +9,9 @@ interface WorkerStageData {
 
 interface WorkerPaymentRec {
   date: string;
-  stageId: string;
-  actualPieces: number;
+  receiptNumber: string;
   earningsUgx: number;
-  status: string;
   nssfEmployee: number;
-  nssfBusiness: number;
   payeeTax: number;
   netPay: number;
 }
@@ -56,6 +51,7 @@ export function WorkerPDF({
 
         <View style={pdfStyles.summaryBox}>
           <Text style={pdfStyles.summaryTitle}>Employee Summary</Text>
+          <Text style={{ fontSize: 9, color: "#666", marginBottom: 5 }}>Earnings use production dates; deductions and net paid use confirmed payment dates in this period.</Text>
           <View style={pdfStyles.summaryRow}>
             <Text style={pdfStyles.summaryLabel}>Employee</Text>
             <Text style={pdfStyles.summaryValue}>{employeeName}</Text>
@@ -89,11 +85,11 @@ export function WorkerPDF({
               <Text style={{ fontSize: 11, fontWeight: "bold", color: "#dc2626" }}>UGX {totalNssfEmployee.toLocaleString()}</Text>
             </View>
             <View style={pdfStyles.summaryRow}>
-              <Text style={pdfStyles.summaryLabel}>PAYEE Tax</Text>
+              <Text style={pdfStyles.summaryLabel}>PAYE Tax</Text>
               <Text style={{ fontSize: 11, fontWeight: "bold", color: "#dc2626" }}>UGX {totalPayee.toLocaleString()}</Text>
             </View>
             <View style={pdfStyles.summaryRow}>
-              <Text style={pdfStyles.summaryLabel}>Net Pay</Text>
+              <Text style={pdfStyles.summaryLabel}>Net Paid</Text>
               <Text style={{ fontSize: 11, fontWeight: "bold", color: "#059669" }}>UGX {totalNetPay.toLocaleString()}</Text>
             </View>
             <View style={pdfStyles.summaryRow}>
@@ -138,12 +134,11 @@ export function WorkerPDF({
           <View style={pdfStyles.table}>
             <View style={pdfStyles.tableRow}>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(14) }}><Text style={pdfStyles.tableCellHeader}>Date</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(20) }}><Text style={pdfStyles.tableCellHeader}>Stage</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>Pieces</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(20) }}><Text style={pdfStyles.tableCellHeader}>Receipt</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(16) }}><Text style={pdfStyles.tableCellHeader}>Earnings</Text></View>
               <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>NSSF Emp</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>PAYEE</Text></View>
-              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(14) }}><Text style={pdfStyles.tableCellHeader}>Status</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(12) }}><Text style={pdfStyles.tableCellHeader}>PAYE</Text></View>
+              <View style={{ ...pdfStyles.tableColHeader, width: colWidth(14) }}><Text style={pdfStyles.tableCellHeader}>Net paid</Text></View>
             </View>
             {paymentHistory.length === 0 ? (
               <View style={pdfStyles.tableRow}>
@@ -153,12 +148,11 @@ export function WorkerPDF({
               paymentHistory.map((p, i) => (
                 <View style={pdfStyles.tableRow} key={i}>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{p.date}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(20) }}><Text style={pdfStyles.tableCell}>{STAGE_LABELS[p.stageId as StageId] || p.stageId}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(12) }}><Text style={pdfStyles.tableCell}>{p.actualPieces.toLocaleString()}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(20) }}><Text style={pdfStyles.tableCell}>{p.receiptNumber}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(16) }}><Text style={pdfStyles.tableCell}>UGX {p.earningsUgx.toLocaleString()}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(12) }}><Text style={pdfStyles.tableCell}>{p.nssfEmployee.toLocaleString()}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(12) }}><Text style={pdfStyles.tableCell}>{p.payeeTax.toLocaleString()}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{p.status}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{p.netPay.toLocaleString()}</Text></View>
                 </View>
               ))
             )}
