@@ -33,7 +33,7 @@ export function validateAccounting(value: AccountingSelection, kind: "sale" | "e
   if (!allowed.includes(value.accountGroup) || !value.accountName.trim() || (!known && !value.accountCode.startsWith("custom:")) || (known && known.group !== value.accountGroup) || !SETTLEMENT_CODES.includes(value.settlementCode) || (needsDetail && !value.accountDetail?.trim())) throw new Error(needsDetail ? "Enter the specific direct material or direct labour details." : "Select an account / subcategory and cash/bank account.");
   return { ...value, accountName: value.accountCode === "4082" ? "Trainings" : value.accountName.trim(), accountDetail: value.accountDetail?.trim() ?? "" };
 }
-export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number; paymentMethod?: string; description?: string; customerName?: string; category?: string; subcategory?: string }
+export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number; paymentMethod?: string; description?: string; customerName?: string; category?: string; subcategory?: string; status?: string; paymentStatus?: string; amountReceived?: number; receivedAmount?: number; amountPaid?: number; paidAmount?: number }
 export interface Journal {
   id: string;
   date: string;

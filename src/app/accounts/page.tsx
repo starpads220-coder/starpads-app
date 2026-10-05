@@ -56,8 +56,8 @@ export default function AccountsPage() {
   const openingReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", openingEnd, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, openingEnd, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
   const openingCashBalance = useMemo(() => openingReport.rows.filter(row => SETTLEMENT_CODES.includes(row.code)).reduce((sum, row) => sum + row.balance, 0), [openingReport]);
   const statements = useMemo(
-    () => buildFinancialStatements(sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data, payrollEntries.data, openingCashBalance),
-    [sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data, payrollEntries.data, openingCashBalance],
+    () => buildFinancialStatements(sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data, payrollEntries.data, openingCashBalance, payeRemittances.data),
+    [sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data, payrollEntries.data, openingCashBalance, payeRemittances.data],
   );
   const accountName = (code: string) => balanceSheetAccountName(code, report.rows.find(account => account.code === code)?.name ?? ACCOUNTS.find(account => account.code === code)?.name ?? "Account");
   const journalEntries = useMemo(() => journals.data.filter(entry => !entry.bankingKind).sort((a, b) => b.date.localeCompare(a.date)), [journals.data]);
@@ -103,10 +103,13 @@ export default function AccountsPage() {
       { title: "Operating Expenses", rows: [{ label: "Operating Expenses", amount: statements.operatingExpenses }, ...statements.operatingExpenseLines.map(entry => ({ label: `  ${entry.name}`, amount: entry.amount })), { label: "Income Before Taxes", amount: statements.incomeBeforeTaxes, emphasis: "total" }, { label: "Tax Deductions", amount: statements.taxDeductions }, { label: "Net income", amount: statements.netIncome, emphasis: "grand" }] },
     ];
     if (view === "cashflow") return [
-      { title: "Cash Flows from Operating Activities", rows: [{ label: "Net income", amount: statements.netIncome }, { label: "Non-cash expenses added back", amount: statements.nonCashAdjustments }, { label: "Changes in working capital", amount: statements.workingCapitalAdjustments }, { label: "Net cash from operating activities", amount: statements.operatingCashFlow, emphasis: "total" }] },
-      { title: "Cash Flows from Investing Activities", rows: [{ label: "Net cash from investing activities", amount: statements.investingCashFlow, emphasis: "total" }] },
-      { title: "Cash Flows from Financing Activities", rows: [{ label: "Net cash from financing activities", amount: statements.financingCashFlow, emphasis: "total" }, ...(Math.abs(statements.otherCashFlow) >= 0.01 ? [{ label: "Other cash movements / reconciliation", amount: statements.otherCashFlow }] : []), { label: "Net cash flow", amount: statements.netCashFlow, emphasis: "total" }] },
-      { title: "Cash Reconciliation", rows: [{ label: "Beginning cash balance", amount: statements.beginningCashBalance }, { label: "Ending cash balance", amount: statements.endingCashBalance, emphasis: "grand" }] },
+      { title: "Opening Cash", rows: [{ label: `Opening Cash at ${formatAccountDate(start)}`, amount: statements.beginningCashBalance, emphasis: "total" }] },
+      { title: "A. Cash Flows from Operating Activities — Cash Received", rows: [...statements.cashReceivedLines.map(line => ({ label: line.name, amount: line.amount })), { label: "Total Cash Received", amount: statements.totalCashReceived, emphasis: "total" }] },
+      { title: "A. Cash Flows from Operating Activities — Cash Paid", rows: [{ label: "Purchases of Raw Materials", amount: -statements.cashPaidForRawMaterials }, { label: "Carriage Inwards", amount: -statements.cashPaidForCarriageInwards }, { label: "Direct Labor", amount: -statements.cashPaidForDirectLabor }, { label: "Other production costs", amount: -statements.cashPaidForOtherProductionCosts }, { label: "Operating Expenses", amount: -statements.cashPaidForOperatingExpenses }, ...statements.operatingExpenseCashLines.map(line => ({ label: `  ${line.name}`, amount: -line.amount })), { label: "Taxes", amount: -statements.cashPaidForTaxes }, { label: "Total Cash Paid", amount: -statements.totalCashPaid, emphasis: "total" }, { label: "Net Cash from Operating Activities", amount: statements.operatingCashFlow, emphasis: "grand" }] },
+      { title: "B. Cash Flows from Investing Activities", rows: [...statements.investingCashLines.map(line => ({ label: line.name, amount: line.amount })), { label: "Net Cash from Investing Activities", amount: statements.investingCashFlow, emphasis: "total" }] },
+      { title: "C. Cash Flows from Financing Activities", rows: [...statements.financingCashLines.map(line => ({ label: line.name, amount: line.amount })), { label: "Net Cash from Financing Activities", amount: statements.financingCashFlow, emphasis: "total" }] },
+      ...(Math.abs(statements.otherCashFlow) >= 0.01 ? [{ title: "Other Cash Movements — Review Classification", rows: statements.otherCashMovementLines.map(line => ({ label: line.name, amount: line.amount })) }] : []),
+      { title: "Cash Reconciliation", rows: [{ label: "Net Increase or Decrease in Cash", amount: statements.netCashFlow }, { label: `Closing Cash at ${formatAccountDate(end)}`, amount: statements.endingCashBalance, emphasis: "grand" }, ...(Math.abs(statements.cashActivityDifference) >= 0.01 ? [{ label: "Difference from Cash and Bank Activity — review", amount: statements.cashActivityDifference }] : []), ...(Math.abs(statements.cashBalanceDifference) >= 0.01 ? [{ label: "Difference from Balance Sheet Cash — review", amount: statements.cashBalanceDifference }] : [])] },
     ];
     if (view === "balance") {
       const balanceSections: AccountsPdfSection[] = [...ACCOUNT_GROUPS]
@@ -125,7 +128,7 @@ export default function AccountsPage() {
       return balanceSections;
     }
     return [];
-  }, [view, statements, report, cashActivity, openingEnd, end]);
+  }, [view, statements, report, cashActivity, openingEnd, start, end]);
 
   async function downloadPagelessPdf() {
     if (view === "entries" || !valid) return;
