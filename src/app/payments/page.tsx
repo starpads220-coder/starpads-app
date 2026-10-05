@@ -802,18 +802,23 @@ export default function PaymentsPage() {
               No production entries found for this period.
             </div>
           ) : (
-            <table className="min-w-full divide-y divide-gray-200">
+            <table className="w-full min-w-[1320px] table-fixed divide-y divide-gray-200">
+              <colgroup>
+                <col className="w-[17%]" /><col className="w-[6%]" />
+                <col className="w-[9%]" /><col className="w-[9%]" /><col className="w-[10%]" /><col className="w-[10%]" /><col className="w-[10%]" />
+                <col className="w-[6%]" /><col className="w-[8%]" /><col className="w-[7%]" /><col className="w-[8%]" />
+              </colgroup>
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pieces</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Due Amount</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Paid Amount</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Gross paid (paid date)</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">PAYE withheld (paid date)</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Net paid (paid date)</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase"><span className="block text-[10px] tracking-wider">UGX</span>Due Amount</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase"><span className="block text-[10px] tracking-wider">UGX</span>Paid Amount</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase"><span className="block text-[10px] tracking-wider">UGX</span>Gross paid (paid date)</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase"><span className="block text-[10px] tracking-wider">UGX</span>PAYE withheld (paid date)</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase"><span className="block text-[10px] tracking-wider">UGX</span>Net paid (paid date)</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Days</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Avg/Day</th>
+                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase"><span className="block text-[10px] tracking-wider">UGX</span>Avg/Day</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Perf.</th>
                   <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
                 </tr>
@@ -838,18 +843,18 @@ export default function PaymentsPage() {
                       <td className="px-4 py-3 text-sm text-gray-700">
                         {emp.totalPieces.toLocaleString()}
                       </td>
-                      <td className="px-4 py-3 text-sm font-medium text-amber-600">
-                        {emp.dueAmount > 0 ? `UGX ${emp.dueAmount.toLocaleString()}` : "—"}
+                      <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-medium text-amber-600">
+                        {emp.dueAmount > 0 ? emp.dueAmount.toLocaleString() : "—"}
                       </td>
-                      <td className="px-4 py-3 text-sm font-medium text-ugx">
-                        {emp.paidAmount > 0 ? `UGX ${emp.paidAmount.toLocaleString()}` : "—"}
+                      <td className="whitespace-nowrap px-4 py-3 text-right text-sm font-medium text-ugx">
+                        {emp.paidAmount > 0 ? emp.paidAmount.toLocaleString() : "—"}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-700">UGX {(confirmedTotalsByEmployee.get(emp.employeeId)?.gross ?? 0).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-sm text-red-700">UGX {(confirmedTotalsByEmployee.get(emp.employeeId)?.paye ?? 0).toLocaleString()}</td>
-                      <td className="px-4 py-3 text-sm text-green-700">UGX {(confirmedTotalsByEmployee.get(emp.employeeId)?.net ?? 0).toLocaleString()}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-700">{(confirmedTotalsByEmployee.get(emp.employeeId)?.gross ?? 0).toLocaleString()}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-red-700">{(confirmedTotalsByEmployee.get(emp.employeeId)?.paye ?? 0).toLocaleString()}</td>
+                      <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-green-700">{(confirmedTotalsByEmployee.get(emp.employeeId)?.net ?? 0).toLocaleString()}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">{emp.daysWorked}</td>
-                      <td className="px-4 py-3 text-sm text-gray-700">
-                        UGX {Math.round((emp.dueAmount + emp.paidAmount) / emp.daysWorked).toLocaleString()}
+                      <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-700">
+                        {Math.round((emp.dueAmount + emp.paidAmount) / emp.daysWorked).toLocaleString()}
                       </td>
                       <td className="px-4 py-3">
                         <StatusBadge value={emp.avgPerformance} />
@@ -874,12 +879,13 @@ export default function PaymentsPage() {
                     </tr>
                     {expandedEmployee === emp.employeeId && (
                       <tr key={`${emp.employeeId}-detail`}>
-                        <td colSpan={8} className="px-0 py-0">
-                          <div className="bg-gray-50 px-6 py-4 border-t border-gray-200">
+                        <td colSpan={11} className="px-0 py-0">
+                          <div className="w-full bg-gray-50 px-6 py-4 border-t border-gray-200">
                             <h4 className="text-sm font-semibold text-gray-700 mb-3">
                               Entries for {emp.employeeName}
                             </h4>
-                            <table className="min-w-full text-sm">
+                            <table className="w-full min-w-[1040px] table-fixed text-sm">
+                              <colgroup><col className="w-[11%]" /><col className="w-[15%]" /><col className="w-[15%]" /><col className="w-[8%]" /><col className="w-[8%]" /><col className="w-[13%]" /><col className="w-[10%]" /><col className="w-[9%]" /><col className="w-[11%]" /></colgroup>
                               <thead>
                                 <tr className="text-xs text-gray-500 uppercase border-b border-gray-200">
                                   <th className="text-left pb-2 pr-4">Date</th>
@@ -887,7 +893,7 @@ export default function PaymentsPage() {
                                   <th className="text-left pb-2 pr-4">Material</th>
                                   <th className="text-left pb-2 pr-4">Pieces</th>
                                   <th className="text-left pb-2 pr-4">Target</th>
-                                  <th className="text-left pb-2 pr-4">Earnings</th>
+                                  <th className="whitespace-nowrap pb-2 pr-4 text-right"><span className="block text-[10px] tracking-wider">UGX</span>Earnings</th>
                                   <th className="text-left pb-2 pr-4">Perf.</th>
                                   <th className="text-left pb-2 pr-4">Status</th>
                                   <th className="text-right pb-2 pr-4">Actions</th>
@@ -916,8 +922,8 @@ export default function PaymentsPage() {
                                         <td className="py-2 pr-4 text-gray-500">
                                           {entry.targetPieces}
                                         </td>
-                                        <td className="py-2 pr-4 text-ugx font-medium">
-                                          UGX {entry.earningsUgx.toLocaleString()}
+                                        <td className="whitespace-nowrap py-2 pr-4 text-right text-ugx font-medium">
+                                          {entry.earningsUgx.toLocaleString()}
                                         </td>
                                         <td className="py-2 pr-4">
                                           <StatusBadge value={entry.performancePct} />
@@ -983,8 +989,8 @@ export default function PaymentsPage() {
                                           <td className="py-2 pr-4 text-gray-500">
                                             {entry.targetPieces}
                                           </td>
-                                          <td className="py-2 pr-4 text-ugx font-medium">
-                                            UGX {entry.earningsUgx.toLocaleString()}
+                                          <td className="whitespace-nowrap py-2 pr-4 text-right text-ugx font-medium">
+                                            {entry.earningsUgx.toLocaleString()}
                                           </td>
                                           <td className="py-2 pr-4">
                                             <StatusBadge value={entry.performancePct} />
