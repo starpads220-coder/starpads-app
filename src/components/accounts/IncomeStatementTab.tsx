@@ -2,6 +2,7 @@
 import { useState } from "react";
 import type { FinancialStatements } from "@/lib/financial-statements";
 import { formatUgx } from "@/components/accounts/StatementTable";
+import { formatAccountDate } from "@/lib/account-period";
 
 export function IncomeStatementTab({ statement, start, end }: { statement: FinancialStatements; start: string; end: string }) {
   const [otherIncomeOpen, setOtherIncomeOpen] = useState(false);
@@ -10,7 +11,7 @@ export function IncomeStatementTab({ statement, start, end }: { statement: Finan
   const section = (label: string) => <tr key={label} className="bg-gray-50"><th colSpan={2} className="px-5 py-3 text-left text-xs font-bold uppercase tracking-wide text-gray-600">{label}</th></tr>;
   const total = (label: string, amount: number, grand = false) => <tr key={label} className={grand ? "border-y-4 border-double border-gray-900 font-bold" : "border-t-2 border-gray-500 font-semibold"}><td className="px-5 py-3 text-gray-900">{label}</td><td className="px-5 py-3 text-right tabular-nums">{formatUgx(amount)}</td></tr>;
   return <section className="overflow-hidden rounded-xl border bg-white">
-    <div className="accounts-no-print border-b px-5 py-4"><h2 className="text-xl font-bold text-gray-900">Income Statement (Profit &amp; Loss)</h2><p className="mt-1 text-sm text-gray-500">{start} to {end} · Revenue and expenses update automatically from their entry forms.</p></div>
+    <div className="accounts-no-print border-b px-5 py-4"><h2 className="text-xl font-bold text-gray-900">Income Statement (Profit &amp; Loss)</h2><p className="mt-1 text-sm text-gray-500">{formatAccountDate(start)} to {formatAccountDate(end)} · Revenue and expenses update automatically from their entry forms.</p></div>
     <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><tbody>
       {section("Revenue")}
       {line("Sales of Pads", statement.salesOfPads)}

@@ -1,6 +1,7 @@
 import { Fragment } from "react";
 import type { buildAccounts } from "@/lib/accounts";
 import { balanceSheetGroupTotal, balanceSheetRows, balanceSheetTotals } from "@/lib/balance-sheet-sections";
+import { formatAccountDate } from "@/lib/account-period";
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
 
@@ -15,7 +16,7 @@ const amount = (value: number) => value === 0
   ? "—"
   : value.toLocaleString(undefined, { maximumFractionDigits: 2 });
 
-export function BalanceSheetTable({ columns }: { columns: BalanceSheetColumn[] }) {
+export function BalanceSheetTable({ columns, activeEnd }: { columns: BalanceSheetColumn[]; activeEnd?: string }) {
   const rowsFor = (group: string) => [...new Map(columns.flatMap(column => balanceSheetRows(column.report, group)).map(row => [row.code, row])).values()];
   const balance = (column: BalanceSheetColumn, group: string, code: string) => balanceSheetRows(column.report, group).find(row => row.code === code)?.balance ?? 0;
   const groupTotal = (column: BalanceSheetColumn, group: string) => balanceSheetGroupTotal(column.report, group);
@@ -46,14 +47,14 @@ export function BalanceSheetTable({ columns }: { columns: BalanceSheetColumn[] }
     <section className="overflow-hidden rounded-xl border bg-white">
       <div className="accounts-no-print border-b px-5 py-4">
         <h2 className="text-lg font-semibold">Balance Sheet</h2>
-        <p className="text-sm text-gray-500">Self-computed from classified sales, expenses, and account journals · UGX</p>
+        <p className="text-sm text-gray-500">{activeEnd ? `As at ${formatAccountDate(activeEnd)} · ` : ""}Self-computed from classified sales, expenses, and account journals · UGX</p>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full min-w-[760px] text-sm">
           <thead>
             <tr className="border-b bg-gray-50">
               <th className="px-4 py-3 text-left">Account</th>
-              {columns.map(column => <th key={column.label} className="px-4 py-3 text-right"><span className="block">{column.label}</span><span className="block text-xs font-normal text-gray-500">As of {column.end}</span></th>)}
+              {columns.map(column => <th key={column.label} className="px-4 py-3 text-right"><span className="block">{column.label}</span><span className="block text-xs font-normal text-gray-500">As at {formatAccountDate(column.end)}</span></th>)}
             </tr>
           </thead>
           <tbody>

@@ -35,6 +35,8 @@ export interface FinancialStatements {
   netCashFlow: number;
   beginningCashBalance: number;
   endingCashBalance: number;
+  balanceSheetCashBalance: number;
+  cashBalanceDifference: number;
   assets: number;
   liabilities: number;
   equity: number;
@@ -55,8 +57,12 @@ export function buildFinancialStatements(
   payments: ConfirmedLaborPayment[] = [],
   productionCosts: ProductionCostEntry[] = [],
   taxEntries: TaxEntry[] = [],
-  payrollEntries: PayrollProductionEntry[] = [],
+  _payrollEntries: PayrollProductionEntry[] = [],
+  openingCashBalanceOverride?: number,
 ): FinancialStatements {
+  // Kept in the public signature for compatibility with existing callers; labor
+  // on this statement is deliberately recognized from confirmed payments.
+  void _payrollEntries;
   const periodSales = sales.filter(entry => entry.date >= start && entry.date <= end && resolveAccounting(entry, "sale"));
   const periodExpenses = expenses.filter(entry => entry.date >= start && entry.date <= end);
   const expenseCode = (entry: LedgerSource) => resolveAccounting(entry, "expense")?.accountCode ?? entry.accounting?.accountCode ?? "";
@@ -94,10 +100,11 @@ export function buildFinancialStatements(
   const otherIncome = revenue - salesOfPads;
   const purchasesOfRawMaterials = periodExpenses.filter(isRawMaterialPurchase).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const carriageInwards = periodExpenses.filter(isRawMaterialCarriageExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
-  const newPaymentIds = new Set(payments.filter(payment => payment.payrollVersion === 2).map(payment => payment.id));
-  const accruedLabor = payrollEntries.filter(entry => entry.date >= start && entry.date <= end && (entry.paymentStatus !== "paid" || newPaymentIds.has(entry.paymentId ?? ""))).reduce((sum, entry) => sum + (Number(entry.earningsUgx) || 0), 0);
-  const legacyPaidLabor = payments.filter(entry => entry.payrollVersion !== 2 && entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0), 0);
-  const directLabor = accruedLabor + legacyPaidLabor;
+  // Income Statement labor is period activity by confirmation date. Production
+  // entries remain in the Balance Sheet accrual ledger and are not re-posted.
+  const directLabor = payments
+    .filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end)
+    .reduce((sum, entry) => sum + (Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0), 0);
   const recordedOtherCosts = productionCosts.filter(entry => entry.date >= start && entry.date <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   const legacyOtherCosts = periodExpenses.filter(isOtherProductionExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const otherProductionCosts = recordedOtherCosts + legacyOtherCosts;
@@ -143,8 +150,10 @@ export function buildFinancialStatements(
   const financingCashFlow = journalCashFlowFor(["Current Liabilities", "Non-Current Liabilities", "Equity"]);
   const netCashFlow = report.rows.filter(row => SETTLEMENT_CODES.includes(row.code)).reduce((sum, row) => sum + row.movement, 0);
   const otherCashFlow = netCashFlow - operatingCashFlow - investingCashFlow - financingCashFlow;
-  const endingCashBalance = report.rows.filter(row => SETTLEMENT_CODES.includes(row.code)).reduce((sum, row) => sum + row.balance, 0);
-  const beginningCashBalance = endingCashBalance - netCashFlow;
+  const balanceSheetCashBalance = report.rows.filter(row => SETTLEMENT_CODES.includes(row.code)).reduce((sum, row) => sum + row.balance, 0);
+  const beginningCashBalance = openingCashBalanceOverride ?? (balanceSheetCashBalance - netCashFlow);
+  const endingCashBalance = beginningCashBalance + netCashFlow;
+  const cashBalanceDifference = endingCashBalance - balanceSheetCashBalance;
   const assets = report.assets;
   const liabilities = report.liabilities;
   const equity = report.equity;
@@ -180,6 +189,8 @@ export function buildFinancialStatements(
     netCashFlow,
     beginningCashBalance,
     endingCashBalance,
+    balanceSheetCashBalance,
+    cashBalanceDifference,
     assets,
     liabilities,
     equity,
