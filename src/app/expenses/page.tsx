@@ -123,6 +123,11 @@ export default function ExpensesPage() {
   const calculatedAmount = accounting.accountCode === "6010"
     ? form.labourTotalPayments
     : form.unitCost * form.itemCount;
+  const isDepreciation = accounting.accountCode === "6200";
+  const depreciationLikeRecords = useMemo(() => expenses.filter(expense => {
+    if (expense.accounting?.accountCode === "6200") return false;
+    return /depreciation/i.test(`${expense.accounting?.accountName ?? ""} ${expense.category ?? ""} ${expense.subcategory ?? ""} ${expense.description ?? ""}`);
+  }), [expenses]);
 
   const { data: employees = [] } = useCollectionQuery<{ id: string; name: string; isActive?: boolean; active?: boolean }>(
     "employees", [orderBy("name")], { staleTime: 10 * 60 * 1000 }
@@ -243,14 +248,15 @@ export default function ExpensesPage() {
     setFormSuccess(false);
     try {
       if (!Number.isFinite(calculatedAmount) || calculatedAmount <= 0) throw new Error("Enter an expense amount greater than zero.");
-      if (!expensePayers.some(person => person.id === form.paidBy)) throw new Error("Select an approved employee under Paid By.");
-      if (!form.receiptRef.trim()) throw new Error("Enter a Payment Voucher No.");
+      if (!isDepreciation && !expensePayers.some(person => person.id === form.paidBy)) throw new Error("Select an approved employee under Paid By.");
+      if (!isDepreciation && !form.receiptRef.trim()) throw new Error("Enter a Payment Voucher No.");
       const validatedAccounting = validateAccounting(accounting, "expense");
       await addDoc(collection(db, "expenses"), {
         accounting: validatedAccounting,
         ...form,
         category: validatedAccounting.accountName,
-        receiptRef: form.receiptRef.trim(),
+        paidBy: isDepreciation ? "" : form.paidBy,
+        receiptRef: isDepreciation ? "" : form.receiptRef.trim(),
         amountUgx: calculatedAmount,
         createdAt: Timestamp.now(),
       });
@@ -432,6 +438,7 @@ export default function ExpensesPage() {
       <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
         <h2 className="text-lg font-semibold">Expense Entry</h2>
         <AccountingFields value={accounting} onChange={setAccounting} kind="expense" />
+        {depreciationLikeRecords.length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p className="font-semibold">Existing depreciation-like records require review</p><p className="mt-1">These entries were not changed automatically: {depreciationLikeRecords.map(expense => `${expense.date} — ${expense.description || expense.id}`).join("; ")}.</p></div>}
         {formError && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-4 rounded-xl">
             {formError}
@@ -467,20 +474,20 @@ export default function ExpensesPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Amount (UGX)</label>
             <input type="number" value={calculatedAmount || ""} readOnly required min={0} className="w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-md text-sm" />
           </div>
-          <div>
+          {!isDepreciation && <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Paid By</label>
             <select value={form.paidBy} onChange={(e) => setForm({ ...form, paidBy: e.target.value })}
               required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
               <option value="">Select...</option>
               {expensePayers.map((employee) => (<option key={employee.id} value={employee.id}>{employee.name}</option>))}
             </select>
-          </div>
-          <div>
+          </div>}
+          {!isDepreciation && <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Payment Voucher No</label>
             <input type="text" value={form.receiptRef} onChange={(e) => { e.currentTarget.setCustomValidity(""); setForm({ ...form, receiptRef: e.target.value }); }}
               onInvalid={(e) => e.currentTarget.setCustomValidity("Enter a Payment Voucher No.")}
               required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
-          </div>
+          </div>}
         </div>
         <div className="flex justify-end">
           <button type="submit" disabled={saving}

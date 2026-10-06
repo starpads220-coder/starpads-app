@@ -11,6 +11,8 @@ const EXPENSE_ACCOUNT_OPTIONS = [
   { name: "Machine Repair and Maintenance", code: "6131" },
   { name: "Sundries", code: "6171" },
   { name: "Other Costs", code: "6172" },
+  { name: "Small Tools and Equipment", code: "6050" },
+  { name: "Depreciation", code: "6200" },
 ] as const;
 export function AccountingFields({ value, onChange, kind }: { value: AccountingSelection; onChange: (v: AccountingSelection) => void; kind: "sale" | "expense" }) {
   const groups: AccountGroup[] = kind === "sale" ? ["Income", "Other Income"] : ["Cost of Sales", "Expenses"];
@@ -39,14 +41,15 @@ export function AccountingFields({ value, onChange, kind }: { value: AccountingS
         const previous = saved.find(a => a.accountCode === e.target.value);
         const accountGroup = a?.group ?? previous?.accountGroup ?? (groups.includes(value.accountGroup) ? value.accountGroup : defaultGroup);
         const expenseLabel = kind === "expense" ? EXPENSE_ACCOUNT_OPTIONS.find(option => option.code === e.target.value)?.name : undefined;
-        onChange({ ...value, accountGroup, accountCode: a?.code ?? previous?.accountCode ?? `custom:${accountGroup}:`, accountName: expenseLabel ?? a?.name ?? previous?.accountName ?? "", accountDetail: "" });
+        const accountCode = a?.code ?? previous?.accountCode ?? `custom:${accountGroup}:`;
+        onChange({ ...value, accountGroup, accountCode, accountName: expenseLabel ?? a?.name ?? previous?.accountName ?? "", accountDetail: "", ...(kind === "expense" && accountCode === "6200" ? { settlementCode: "" } : {}) });
       }}><option value="">Select account...</option>{kind === "expense" ? EXPENSE_ACCOUNT_OPTIONS.map(option => <option key={option.name} value={option.code}>{option.name}</option>) : groups.map(group => {
         const options = availableAccounts.filter(account => account.group === group);
         return options.length > 0 ? <optgroup key={group} label={group}>{options.map(account => <option key={account.code} value={account.code}>{account.name}</option>)}</optgroup> : null;
       })}{kind === "sale" && saved.map(a => <option key={a.accountCode} value={a.accountCode}>{a.accountName} (custom)</option>)}{kind === "sale" && <option value="custom">Custom subcategory...</option>}</select></label>
       {kind === "sale" && value.accountCode.startsWith("custom:") && <label className="text-sm">Custom subcategory name<input required maxLength={100} className={input} value={value.accountName} onChange={e => onChange({ ...value, accountName: e.target.value, accountCode: `custom:${value.accountGroup}:${e.target.value.trim().toLowerCase()}` })} /></label>}
       {kind === "expense" && ["5080", "5090"].includes(value.accountCode) && <label className="text-sm">{value.accountCode === "5080" ? "Direct material details" : "Direct labour details"}<input required maxLength={120} className={input} value={value.accountDetail ?? ""} onChange={e => onChange({ ...value, accountDetail: e.target.value })} placeholder={value.accountCode === "5080" ? "Enter the material purchased or used" : "Enter the labour activity or worker details"} /></label>}
-      <label className="text-sm">{kind === "sale" ? "Payment Method" : "Paid from"}<select required className={input} value={value.settlementCode} onChange={e => onChange({ ...value, settlementCode: e.target.value })}>{kind === "expense" ? <option value="" disabled hidden /> : <option value="">Select payment method...</option>}{settlementAccounts.map(account => <option key={account.code} value={account.code}>{account.name}</option>)}</select></label>
+      {!(kind === "expense" && value.accountCode === "6200") && <label className="text-sm">{kind === "sale" ? "Payment Method" : "Paid from"}<select required className={input} value={value.settlementCode} onChange={e => onChange({ ...value, settlementCode: e.target.value })}>{kind === "expense" ? <option value="" disabled hidden /> : <option value="">Select payment method...</option>}{settlementAccounts.map(account => <option key={account.code} value={account.code}>{account.name}</option>)}</select></label>}
     </div>
   </fieldset>;
 }

@@ -49,6 +49,7 @@ export function CashFlowStatementTab({ statement, start, end }: { statement: Fin
         {total(`Closing Cash at ${formatAccountDate(end)}`, statement.endingCashBalance, true)}
       </tbody></table></div>
     </section>
+    <p className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">Non-cash reconciliation note: Depreciation of {formatUgx(statement.nonCashAdjustments)} reduced Net Income for this period but did not reduce Bank or Cash.</p>
     <p className="accounts-no-print rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">PAYE withheld is a liability, not a cash payment. It appears under Cash paid for Taxes only when a PAYE remittance is recorded. Current Sales and Expense entries have settlement accounts but no credit-status field, so they are treated as fully received or paid unless an existing record explicitly contains an unpaid status or partial paid/received amount.</p>
     {Math.abs(statement.transfersNetEffect) >= 0.01 && <p role="alert" className="accounts-no-print rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900">Transfer check failed: internal Bank/Cash transfers affected cash flow by {formatUgx(statement.transfersNetEffect)}.</p>}
     {Math.abs(statement.cashActivityDifference) >= 0.01 && <p role="alert" className="accounts-no-print rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Cash movement reconciliation difference: {formatUgx(statement.cashActivityDifference)}. The classified statement does not match Cash and Bank Activity.</p>}

@@ -30,7 +30,8 @@ export function validateAccounting(value: AccountingSelection, kind: "sale" | "e
   const allowed = kind === "sale" ? ["Income", "Other Income"] : ["Cost of Sales", "Expenses"];
   const known = ACCOUNTS.find(a => a.code === value.accountCode);
   const needsDetail = kind === "expense" && ["5080", "5090"].includes(value.accountCode);
-  if (!allowed.includes(value.accountGroup) || !value.accountName.trim() || (!known && !value.accountCode.startsWith("custom:")) || (known && known.group !== value.accountGroup) || !SETTLEMENT_CODES.includes(value.settlementCode) || (needsDetail && !value.accountDetail?.trim())) throw new Error(needsDetail ? "Enter the specific direct material or direct labour details." : "Select an account / subcategory and cash/bank account.");
+  const nonCashDepreciation = kind === "expense" && value.accountCode === "6200";
+  if (!allowed.includes(value.accountGroup) || !value.accountName.trim() || (!known && !value.accountCode.startsWith("custom:")) || (known && known.group !== value.accountGroup) || (!nonCashDepreciation && !SETTLEMENT_CODES.includes(value.settlementCode)) || (needsDetail && !value.accountDetail?.trim())) throw new Error(needsDetail ? "Enter the specific direct material or direct labour details." : nonCashDepreciation ? "Select the Depreciation account." : "Select an account / subcategory and cash/bank account.");
   return { ...value, accountName: value.accountCode === "4082" ? "Trainings" : value.accountName.trim(), accountDetail: value.accountDetail?.trim() ?? "" };
 }
 export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number; paymentMethod?: string; description?: string; customerName?: string; category?: string; subcategory?: string; status?: string; paymentStatus?: string; amountReceived?: number; receivedAmount?: number; amountPaid?: number; paidAmount?: number }

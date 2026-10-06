@@ -1,7 +1,7 @@
 import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, resolveAccounting, type Journal, type LedgerSource, type PayeRemittanceEntry, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type buildAccounts } from "@/lib/accounts";
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
-const OPERATING_EXPENSE_NAMES = ["Office and Administration", "Legal and Professional Fees", "Salaries and Wages", "Fuel and Transport", "Data and Communication Costs", "Utilities", "Machine Repair and Maintenance", "Sundries", "Other Costs"];
+const OPERATING_EXPENSE_NAMES = ["Office and Administration", "Legal and Professional Fees", "Salaries and Wages", "Fuel and Transport", "Data and Communication Costs", "Utilities", "Machine Repair and Maintenance", "Sundries", "Other Costs", "Small Tools and Equipment", "Depreciation"];
 export interface ConfirmedLaborPayment { id: string; paidDate: string; status?: string; grossAmount?: number; totalAmount?: number; amountUgx?: number; payrollVersion?: number; netPayAmount?: number }
 export interface CashFlowLine { name: string; amount: number }
 
@@ -176,6 +176,7 @@ export function buildFinancialStatements(
   for (const entry of periodExpenses) {
     const amount = actualCashAmount(entry, "expense");
     if (amount <= 0) continue;
+    if (expenseCode(entry) === "6200") continue;
     if (isRawMaterialPurchase(entry)) cashPaidForRawMaterials += amount;
     else if (isRawMaterialCarriageExpense(entry)) cashPaidForCarriageInwards += amount;
     else if (!isDirectLaborExpense(entry) && !isOtherProductionExpense(entry) && !isTaxExpense(entry)) {

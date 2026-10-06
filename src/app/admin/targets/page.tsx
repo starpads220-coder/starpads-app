@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, FormEvent } from "react";
+import { Fragment, useState, useMemo, FormEvent } from "react";
 import {
   collection,
   addDoc,
@@ -29,7 +29,7 @@ interface StageTarget {
 }
 
 type ProductionActivity = "PINNING" | "FOLDING";
-type TargetVariant = "stage" | "materialPieces" | "materialMeters" | "activity";
+type TargetVariant = "stage" | "combinedStage" | "materialPieces" | "materialMeters" | "activity";
 
 interface StageRow {
   stageId: StageId;
@@ -43,19 +43,11 @@ interface StageRow {
   activity: ProductionActivity | null;
   variant: TargetVariant;
   label: string;
-  sourceRate?: number;
+  secondaryStageId?: StageId;
   exists: boolean;
 }
 
 const CUTTING_MATERIALS: MaterialType[] = ["FLEECE", "FLANNEL", "PUL"];
-
-const MATERIAL_LABELS: Record<MaterialType, string> = {
-  FLEECE: "Fleece (Microfiber)",
-  FLANNEL: "Flannel",
-  PUL: "PUL",
-  COMBINED: "Combined",
-  MICROFIBER: "Microfiber",
-};
 
 const REVISED_TARGETS: Record<StageId, { defaultTarget: number; defaultWageRate: number; unit: string }> = {
   "STG-01": { defaultTarget: 800, defaultWageRate: 10000, unit: "pieces" },
@@ -67,14 +59,22 @@ const REVISED_TARGETS: Record<StageId, { defaultTarget: number; defaultWageRate:
   "STG-07": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
   "STG-08": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
   "STG-09": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
-  "STG-10": { defaultTarget: 120, defaultWageRate: 10000, unit: "packs" },
+  "STG-10": { defaultTarget: 120, defaultWageRate: 10000, unit: "pieces" },
 };
 
 const REVISED_MATERIAL_TARGETS: Record<"FLEECE" | "FLANNEL" | "PUL", number> = { FLEECE: 800, FLANNEL: 1000, PUL: 1000 };
 const REVISED_METER_TARGETS: Record<"FLEECE" | "FLANNEL" | "PUL", number> = { FLEECE: 26, FLANNEL: 50, PUL: 50 };
-const REVISED_METER_RATES: Record<"FLEECE" | "FLANNEL" | "PUL", number> = { FLEECE: 381, FLANNEL: 200, PUL: 200 };
 const REVISED_ACTIVITY_TARGETS: Record<ProductionActivity, number> = { PINNING: 500, FOLDING: 700 };
 const ACTIVITY_LABELS: Record<ProductionActivity, string> = { PINNING: "Pinning", FOLDING: "Folding" };
+const TARGET_LABELS: Partial<Record<StageId, string>> = {
+  "STG-02": "Sewing inner (middle)",
+  "STG-03": "Sewing outer (top layer)",
+  "STG-04": "Overlocking",
+  "STG-05": "Pouch making & cutting",
+  "STG-07": "Checking",
+  "STG-08": "Holling",
+  "STG-10": "Packaging",
+};
 
 interface WorkerTarget {
   id: string;
@@ -126,20 +126,30 @@ export default function AdminTargetsPage() {
   const stageRows: StageRow[] = [];
   for (const stageId of STAGE_ORDER) {
     const stage = stages.find((s) => s.stageId === stageId);
-    if (!stage) {
-      stageRows.push({ stageId, ...REVISED_TARGETS[stageId], material: null, activity: null, variant: "stage", label: STAGE_LABELS[stageId], exists: false });
-    } else if (stage.stageId === "STG-01") {
+    const resolved: StageTarget = stage ?? { stageId, ...REVISED_TARGETS[stageId], materialTargets: stageId === "STG-01" ? REVISED_MATERIAL_TARGETS : undefined, materialMeterTargets: stageId === "STG-01" ? REVISED_METER_TARGETS : undefined, activityTargets: stageId === "STG-09" ? REVISED_ACTIVITY_TARGETS : undefined };
+    if (stageId === "STG-01") {
       for (const mat of CUTTING_MATERIALS) {
         const material = mat as "FLEECE" | "FLANNEL" | "PUL";
-        stageRows.push({ ...stage, material, activity: null, variant: "materialPieces", unit: "pieces", label: `Cutting & Measuring — ${MATERIAL_LABELS[material]}`, exists: true });
-        stageRows.push({ ...stage, material, activity: null, variant: "materialMeters", unit: "meters", label: `Cutting in Meters — ${MATERIAL_LABELS[material]}`, sourceRate: REVISED_METER_RATES[material], exists: true });
+        const pieceLabel = material === "FLEECE" ? "Cutting & measuring fleece (micro fibre)" : `Cutting & measuring (${material === "PUL" ? "PUL" : "flannel"})`;
+        const meterLabel = material === "FLEECE" ? "Cutting in meters (micro fibre)" : `Cutting in meters (${material === "PUL" ? "PUL" : "flannel"})`;
+        stageRows.push({ ...resolved, material, activity: null, variant: "materialPieces", unit: "pieces", label: pieceLabel, exists: !!stage });
+        stageRows.push({ ...resolved, material, activity: null, variant: "materialMeters", unit: "meters", label: meterLabel, exists: !!stage });
       }
-    } else if (stage.stageId === "STG-09") {
-      for (const activity of ["PINNING", "FOLDING"] as ProductionActivity[]) stageRows.push({ ...stage, material: null, activity, variant: "activity", label: ACTIVITY_LABELS[activity], exists: true });
+    } else if (stageId === "STG-05") {
+      const pairedStage = stages.find(item => item.stageId === "STG-06");
+      stageRows.push({ ...resolved, material: null, activity: null, variant: "combinedStage", label: TARGET_LABELS[stageId]!, secondaryStageId: "STG-06", exists: !!stage && !!pairedStage });
+    } else if (stageId === "STG-06") {
+      continue;
+    } else if (stageId === "STG-09") {
+      for (const activity of ["PINNING", "FOLDING"] as ProductionActivity[]) stageRows.push({ ...resolved, material: null, activity, variant: "activity", label: ACTIVITY_LABELS[activity], exists: !!stage });
     } else {
-      stageRows.push({ ...stage, material: null, activity: null, variant: "stage", label: STAGE_LABELS[stage.stageId], exists: true });
+      stageRows.push({ ...resolved, material: null, activity: null, variant: "stage", label: TARGET_LABELS[stageId] ?? STAGE_LABELS[stageId], exists: !!stage });
     }
   }
+  const pieceTargetRows = stageRows.filter(row => row.variant !== "materialMeters");
+  const meterTargetRows = stageRows.filter(row => row.variant === "materialMeters");
+  const orderedStageRows = [...pieceTargetRows, ...meterTargetRows];
+  const extraOrDuplicateStages = stages.filter((stage, index) => !STAGE_ORDER.includes(stage.stageId) || stages.findIndex(item => item.stageId === stage.stageId) !== index);
 
   const handleCreateStage = async (stageId: string) => {
     setSaving(true);
@@ -155,6 +165,7 @@ export default function AdminTargetsPage() {
         activityTargets: stageId === "STG-09" ? REVISED_ACTIVITY_TARGETS : null,
         updatedAt: Timestamp.now(),
       });
+      if (stageId === "STG-05") await setDoc(doc(db, "productionStages", "STG-06"), { stageId: "STG-06", name: STAGE_LABELS["STG-06"], ...REVISED_TARGETS["STG-06"], updatedAt: Timestamp.now() });
       queryClient.invalidateQueries({ queryKey: ["productionStages"] });
     } finally {
       setSaving(false);
@@ -249,6 +260,10 @@ export default function AdminTargetsPage() {
           defaultWageRate: editWageRate,
           updatedAt: Timestamp.now(),
         });
+      } else if (row.variant === "combinedStage" && row.secondaryStageId) {
+        const update = { defaultTarget: editValue, defaultWageRate: editWageRate, updatedAt: Timestamp.now() };
+        await updateDoc(doc(db, "productionStages", row.stageId), update);
+        await updateDoc(doc(db, "productionStages", row.secondaryStageId), update);
       } else {
         await updateDoc(doc(db, "productionStages", row.stageId), {
           defaultTarget: editValue,
@@ -293,7 +308,7 @@ export default function AdminTargetsPage() {
 
       <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
-          <div><h2 className="text-lg font-semibold text-gray-900">Revised Production Targets</h2><p className="mt-1 text-sm text-gray-500">Piece and meter targets from the approved production target schedule. Amount is the wage earned when the full target is completed.</p></div>
+          <div><h2 className="text-lg font-semibold text-gray-900">Star Durable Pads Production Targets</h2><p className="mt-1 text-sm text-gray-500">15 canonical targets: 12 counted in pieces and 3 counted in meters. Amount is the wage earned when the full target is completed.</p></div>
           <button type="button" onClick={handleApplyRevisedTargets} disabled={saving} className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:opacity-50">{saving ? "Saving…" : "Apply revised targets"}</button>
         </div>
         <div className="overflow-x-auto">
@@ -301,29 +316,36 @@ export default function AdminTargetsPage() {
             <thead className="bg-gray-50">
               <tr>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stage</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Default Target</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Default Daily Wage (UGX)</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Price per unit</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Target Quantity</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount (UGX)</th>
+                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rate per Unit (UGX)</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Verification</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200">
-              {stageRows.map((row, i) => {
+              {orderedStageRows.map((row, i) => {
                 const editKey = `${row.stageId}-${row.variant}-${row.material ?? row.activity ?? "default"}`;
                 const isEditing = editingStage === row.stageId && editingVariant === row.variant && editingMaterial === row.material && editingActivity === row.activity;
                 const targetValue = row.variant === "materialPieces" && row.material ? row.materialTargets?.[row.material]
                   : row.variant === "materialMeters" && row.material ? row.materialMeterTargets?.[row.material]
                     : row.variant === "activity" && row.activity ? row.activityTargets?.[row.activity]
                       : row.defaultTarget;
-                const usesWorkbookRate = row.variant === "materialMeters" && row.material && targetValue === REVISED_METER_TARGETS[row.material as "FLEECE" | "FLANNEL" | "PUL"] && row.defaultWageRate === 10000;
-                const pricePerUnit = usesWorkbookRate && row.sourceRate ? row.sourceRate : targetValue ? row.defaultWageRate / targetValue : 0;
+                const pricePerUnit = targetValue ? row.defaultWageRate / targetValue : 0;
+                const groupHeading = i === 0 ? "Piece-count targets · Number of Pieces · Price per Piece" : i === pieceTargetRows.length ? "Meter-count targets · Number of Meters · Per Meter" : null;
+                const expectedTarget = row.variant === "materialPieces" && row.material ? REVISED_MATERIAL_TARGETS[row.material as "FLEECE" | "FLANNEL" | "PUL"] : row.variant === "materialMeters" && row.material ? REVISED_METER_TARGETS[row.material as "FLEECE" | "FLANNEL" | "PUL"] : row.variant === "activity" && row.activity ? REVISED_ACTIVITY_TARGETS[row.activity] : REVISED_TARGETS[row.stageId].defaultTarget;
+                const pairedStage = row.secondaryStageId ? stages.find(stage => stage.stageId === row.secondaryStageId) : null;
+                const expectedUnit = row.variant === "materialMeters" ? "meters" : "pieces";
+                const matches = row.exists && targetValue === expectedTarget && row.defaultWageRate === REVISED_TARGETS[row.stageId].defaultWageRate && row.unit === expectedUnit && (!row.secondaryStageId || (pairedStage?.defaultTarget === expectedTarget && pairedStage.defaultWageRate === REVISED_TARGETS[row.stageId].defaultWageRate && pairedStage.unit === expectedUnit));
                 return (
+                  <Fragment key={editKey}>
+                  {groupHeading && <tr className="bg-blue-50"><th colSpan={7} className="px-4 py-3 text-left text-sm font-semibold text-blue-900">{groupHeading}</th></tr>}
                   <tr key={editKey} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       {row.stageId} — {row.label}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-700">
                       {!row.exists ? (
                         <span className="text-gray-400 italic">Not configured</span>
                       ) : isEditing ? (
@@ -349,11 +371,12 @@ export default function AdminTargetsPage() {
                           className="w-28 px-2 py-1 border border-gray-300 rounded text-sm"
                         />
                       ) : (
-                        row.defaultWageRate ? `UGX ${row.defaultWageRate.toLocaleString()}` : "—"
+                        row.defaultWageRate ? row.defaultWageRate.toLocaleString() : "—"
                       )}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-700">{row.exists && pricePerUnit ? `UGX ${pricePerUnit.toLocaleString(undefined, { maximumFractionDigits: 2 })}` : "—"}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-700">{row.exists && pricePerUnit ? pricePerUnit.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{row.exists ? row.unit : <span className="text-gray-400 italic">—</span>}</td>
+                    <td className="px-4 py-3 text-sm"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${matches ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-800"}`}>{matches ? "Match" : "Mismatch"}</span></td>
                     <td className="px-4 py-3 text-right">
                       {!row.exists ? (
                         <button
@@ -389,6 +412,7 @@ export default function AdminTargetsPage() {
                       )}
                     </td>
                   </tr>
+                  </Fragment>
                 );
               })}
             </tbody>
@@ -409,6 +433,8 @@ export default function AdminTargetsPage() {
             </p>
           </div>
         )}
+        {extraOrDuplicateStages.length > 0 && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><p className="font-semibold">Additional or duplicate stored stage definitions need review</p><p className="mt-1">Left unchanged: {extraOrDuplicateStages.map(stage => `${stage.stageId}${stage.id ? ` (${stage.id})` : ""}`).join(", ")}.</p></div>}
+        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900"><p className="font-semibold">Verification note</p><p className="mt-1">Rates are calculated live as Amount ÷ Quantity and therefore retain full precision. For micro fibre meters, UGX 10,000 ÷ 26 = UGX {(10000 / 26).toLocaleString(undefined, { maximumFractionDigits: 2 })}, not the sheet’s UGX 381.</p></div>
       </section>
 
       <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
