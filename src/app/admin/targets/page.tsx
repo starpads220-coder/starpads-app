@@ -126,7 +126,29 @@ export default function AdminTargetsPage() {
   const stageRows: StageRow[] = [];
   for (const stageId of STAGE_ORDER) {
     const stage = stages.find((s) => s.stageId === stageId);
-    const resolved: StageTarget = stage ?? { stageId, ...REVISED_TARGETS[stageId], materialTargets: stageId === "STG-01" ? REVISED_MATERIAL_TARGETS : undefined, materialMeterTargets: stageId === "STG-01" ? REVISED_METER_TARGETS : undefined, activityTargets: stageId === "STG-09" ? REVISED_ACTIVITY_TARGETS : undefined };
+    const workbookTarget: StageTarget = {
+      stageId,
+      ...REVISED_TARGETS[stageId],
+      materialTargets: stageId === "STG-01" ? REVISED_MATERIAL_TARGETS : undefined,
+      materialMeterTargets: stageId === "STG-01" ? REVISED_METER_TARGETS : undefined,
+      activityTargets: stageId === "STG-09" ? REVISED_ACTIVITY_TARGETS : undefined,
+    };
+    const resolved: StageTarget = stage ? {
+      ...workbookTarget,
+      ...stage,
+      defaultTarget: stage.defaultTarget ?? workbookTarget.defaultTarget,
+      defaultWageRate: stage.defaultWageRate ?? workbookTarget.defaultWageRate,
+      unit: stage.unit || workbookTarget.unit,
+      materialTargets: stageId === "STG-01"
+        ? { ...REVISED_MATERIAL_TARGETS, ...stage.materialTargets }
+        : stage.materialTargets,
+      materialMeterTargets: stageId === "STG-01"
+        ? { ...REVISED_METER_TARGETS, ...stage.materialMeterTargets }
+        : stage.materialMeterTargets,
+      activityTargets: stageId === "STG-09"
+        ? { ...REVISED_ACTIVITY_TARGETS, ...stage.activityTargets }
+        : stage.activityTargets,
+    } : workbookTarget;
     if (stageId === "STG-01") {
       for (const mat of CUTTING_MATERIALS) {
         const material = mat as "FLEECE" | "FLANNEL" | "PUL";
@@ -320,7 +342,6 @@ export default function AdminTargetsPage() {
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount (UGX)</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rate per Unit (UGX)</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
-                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Verification</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
@@ -334,21 +355,15 @@ export default function AdminTargetsPage() {
                       : row.defaultTarget;
                 const pricePerUnit = targetValue ? row.defaultWageRate / targetValue : 0;
                 const groupHeading = i === 0 ? "Piece-count targets · Number of Pieces · Price per Piece" : i === pieceTargetRows.length ? "Meter-count targets · Number of Meters · Per Meter" : null;
-                const expectedTarget = row.variant === "materialPieces" && row.material ? REVISED_MATERIAL_TARGETS[row.material as "FLEECE" | "FLANNEL" | "PUL"] : row.variant === "materialMeters" && row.material ? REVISED_METER_TARGETS[row.material as "FLEECE" | "FLANNEL" | "PUL"] : row.variant === "activity" && row.activity ? REVISED_ACTIVITY_TARGETS[row.activity] : REVISED_TARGETS[row.stageId].defaultTarget;
-                const pairedStage = row.secondaryStageId ? stages.find(stage => stage.stageId === row.secondaryStageId) : null;
-                const expectedUnit = row.variant === "materialMeters" ? "meters" : "pieces";
-                const matches = row.exists && targetValue === expectedTarget && row.defaultWageRate === REVISED_TARGETS[row.stageId].defaultWageRate && row.unit === expectedUnit && (!row.secondaryStageId || (pairedStage?.defaultTarget === expectedTarget && pairedStage.defaultWageRate === REVISED_TARGETS[row.stageId].defaultWageRate && pairedStage.unit === expectedUnit));
                 return (
                   <Fragment key={editKey}>
-                  {groupHeading && <tr className="bg-blue-50"><th colSpan={7} className="px-4 py-3 text-left text-sm font-semibold text-blue-900">{groupHeading}</th></tr>}
+                  {groupHeading && <tr className="bg-blue-50"><th colSpan={6} className="px-4 py-3 text-left text-sm font-semibold text-blue-900">{groupHeading}</th></tr>}
                   <tr key={editKey} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       {row.stageId} — {row.label}
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-700">
-                      {!row.exists ? (
-                        <span className="text-gray-400 italic">Not configured</span>
-                      ) : isEditing ? (
+                      {isEditing ? (
                         <input
                           type="number"
                           value={editValue}
@@ -357,12 +372,10 @@ export default function AdminTargetsPage() {
                           className="w-24 px-2 py-1 border border-gray-300 rounded text-sm"
                           autoFocus
                         />
-                      ) : targetValue?.toLocaleString() ?? "—"}
+                      ) : targetValue.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">
-                      {!row.exists ? (
-                        <span className="text-gray-400 italic">—</span>
-                      ) : isEditing ? (
+                      {isEditing ? (
                         <input
                           type="number"
                           value={editWageRate}
@@ -374,9 +387,8 @@ export default function AdminTargetsPage() {
                         row.defaultWageRate ? row.defaultWageRate.toLocaleString() : "—"
                       )}
                     </td>
-                    <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-700">{row.exists && pricePerUnit ? pricePerUnit.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{row.exists ? row.unit : <span className="text-gray-400 italic">—</span>}</td>
-                    <td className="px-4 py-3 text-sm"><span className={`rounded-full px-2 py-1 text-xs font-semibold ${matches ? "bg-green-100 text-green-700" : "bg-amber-100 text-amber-800"}`}>{matches ? "Match" : "Mismatch"}</span></td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-700">{pricePerUnit ? pricePerUnit.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">{row.unit}</td>
                     <td className="px-4 py-3 text-right">
                       {!row.exists ? (
                         <button
