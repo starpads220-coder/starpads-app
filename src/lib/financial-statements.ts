@@ -1,4 +1,4 @@
-import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, resolveAccounting, type Journal, type LedgerSource, type PayeRemittanceEntry, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type buildAccounts } from "@/lib/accounts";
+import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, productionCostItem, resolveAccounting, type Journal, type LedgerSource, type PayeRemittanceEntry, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type buildAccounts } from "@/lib/accounts";
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
 const OPERATING_EXPENSE_NAMES = ["Office and Administration", "Legal and Professional Fees", "Salaries and Wages", "Fuel and Transport", "Data and Communication Costs", "Utilities", "Machine Repair and Maintenance", "Sundries", "Other Costs", "Small Tools and Equipment", "Depreciation"];
@@ -132,14 +132,18 @@ export function buildFinancialStatements(
   }
   const customIncome = [...customTotals.values()].sort((a, b) => a.name.localeCompare(b.name));
   const otherIncome = revenue - salesOfPads;
-  const purchasesOfRawMaterials = periodExpenses.filter(isRawMaterialPurchase).reduce((sum, entry) => sum + expenseAmount(entry), 0);
-  const carriageInwards = periodExpenses.filter(isRawMaterialCarriageExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
+  const periodProductionCosts = productionCosts.filter(entry => entry.date >= start && entry.date <= end);
+  const productionCostTotal = (item: ReturnType<typeof productionCostItem>) => periodProductionCosts
+    .filter(entry => productionCostItem(entry) === item)
+    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const purchasesOfRawMaterials = periodExpenses.filter(isRawMaterialPurchase).reduce((sum, entry) => sum + expenseAmount(entry), 0) + productionCostTotal("purchases_raw_materials");
+  const carriageInwards = periodExpenses.filter(isRawMaterialCarriageExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0) + productionCostTotal("carriage_inwards");
   // Income Statement labor is period activity by confirmation date. Production
   // entries remain in the Balance Sheet accrual ledger and are not re-posted.
   const directLabor = payments
     .filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end)
     .reduce((sum, entry) => sum + (Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0), 0);
-  const recordedOtherCosts = productionCosts.filter(entry => entry.date >= start && entry.date <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const recordedOtherCosts = productionCostTotal("other_costs");
   const legacyOtherCosts = periodExpenses.filter(isOtherProductionExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const otherProductionCosts = recordedOtherCosts + legacyOtherCosts;
   const costOfProduction = purchasesOfRawMaterials + carriageInwards + directLabor + otherProductionCosts;
@@ -184,6 +188,8 @@ export function buildFinancialStatements(
       addLine(operatingCashExpenses, name, amount);
     }
   }
+  cashPaidForRawMaterials += productionCostTotal("purchases_raw_materials");
+  cashPaidForCarriageInwards += productionCostTotal("carriage_inwards");
   const cashPaidForDirectLabor = payments.filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.netPayAmount) || 0), 0);
   const cashPaidForOtherProductionCosts = recordedOtherCosts;
   const cashPaidForOperatingExpenses = [...operatingCashExpenses.values()].reduce((sum, line) => sum + line.amount, 0);

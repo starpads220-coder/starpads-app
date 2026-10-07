@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import type { FinancialStatements } from "@/lib/financial-statements";
+import { COST_OF_PRODUCTION_LINES } from "@/lib/accounts";
 import { formatUgx } from "@/components/accounts/StatementTable";
 import { formatAccountDate } from "@/lib/account-period";
 
@@ -22,10 +23,7 @@ export function IncomeStatementTab({ statement, start, end }: { statement: Finan
       {line("Grants and Donations", statement.grantsAndDonations, "grants", otherIncomeOpen ? "" : "hidden print:table-row")}
       {total("Total revenue", statement.revenue)}
       {section("Cost of Production")}
-      {line("Purchases of Raw Materials", statement.purchasesOfRawMaterials)}
-      {line("Carriage Inwards", statement.carriageInwards)}
-      {line("Direct Labor", statement.directLabor)}
-      {line("Other Costs", statement.otherProductionCosts)}
+      {COST_OF_PRODUCTION_LINES.map(item => line(item.label, statement[item.statementField]))}
       {total("Total Cost of Production", statement.costOfProduction)}
       {total("Gross profit", statement.grossProfit)}
       {section("Operating Expenses")}

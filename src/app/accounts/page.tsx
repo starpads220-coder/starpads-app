@@ -13,7 +13,7 @@ import { balanceSheetGroupTotal, balanceSheetRows, balanceSheetTotals } from "@/
 import { JOURNAL_STRUCTURE, journalLines, journalPathForCode, type JournalCategory, type JournalSection } from "@/lib/balance-sheet-journal-options";
 import { CashFlowStatementTab } from "@/components/accounts/CashFlowStatementTab";
 import { IncomeStatementTab } from "@/components/accounts/IncomeStatementTab";
-import { ACCOUNTS, ACCOUNT_GROUPS, SETTLEMENT_CODES, buildAccounts, resolveAccounting, type LedgerSource, type Journal, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
+import { ACCOUNTS, ACCOUNT_GROUPS, PRODUCTION_COST_ENTRY_LINES, SETTLEMENT_CODES, buildAccounts, productionCostItem, resolveAccounting, type LedgerSource, type Journal, type ProductionCostEntry, type ProductionCostItem, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
 import { buildFinancialStatements, type ConfirmedLaborPayment } from "@/lib/financial-statements";
 import { accountPeriodError, addCalendarDays, comparisonAccountPeriods, formatAccountDate, resolveAccountPeriod, todayInEat, type AccountPeriodKey } from "@/lib/account-period";
 import type { AccountsPdfSection } from "@/components/reports/AccountsStatementPDF";
@@ -31,7 +31,7 @@ export default function AccountsPage() {
   const [journal, setJournal] = useState({ date: todayInEat(), debitCode: "", creditCode: "", amount: "", description: "" });
   const [journalPaths, setJournalPaths] = useState<Record<"debitCode" | "creditCode", { category: JournalCategory | ""; section: JournalSection | "" }>>({ debitCode: { category: "", section: "" }, creditCode: { category: "", section: "" } });
   const [cashActivityOpen, setCashActivityOpen] = useState(false);
-  const [productionCost, setProductionCost] = useState({ date: todayInEat(), description: "", amount: "", settlementCode: "" as "" | "1000" | "1030", reference: "", notes: "" });
+  const [productionCost, setProductionCost] = useState({ date: todayInEat(), item: "" as "" | ProductionCostItem, description: "", amount: "", settlementCode: "" as "" | "1000" | "1030", reference: "", notes: "" });
   const [editingProductionCostId, setEditingProductionCostId] = useState<string | null>(null);
   const [taxEntry, setTaxEntry] = useState({ date: todayInEat(), description: "", amount: "" });
   const [editingTaxId, setEditingTaxId] = useState<string | null>(null);
@@ -195,19 +195,19 @@ export default function AccountsPage() {
     try {
       const amount = Number(productionCost.amount);
       const description = productionCost.description.trim();
-      if (!canPost || !/^\d{4}-\d{2}-\d{2}$/.test(productionCost.date) || !description || !Number.isFinite(amount) || amount <= 0 || !["1000", "1030"].includes(productionCost.settlementCode)) throw new Error("Enter a date, cost name, positive amount, and Cash or Bank payment method.");
+      if (!canPost || !/^\d{4}-\d{2}-\d{2}$/.test(productionCost.date) || !PRODUCTION_COST_ENTRY_LINES.some(line => line.id === productionCost.item) || !description || !Number.isFinite(amount) || amount <= 0 || !["1000", "1030"].includes(productionCost.settlementCode)) throw new Error("Enter a date, Cost of Production item, cost name, positive amount, and Cash or Bank payment method.");
       if (/\bdirect\s*labou?r\b/i.test(description)) throw new Error("Direct Labor comes from production earnings, including accrued unpaid wages, and cannot be entered here.");
-      const entry = { date: productionCost.date, description, amount, settlementCode: productionCost.settlementCode, reference: productionCost.reference.trim(), notes: productionCost.notes.trim() };
+      const entry = { date: productionCost.date, item: productionCost.item as ProductionCostItem, description, amount, settlementCode: productionCost.settlementCode, reference: productionCost.reference.trim(), notes: productionCost.notes.trim() };
       if (editingProductionCostId) await updateDoc(doc(db, "productionCosts", editingProductionCostId), entry);
       else await addDoc(collection(db, "productionCosts"), { ...entry, createdAt: Timestamp.now(), createdBy: userRole?.uid });
-      setProductionCost({ date: todayInEat(), description: "", amount: "", settlementCode: "", reference: "", notes: "" });
+      setProductionCost({ date: todayInEat(), item: "", description: "", amount: "", settlementCode: "", reference: "", notes: "" });
       setEditingProductionCostId(null);
       setMessage(editingProductionCostId ? "Production cost updated successfully." : "Production cost recorded successfully.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to save production cost."); }
     finally { setSaving(false); }
   }
   function editProductionCost(entry: ProductionCostEntry) {
-    setProductionCost({ date: entry.date, description: entry.description, amount: String(entry.amount), settlementCode: entry.settlementCode, reference: entry.reference ?? "", notes: entry.notes ?? "" });
+    setProductionCost({ date: entry.date, item: productionCostItem(entry), description: entry.description, amount: String(entry.amount), settlementCode: entry.settlementCode, reference: entry.reference ?? "", notes: entry.notes ?? "" });
     setEditingProductionCostId(entry.id);
     setEntriesStatement("income"); setView("entries"); setMessage("");
   }
@@ -216,7 +216,7 @@ export default function AccountsPage() {
     setMessage("");
     try {
       await deleteDoc(doc(db, "productionCosts", entry.id));
-      if (editingProductionCostId === entry.id) { setEditingProductionCostId(null); setProductionCost({ date: todayInEat(), description: "", amount: "", settlementCode: "", reference: "", notes: "" }); }
+      if (editingProductionCostId === entry.id) { setEditingProductionCostId(null); setProductionCost({ date: todayInEat(), item: "", description: "", amount: "", settlementCode: "", reference: "", notes: "" }); }
       setMessage("Production cost deleted successfully.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to delete production cost."); }
   }
@@ -295,11 +295,13 @@ export default function AccountsPage() {
     {view === "entries" && <div className="accounts-no-print flex items-center gap-3"><label htmlFor="entries-statement" className="text-sm font-medium">Statement</label><select id="entries-statement" className={input} style={{ maxWidth: 280 }} value={entriesStatement} onChange={e => { setEntriesStatement(e.target.value as "balance" | "income"); setMessage(""); }}><option value="balance">Balance Sheet</option><option value="income">Income Statement</option></select></div>}
     {view === "entries" && entriesStatement === "income" && <>
       {canPost && <form onSubmit={saveProductionCost} className="accounts-no-print rounded-xl border bg-white p-5 space-y-4">
-        <div className="flex items-center justify-between"><h2 className="font-semibold">{editingProductionCostId ? "Edit Cost of Production" : "Add Cost of Production"}</h2>{editingProductionCostId && <button type="button" className="text-sm text-gray-600 hover:underline" onClick={() => { setEditingProductionCostId(null); setProductionCost({ date: todayInEat(), description: "", amount: "", settlementCode: "", reference: "", notes: "" }); setMessage(""); }}>Cancel edit</button>}</div>
-        <p className="text-sm text-gray-500">Record Other Costs here. Direct Labor is calculated from production earnings, including accrued unpaid wages.</p>
+        <div className="flex items-center justify-between"><h2 className="font-semibold">{editingProductionCostId ? "Edit Cost of Production" : "Add Cost of Production"}</h2>{editingProductionCostId && <button type="button" className="text-sm text-gray-600 hover:underline" onClick={() => { setEditingProductionCostId(null); setProductionCost({ date: todayInEat(), item: "", description: "", amount: "", settlementCode: "", reference: "", notes: "" }); setMessage(""); }}>Cancel edit</button>}</div>
+        <p className="text-sm text-gray-500">Select the Income Statement line for this cost. Direct Labor comes only from confirmed Payments and cannot be entered here.</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <label>Date<input required type="date" className={input} value={productionCost.date} onChange={e => setProductionCost({ ...productionCost, date: e.target.value })} /></label>
           <label>Amount (UGX)<input required type="number" min="0.01" step="0.01" className={input} value={productionCost.amount} onChange={e => setProductionCost({ ...productionCost, amount: e.target.value })} /></label>
+          <label>Cost of Production Item<select required className={input} value={productionCost.item} onChange={e => setProductionCost({ ...productionCost, item: e.target.value as "" | ProductionCostItem })}><option value="">Select item...</option>{PRODUCTION_COST_ENTRY_LINES.map(line => <option key={line.id} value={line.id}>{line.label}</option>)}</select></label>
+          <span className="hidden sm:block" aria-hidden="true" />
           <label className="sm:col-span-2">Cost Name / Description<input required maxLength={200} className={input} value={productionCost.description} onChange={e => setProductionCost({ ...productionCost, description: e.target.value })} /></label>
           <label>Payment Method<select required className={input} value={productionCost.settlementCode} onChange={e => setProductionCost({ ...productionCost, settlementCode: e.target.value as "" | "1000" | "1030" })}><option value="">Select payment method...</option><option value="1030">Cash</option><option value="1000">Bank</option></select></label>
           <label>Reference (optional)<input maxLength={120} className={input} value={productionCost.reference} onChange={e => setProductionCost({ ...productionCost, reference: e.target.value })} /></label>
@@ -307,7 +309,7 @@ export default function AccountsPage() {
         </div>
         <button disabled={saving} className="rounded-lg bg-gray-900 px-4 py-2 text-white disabled:opacity-50">{saving ? "Saving..." : editingProductionCostId ? "Update cost" : "Record cost"}</button><p role="status">{message}</p>
       </form>}
-      <section className="accounts-no-print overflow-hidden rounded-xl border bg-white"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Cost of Production Entries</h2><p className="text-sm text-gray-500">Other Costs recorded on this page.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Cost Name / Description</th><th className="p-3 text-left">Payment Method</th><th className="p-3 text-left">Reference</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>{productionCostEntries.length === 0 ? <tr><td colSpan={canPost ? 6 : 5} className="p-8 text-center text-gray-500">No production costs have been recorded.</td></tr> : productionCostEntries.map(entry => <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{entry.description}{entry.notes && <span className="block text-xs text-gray-500">{entry.notes}</span>}</td><td className="p-3">{entry.settlementCode === "1030" ? "Cash" : "Bank"}</td><td className="p-3">{entry.reference || "—"}</td><td className="p-3 text-right tabular-nums">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" onClick={() => editProductionCost(entry)} className="mr-3 text-blue-700 hover:underline">Edit</button><button type="button" onClick={() => removeProductionCost(entry)} className="text-red-700 hover:underline">Delete</button></td>}</tr>)}</tbody></table></div></section>
+      <section className="accounts-no-print overflow-hidden rounded-xl border bg-white"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Cost of Production Entries</h2><p className="text-sm text-gray-500">Entries are grouped into their selected Income Statement line. Older entries without a saved item remain under Other Costs.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Cost of Production Item</th><th className="p-3 text-left">Cost Name / Description</th><th className="p-3 text-left">Payment Method</th><th className="p-3 text-left">Reference</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>{productionCostEntries.length === 0 ? <tr><td colSpan={canPost ? 7 : 6} className="p-8 text-center text-gray-500">No production costs have been recorded.</td></tr> : productionCostEntries.map(entry => { const item = PRODUCTION_COST_ENTRY_LINES.find(line => line.id === productionCostItem(entry)); return <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{item?.label ?? "Other Costs"}</td><td className="p-3">{entry.description}{entry.notes && <span className="block text-xs text-gray-500">{entry.notes}</span>}</td><td className="p-3">{entry.settlementCode === "1030" ? "Cash" : "Bank"}</td><td className="p-3">{entry.reference || "—"}</td><td className="p-3 text-right tabular-nums">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" onClick={() => editProductionCost(entry)} className="mr-3 text-blue-700 hover:underline">Edit</button><button type="button" onClick={() => removeProductionCost(entry)} className="text-red-700 hover:underline">Delete</button></td>}</tr>; })}</tbody></table></div></section>
       {canPost && <form onSubmit={saveTaxEntry} className="accounts-no-print space-y-4 rounded-xl border bg-white p-5">
         <div className="flex items-center justify-between"><h2 className="font-semibold">{editingTaxId ? "Edit Tax Deduction" : "Add Tax Deduction"}</h2>{editingTaxId && <button type="button" className="text-sm text-gray-600 hover:underline" onClick={() => { setEditingTaxId(null); setTaxEntry({ date: todayInEat(), description: "", amount: "" }); setMessage(""); }}>Cancel edit</button>}</div>
         <p className="text-sm text-gray-500">Tax entries reduce Net Income and accrue to Income Tax Payable until settled. Existing tax expenses already appear automatically; do not enter the same tax twice.</p>

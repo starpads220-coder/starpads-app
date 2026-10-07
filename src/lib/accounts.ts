@@ -26,6 +26,15 @@ export const REMOVED_ACCOUNT_CODES = new Set([
 export interface AccountingSelection { accountCode: string; accountGroup: AccountGroup; accountName: string; settlementCode: string; accountDetail?: string }
 export const emptyAccounting = (): AccountingSelection => ({ accountCode: "", accountGroup: "Income", accountName: "", settlementCode: "", accountDetail: "" });
 export const SETTLEMENT_CODES = ["1000", "1010", "1020", "1030"];
+export const COST_OF_PRODUCTION_LINES = [
+  { id: "purchases_raw_materials", label: "Purchases of Raw Materials", accountCode: "5080", statementField: "purchasesOfRawMaterials", entrySelectable: true },
+  { id: "carriage_inwards", label: "Carriage Inwards", accountCode: "6030", statementField: "carriageInwards", entrySelectable: true },
+  { id: "direct_labor", label: "Direct Labor", accountCode: "5090", statementField: "directLabor", entrySelectable: false },
+  { id: "other_costs", label: "Other Costs", accountCode: "5100", statementField: "otherProductionCosts", entrySelectable: true },
+] as const;
+export type ProductionCostItem = Extract<(typeof COST_OF_PRODUCTION_LINES)[number], { entrySelectable: true }>["id"];
+export const PRODUCTION_COST_ENTRY_LINES = COST_OF_PRODUCTION_LINES.filter(line => line.entrySelectable);
+export const productionCostItem = (entry: Pick<ProductionCostEntry, "item">): ProductionCostItem => entry.item ?? "other_costs";
 export function validateAccounting(value: AccountingSelection, kind: "sale" | "expense") {
   const allowed = kind === "sale" ? ["Income", "Other Income"] : ["Cost of Sales", "Expenses"];
   const known = ACCOUNTS.find(a => a.code === value.accountCode);
@@ -49,7 +58,7 @@ export interface Journal {
   paymentMethod?: "Cash" | "Cheque";
   referenceNumber?: string;
 }
-export interface ProductionCostEntry { id: string; date: string; description: string; amount: number; settlementCode: "1000" | "1030"; reference?: string; notes?: string }
+export interface ProductionCostEntry { id: string; date: string; description: string; amount: number; settlementCode: "1000" | "1030"; item?: ProductionCostItem; reference?: string; notes?: string }
 export interface TaxEntry { id: string; date: string; description: string; amount: number }
 export interface PayrollProductionEntry { id: string; date: string; earningsUgx: number; paymentStatus?: string; paymentId?: string }
 export interface PayrollPaymentEntry { id: string; paidDate: string; status?: string; payrollVersion?: number; grossAmount?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; paymentSourceCode?: string }
@@ -102,7 +111,8 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
     }
   }
   productionCosts.forEach(entry => {
-    if ((entry.settlementCode === "1000" || entry.settlementCode === "1030") && Number(entry.amount) > 0) post(entry.date, "5100", entry.settlementCode, Number(entry.amount));
+    const line = PRODUCTION_COST_ENTRY_LINES.find(item => item.id === productionCostItem(entry));
+    if (line && (entry.settlementCode === "1000" || entry.settlementCode === "1030") && Number(entry.amount) > 0) post(entry.date, line.accountCode, entry.settlementCode, Number(entry.amount));
   });
   taxEntries.forEach(entry => {
     if (Number(entry.amount) > 0) post(entry.date, "6195", "2250", Number(entry.amount));

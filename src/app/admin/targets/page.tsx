@@ -349,10 +349,18 @@ export default function AdminTargetsPage() {
               {orderedStageRows.map((row, i) => {
                 const editKey = `${row.stageId}-${row.variant}-${row.material ?? row.activity ?? "default"}`;
                 const isEditing = editingStage === row.stageId && editingVariant === row.variant && editingMaterial === row.material && editingActivity === row.activity;
-                const targetValue = row.variant === "materialPieces" && row.material ? row.materialTargets?.[row.material]
+                const storedTargetValue = row.variant === "materialPieces" && row.material ? row.materialTargets?.[row.material]
                   : row.variant === "materialMeters" && row.material ? row.materialMeterTargets?.[row.material]
                     : row.variant === "activity" && row.activity ? row.activityTargets?.[row.activity]
                       : row.defaultTarget;
+                const workbookTargetValue = row.variant === "materialPieces" && row.material
+                  ? REVISED_MATERIAL_TARGETS[row.material as keyof typeof REVISED_MATERIAL_TARGETS]
+                  : row.variant === "materialMeters" && row.material
+                    ? REVISED_METER_TARGETS[row.material as keyof typeof REVISED_METER_TARGETS]
+                    : row.variant === "activity" && row.activity
+                      ? REVISED_ACTIVITY_TARGETS[row.activity]
+                      : REVISED_TARGETS[row.stageId].defaultTarget;
+                const targetValue = storedTargetValue ?? workbookTargetValue;
                 const pricePerUnit = targetValue ? row.defaultWageRate / targetValue : 0;
                 const groupHeading = i === 0 ? "Piece-count targets · Number of Pieces · Price per Piece" : i === pieceTargetRows.length ? "Meter-count targets · Number of Meters · Per Meter" : null;
                 return (
@@ -446,7 +454,6 @@ export default function AdminTargetsPage() {
           </div>
         )}
         {extraOrDuplicateStages.length > 0 && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><p className="font-semibold">Additional or duplicate stored stage definitions need review</p><p className="mt-1">Left unchanged: {extraOrDuplicateStages.map(stage => `${stage.stageId}${stage.id ? ` (${stage.id})` : ""}`).join(", ")}.</p></div>}
-        <div className="mt-4 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900"><p className="font-semibold">Verification note</p><p className="mt-1">Rates are calculated live as Amount ÷ Quantity and therefore retain full precision. For micro fibre meters, UGX 10,000 ÷ 26 = UGX {(10000 / 26).toLocaleString(undefined, { maximumFractionDigits: 2 })}, not the sheet’s UGX 381.</p></div>
       </section>
 
       <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
