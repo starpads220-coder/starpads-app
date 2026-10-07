@@ -12,7 +12,6 @@ import {
   doc,
   deleteDoc,
   Timestamp,
-  limit,
   where,
   getDocsFromServer,
   getDocFromServer,
@@ -53,7 +52,8 @@ import { PayeRemittanceCard } from "@/components/payments/PayeRemittanceCard";
 import { isEmployeeActive } from "@/lib/employees";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
-type ActiveTab = "employees" | "dates";
+type ActiveTab = "employees" | "dates" | "due";
+const EMPLOYEE_PAGE_SIZE = 10;
 
 function getDateBounds(window: TimeWindow, customStart?: string, customEnd?: string) {
   const now = new Date();
@@ -152,6 +152,8 @@ export default function PaymentsPage() {
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
   const [activeTab, setActiveTab] = useState<ActiveTab>("employees");
+  const [employeePage, setEmployeePage] = useState(0);
+  const [duePage, setDuePage] = useState(0);
   const [entries, setEntries] = useState<ProductionEntry[]>([]);
   const [entriesLoading, setEntriesLoading] = useState(true);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
@@ -175,7 +177,7 @@ export default function PaymentsPage() {
 
   useEffect(() => {
     const unsub = onSnapshot(
-      query(collection(db, "productionEntries"), orderBy("date", "desc"), limit(500)),
+      query(collection(db, "productionEntries"), orderBy("date", "desc")),
       (snap) => {
         setEntries(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductionEntry)));
         setEntriesLoading(false);
@@ -251,6 +253,45 @@ export default function PaymentsPage() {
     });
     return Array.from(map.values()).sort((a, b) => b.dueAmount - a.dueAmount);
   }, [productionEmployees, filteredEntries]);
+
+  const allDueEntries = useMemo(
+    () => entries.filter(entry => !entry.paymentStatus || entry.paymentStatus === "due"),
+    [entries]
+  );
+  const allDueEmployeePayments = useMemo(() => {
+    const map = new Map<string, EmployeePayment>();
+    for (const entry of allDueEntries) {
+      const employee = employees.find(item => item.id === entry.employeeId);
+      const existing = map.get(entry.employeeId);
+      if (existing) {
+        existing.totalPieces += entry.actualPieces;
+        existing.dueAmount += entry.earningsUgx;
+        existing.daysWorked = new Set([...existing.allEntries.map(item => item.date), entry.date]).size;
+        existing.dueEntries.push(entry);
+        existing.allEntries.push(entry);
+        existing.avgPerformance = Math.round(existing.allEntries.reduce((sum, item) => sum + item.performancePct, 0) / existing.allEntries.length);
+      } else {
+        map.set(entry.employeeId, {
+          employeeId: entry.employeeId,
+          employeeName: employee?.name ?? `Unknown employee (${entry.employeeId})`,
+          totalPieces: entry.actualPieces,
+          dueAmount: entry.earningsUgx,
+          paidAmount: 0,
+          daysWorked: 1,
+          avgPerformance: entry.performancePct,
+          dueEntries: [entry],
+          allEntries: [entry],
+        });
+      }
+    }
+    return [...map.values()]
+      .map(row => ({ ...row, dueEntries: [...row.dueEntries].sort((a, b) => b.date.localeCompare(a.date)), allEntries: [...row.allEntries].sort((a, b) => b.date.localeCompare(a.date)) }))
+      .sort((a, b) => b.dueAmount - a.dueAmount || a.employeeName.localeCompare(b.employeeName));
+  }, [allDueEntries, employees]);
+  const employeePageCount = Math.max(1, Math.ceil(employeePayments.length / EMPLOYEE_PAGE_SIZE));
+  const duePageCount = Math.max(1, Math.ceil(allDueEmployeePayments.length / EMPLOYEE_PAGE_SIZE));
+  const visibleEmployeePayments = employeePayments.slice(employeePage * EMPLOYEE_PAGE_SIZE, (employeePage + 1) * EMPLOYEE_PAGE_SIZE);
+  const visibleDueEmployeePayments = allDueEmployeePayments.slice(duePage * EMPLOYEE_PAGE_SIZE, (duePage + 1) * EMPLOYEE_PAGE_SIZE);
 
   const dateSummaries = useMemo(() => {
     const map = new Map<string, DateSummary>();
@@ -352,6 +393,7 @@ export default function PaymentsPage() {
 
   const handleWindowChange = (tw: TimeWindow) => {
     setTimeWindow(tw);
+    setEmployeePage(0);
     setExpandedDate(null);
     setExpandedEmployee(null);
     if (tw === "today") { setCustomStart(""); setCustomEnd(""); }
@@ -367,7 +409,7 @@ export default function PaymentsPage() {
     }
   };
 
-  const payEmployee = employeePayments.find((e) => e.employeeId === payEmployeeId);
+  const payEmployee = employeePayments.find((e) => e.employeeId === payEmployeeId) ?? allDueEmployeePayments.find((e) => e.employeeId === payEmployeeId);
   const payeApplicable = employees.find(e => e.id === payEmployeeId)?.payeApplicable !== false;
   const previewEmployeeId = payEmployee?.employeeId;
   const previewGross = payEmployee?.dueAmount;
@@ -421,12 +463,15 @@ export default function PaymentsPage() {
       );
       const payeeTax = payeResult.tax;
       const netPayAmount = grossAmount - nssfEmployeeDeduction - payeeTax;
+      const dueDates = payEmployee.dueEntries.map(entry => entry.date).sort();
+      const paymentPeriodStart = activeTab === "due" ? dueDates[0] : start;
+      const paymentPeriodEnd = activeTab === "due" ? dueDates[dueDates.length - 1] : end;
 
       const paymentRef = doc(collection(db, "payments"));
       const paymentRecord = {
         employeeId: payEmployee.employeeId,
-        periodStart: start,
-        periodEnd: end,
+        periodStart: paymentPeriodStart,
+        periodEnd: paymentPeriodEnd,
         grossAmount,
         totalAmount: grossAmount,
         nssfEmployeeDeduction,
@@ -631,14 +676,14 @@ export default function PaymentsPage() {
             <input
               type="date"
               value={customStart}
-              onChange={(e) => setCustomStart(e.target.value)}
+              onChange={(e) => { setCustomStart(e.target.value); setEmployeePage(0); }}
               className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
             />
             <span className="text-sm text-gray-500">to</span>
             <input
               type="date"
               value={customEnd}
-              onChange={(e) => setCustomEnd(e.target.value)}
+              onChange={(e) => { setCustomEnd(e.target.value); setEmployeePage(0); }}
               className="px-3 py-1.5 border border-gray-300 rounded-md text-sm"
             />
           </div>
@@ -774,7 +819,7 @@ export default function PaymentsPage() {
 
       <div className="flex gap-4 border-b border-gray-200">
         <button
-          onClick={() => setActiveTab("employees")}
+          onClick={() => { setActiveTab("employees"); setExpandedEmployee(null); }}
           className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === "employees"
               ? "text-gray-900 border-gray-900"
@@ -784,7 +829,7 @@ export default function PaymentsPage() {
           By Employee
         </button>
         <button
-          onClick={() => setActiveTab("dates")}
+          onClick={() => { setActiveTab("dates"); setExpandedEmployee(null); }}
           className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
             activeTab === "dates"
               ? "text-gray-900 border-gray-900"
@@ -792,6 +837,16 @@ export default function PaymentsPage() {
           }`}
         >
           By Date
+        </button>
+        <button
+          onClick={() => { setActiveTab("due"); setExpandedEmployee(null); }}
+          className={`pb-2 text-sm font-medium border-b-2 transition-colors ${
+            activeTab === "due"
+              ? "text-gray-900 border-gray-900"
+              : "text-gray-500 border-transparent hover:text-gray-700"
+          }`}
+        >
+          All Due Payments ({allDueEntries.length})
         </button>
       </div>
 
@@ -824,7 +879,7 @@ export default function PaymentsPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
-                {employeePayments.map((emp, i) => (
+                {visibleEmployeePayments.map((emp, i) => (
                   <React.Fragment key={emp.employeeId}>
                     <tr
                       onClick={() => setExpandedEmployee(expandedEmployee === emp.employeeId ? null : emp.employeeId)}
@@ -1043,6 +1098,28 @@ export default function PaymentsPage() {
               </tbody>
             </table>
           )}
+          {employeePayments.length > EMPLOYEE_PAGE_SIZE && <div className="flex items-center justify-between border-t border-gray-200 px-4 py-3 text-sm">
+            <span className="text-gray-500">Page {employeePage + 1} of {employeePageCount} · {employeePayments.length} employees</span>
+            <div className="flex gap-4">
+              {employeePage > 0 && <button type="button" onClick={() => { setEmployeePage(page => Math.max(0, page - 1)); setExpandedEmployee(null); }} className="font-semibold text-stock-blue hover:underline">PREVIOUS PAGE</button>}
+              {employeePage + 1 < employeePageCount && <button type="button" onClick={() => { setEmployeePage(page => Math.min(employeePageCount - 1, page + 1)); setExpandedEmployee(null); }} className="font-semibold text-stock-blue hover:underline">NEXT PAGE</button>}
+            </div>
+          </div>}
+        </div>
+      )}
+
+      {activeTab === "due" && (
+        <div className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-4 py-4">
+            <div><h3 className="font-semibold text-gray-900">All Due Payments</h3><p className="text-sm text-gray-500">Every unpaid production entry, regardless of its date or the period selected above.</p></div>
+            <div className="text-right"><span className="block text-xs font-medium uppercase text-gray-500">Total due (UGX)</span><strong className="text-xl text-amber-600">{allDueEntries.reduce((sum, entry) => sum + entry.earningsUgx, 0).toLocaleString()}</strong></div>
+          </div>
+          {allDueEmployeePayments.length === 0 ? <div className="p-8 text-center text-gray-400">There are no unpaid production entries.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[900px] divide-y divide-gray-200 text-sm"><thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Employee</th><th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Entries</th><th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Oldest due</th><th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Newest due</th><th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><span className="block text-[10px]">UGX</span>Amount due</th><th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Action</th></tr></thead><tbody className="divide-y divide-gray-200">
+            {visibleDueEmployeePayments.map((emp, index) => { const dates = emp.dueEntries.map(entry => entry.date).sort(); const employee = employees.find(item => item.id === emp.employeeId); return <React.Fragment key={emp.employeeId}><tr onClick={() => setExpandedEmployee(expandedEmployee === emp.employeeId ? null : emp.employeeId)} className={`cursor-pointer ${index % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-gray-100`}><td className="px-4 py-3 font-medium text-gray-900">{emp.employeeName}{!isEmployeeActive(employee ?? {}) && <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-500">Deactivated</span>}</td><td className="px-4 py-3 text-right">{emp.dueEntries.length}</td><td className="px-4 py-3">{dates[0]}</td><td className="px-4 py-3">{dates[dates.length - 1]}</td><td className="px-4 py-3 text-right font-semibold text-amber-600 tabular-nums">{emp.dueAmount.toLocaleString()}</td><td className="px-4 py-3 text-right">{isEmployeeActive(employee ?? {}) ? <button type="button" onClick={event => { event.stopPropagation(); setPayEmployeeId(emp.employeeId); }} className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800">Pay Due</button> : <span className="text-xs text-gray-500">Reactivate to pay</span>}<span className="ml-3 text-xs text-gray-400">{expandedEmployee === emp.employeeId ? "▲" : "▼"}</span></td></tr>
+              {expandedEmployee === emp.employeeId && <tr><td colSpan={6} className="bg-gray-50 p-0"><div className="overflow-x-auto px-6 py-4"><table className="w-full min-w-[760px] text-sm"><thead><tr className="border-b text-xs uppercase text-gray-500"><th className="pb-2 text-left">Date</th><th className="pb-2 text-left">Stage</th><th className="pb-2 text-left">Material</th><th className="pb-2 text-right">Pieces</th><th className="pb-2 text-right"><span className="block text-[10px]">UGX</span>Earnings</th><th className="pb-2 text-right">Actions</th></tr></thead><tbody>{emp.dueEntries.map(entry => <tr key={entry.id} className="border-b last:border-0"><td className="py-2">{entry.date}</td><td className="py-2">{getStageLabel(entry.stageId)}</td><td className="py-2 text-xs text-gray-600">{formatMaterialDisplay(entry)}</td><td className="py-2 text-right">{entry.actualPieces.toLocaleString()}</td><td className="py-2 text-right font-medium text-amber-700 tabular-nums">{entry.earningsUgx.toLocaleString()}</td><td className="py-2 text-right">{canEdit && <button type="button" onClick={() => router.push(`/production?${new URLSearchParams({ editEntryId: entry.id }).toString()}`)} className="mr-3 text-xs text-stock-blue hover:underline">Edit</button>}{canDelete && <button type="button" onClick={() => setDeleteConfirmEntryId(entry.id)} className="text-xs text-red-600 hover:underline">Delete</button>}</td></tr>)}</tbody></table></div></td></tr>}
+            </React.Fragment>; })}
+          </tbody></table></div>}
+          {allDueEmployeePayments.length > EMPLOYEE_PAGE_SIZE && <div className="flex items-center justify-between border-t border-gray-200 px-4 py-3 text-sm"><span className="text-gray-500">Page {duePage + 1} of {duePageCount} · {allDueEmployeePayments.length} employees with due payments</span><div className="flex gap-4">{duePage > 0 && <button type="button" onClick={() => { setDuePage(page => Math.max(0, page - 1)); setExpandedEmployee(null); }} className="font-semibold text-stock-blue hover:underline">PREVIOUS PAGE</button>}{duePage + 1 < duePageCount && <button type="button" onClick={() => { setDuePage(page => Math.min(duePageCount - 1, page + 1)); setExpandedEmployee(null); }} className="font-semibold text-stock-blue hover:underline">NEXT PAGE</button>}</div></div>}
         </div>
       )}
 

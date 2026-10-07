@@ -272,13 +272,17 @@ service cloud.firestore {
         && request.resource.data.debitCode is string && request.resource.data.creditCode is string
         && request.resource.data.debitCode != request.resource.data.creditCode
         && request.resource.data.date is string && request.resource.data.description is string
+        && (!request.resource.data.keys().hasAny(['simplifiedCategory'])
+          || request.resource.data.simplifiedCategory in ['Assets', 'Liabilities', 'Equity'])
         && validBankingJournal(request.resource.data, journalId);
       allow update: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['date', 'debitCode', 'creditCode', 'amount', 'description', 'bankingStatus', 'receivedFrom', 'paymentMethod', 'referenceNumber'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['date', 'debitCode', 'creditCode', 'amount', 'description', 'simplifiedCategory', 'simplifiedItemCode', 'simplifiedOffsetCode', 'bankingStatus', 'receivedFrom', 'paymentMethod', 'referenceNumber'])
         && request.resource.data.amount is number && request.resource.data.amount > 0
         && request.resource.data.debitCode is string && request.resource.data.creditCode is string
         && request.resource.data.debitCode != request.resource.data.creditCode
         && request.resource.data.date is string && request.resource.data.description is string
+        && (!request.resource.data.keys().hasAny(['simplifiedCategory'])
+          || request.resource.data.simplifiedCategory in ['Assets', 'Liabilities', 'Equity'])
         && request.resource.data.get('bankingKind', '') == resource.data.get('bankingKind', '')
         && (resource.data.get('bankingKind', '') != 'transfer'
           || (request.resource.data.debitCode == resource.data.debitCode && request.resource.data.creditCode == resource.data.creditCode))
@@ -292,12 +296,14 @@ service cloud.firestore {
         && request.resource.data.amount is number && request.resource.data.amount > 0
         && request.resource.data.date is string
         && request.resource.data.description is string && request.resource.data.description.size() > 0
+        && request.resource.data.item in ['purchases_raw_materials', 'carriage_inwards', 'other_costs']
         && request.resource.data.settlementCode in ['1000', '1030'];
       allow update: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['date', 'description', 'amount', 'settlementCode', 'reference', 'notes'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['date', 'item', 'description', 'amount', 'settlementCode', 'reference', 'notes'])
         && request.resource.data.amount is number && request.resource.data.amount > 0
         && request.resource.data.date is string
         && request.resource.data.description is string && request.resource.data.description.size() > 0
+        && request.resource.data.item in ['purchases_raw_materials', 'carriage_inwards', 'other_costs']
         && request.resource.data.settlementCode in ['1000', '1030'];
       allow delete: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
     }
