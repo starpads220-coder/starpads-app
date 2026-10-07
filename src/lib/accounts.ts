@@ -57,6 +57,9 @@ export interface Journal {
   receivedFrom?: string;
   paymentMethod?: "Cash" | "Cheque";
   referenceNumber?: string;
+  simplifiedCategory?: "Assets" | "Liabilities" | "Equity";
+  simplifiedItemCode?: string;
+  simplifiedOffsetCode?: string;
 }
 export interface ProductionCostEntry { id: string; date: string; description: string; amount: number; settlementCode: "1000" | "1030"; item?: ProductionCostItem; reference?: string; notes?: string }
 export interface TaxEntry { id: string; date: string; description: string; amount: number }

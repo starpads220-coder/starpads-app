@@ -18,6 +18,7 @@ export function journalLines(report: Report, section: JournalSection): JournalLi
   return balanceSheetRows(report, group).map(row => {
     if (row.code === "balance-cash") return { code: row.code, name: row.name, accountCode: null, reason: "Cash combines physical cash and two mobile-money accounts. Choose a specific account through an existing journal entry; no mapping was assumed." };
     if (row.code === "3050") return { code: row.code, name: row.name, accountCode: null, reason: "Retained Earnings includes calculated profit and cannot be posted here without double counting." };
+    if (row.code === "1830") return { code: row.code, name: row.name, accountCode: null, reason: "Accumulated Depreciation is updated through depreciation entries and is excluded to prevent double counting." };
     const accountCode = row.code === "balance-bank" ? "1000" : row.code === "balance-prepaid" ? "1320" : row.code;
     if (!ACCOUNTS.some(account => account.code === accountCode)) return { code: row.code, name: row.name, accountCode: null, reason: "No matching Chart of Accounts entry; mapping required." };
     return { code: row.code, name: row.name, accountCode };

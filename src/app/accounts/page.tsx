@@ -10,7 +10,7 @@ import { BalanceSheetTable, type BalanceSheetColumn } from "@/components/Balance
 import { BalanceSheetTab } from "@/components/accounts/BalanceSheetTab";
 import { balanceSheetAccountName, excludedAllowanceBalance } from "@/lib/balance-sheet-current-assets";
 import { balanceSheetGroupTotal, balanceSheetRows, balanceSheetTotals } from "@/lib/balance-sheet-sections";
-import { JOURNAL_STRUCTURE, journalLines, journalPathForCode, type JournalCategory, type JournalSection } from "@/lib/balance-sheet-journal-options";
+import { JOURNAL_STRUCTURE, journalLines, journalPathForCode, type JournalCategory } from "@/lib/balance-sheet-journal-options";
 import { CashFlowStatementTab } from "@/components/accounts/CashFlowStatementTab";
 import { IncomeStatementTab } from "@/components/accounts/IncomeStatementTab";
 import { ACCOUNTS, ACCOUNT_GROUPS, PRODUCTION_COST_ENTRY_LINES, SETTLEMENT_CODES, buildAccounts, productionCostItem, resolveAccounting, type LedgerSource, type Journal, type ProductionCostEntry, type ProductionCostItem, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
@@ -28,8 +28,8 @@ export default function AccountsPage() {
   const [entriesStatement, setEntriesStatement] = useState<"balance" | "income">("balance");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
-  const [journal, setJournal] = useState({ date: todayInEat(), debitCode: "", creditCode: "", amount: "", description: "" });
-  const [journalPaths, setJournalPaths] = useState<Record<"debitCode" | "creditCode", { category: JournalCategory | ""; section: JournalSection | "" }>>({ debitCode: { category: "", section: "" }, creditCode: { category: "", section: "" } });
+  const [journal, setJournal] = useState({ date: todayInEat(), category: "" as JournalCategory | "", itemCode: "", amount: "", description: "" });
+  const [editingJournalOffsetCode, setEditingJournalOffsetCode] = useState<string | null>(null);
   const [cashActivityOpen, setCashActivityOpen] = useState(false);
   const [productionCost, setProductionCost] = useState({ date: todayInEat(), item: "" as "" | ProductionCostItem, description: "", amount: "", settlementCode: "" as "" | "1000" | "1030", reference: "", notes: "" });
   const [editingProductionCostId, setEditingProductionCostId] = useState<string | null>(null);
@@ -95,6 +95,29 @@ export default function AccountsPage() {
   const loading = sales.loading || expenses.loading || journals.loading || payments.loading || productionCosts.loading || taxEntries.loading || payrollEntries.loading || payeRemittances.loading;
   const canPost = ["ADMIN", "FINANCE", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
   const input = "w-full border border-gray-300 rounded-md px-3 py-2 text-sm";
+  const journalSections = journal.category ? JOURNAL_STRUCTURE[journal.category] : [];
+  const journalItemGroups = journalSections.map(section => ({ ...section, lines: journalLines(report, section.label).filter(line => line.accountCode) }));
+  const selectedJournalLine = journalItemGroups.flatMap(section => section.lines).find(line => line.accountCode === journal.itemCode);
+  const automaticJournalOffsetCode = journal.category === "Equity" ? "1000" : "3060";
+  const journalOffsetCode = editingJournalOffsetCode ?? automaticJournalOffsetCode;
+  const journalEffect = selectedJournalLine && journalOffsetCode && selectedJournalLine.accountCode !== journalOffsetCode
+    ? `Increases ${selectedJournalLine.name}; offset to ${accountName(journalOffsetCode)}.`
+    : "Select a category and item to preview the balanced entry.";
+  const resetJournalForm = () => {
+    setJournal({ date: todayInEat(), category: "", itemCode: "", amount: "", description: "" });
+    setEditingJournalId(null);
+    setEditingJournalOffsetCode(null);
+  };
+  const journalDisplay = (entry: Journal) => {
+    if (entry.simplifiedCategory && entry.simplifiedItemCode) return { category: entry.simplifiedCategory, itemCode: entry.simplifiedItemCode, offsetCode: entry.simplifiedOffsetCode ?? (entry.debitCode === entry.simplifiedItemCode ? entry.creditCode : entry.debitCode), mapped: true };
+    const debitPath = journalPathForCode(report, entry.debitCode);
+    const creditPath = journalPathForCode(report, entry.creditCode);
+    if (debitPath?.category === "Assets") return { category: debitPath.category, itemCode: entry.debitCode, offsetCode: entry.creditCode, mapped: true };
+    if (creditPath && ["Liabilities", "Equity"].includes(creditPath.category)) return { category: creditPath.category, itemCode: entry.creditCode, offsetCode: entry.debitCode, mapped: true };
+    if (debitPath) return { category: debitPath.category, itemCode: entry.debitCode, offsetCode: entry.creditCode, mapped: true };
+    if (creditPath) return { category: creditPath.category, itemCode: entry.creditCode, offsetCode: entry.debitCode, mapped: true };
+    return { category: "" as const, itemCode: "", offsetCode: "", mapped: false };
+  };
   const reportTitle = view === "income" ? "Income Statement (Profit & Loss)" : view === "balance" ? "Balance Sheet" : "Cash Flow Statement";
   const pdfSections = useMemo<AccountsPdfSection[]>(() => {
     if (view === "income") return [
@@ -152,25 +175,39 @@ export default function AccountsPage() {
     e.preventDefault(); setSaving(true); setMessage("");
     try {
       const amount = Number(journal.amount);
-      if (!canPost || !Number.isFinite(amount) || amount <= 0 || journal.debitCode === journal.creditCode || !ACCOUNTS.some(a => a.code === journal.debitCode) || !ACCOUNTS.some(a => a.code === journal.creditCode) || !journal.description.trim()) throw new Error("Enter a positive amount, description, and two different accounts.");
-      if (!editingJournalId && (!journalPaths.debitCode.category || !journalPaths.debitCode.section || !journalPaths.creditCode.category || !journalPaths.creditCode.section)) throw new Error("Select a category, section and line for both debit and credit.");
-      if (!editingJournalId && (["debitCode", "creditCode"] as const).some(side => !journalLines(report, journalPaths[side].section as JournalSection).some(line => line.accountCode === journal[side]))) throw new Error("Choose postable Balance Sheet lines for both sides of the journal.");
+      const itemCode = selectedJournalLine?.accountCode ?? "";
+      const offsetCode = journalOffsetCode;
+      if (!canPost || !/^\d{4}-\d{2}-\d{2}$/.test(journal.date) || !journal.category || !itemCode || !Number.isFinite(amount) || amount <= 0 || !journal.description.trim()) throw new Error("Enter a valid date, Category, Item, description and an amount greater than zero.");
+      if (!ACCOUNTS.some(account => account.code === itemCode) || !ACCOUNTS.some(account => account.code === offsetCode) || itemCode === offsetCode) throw new Error("The selected item cannot be posted with its balancing account. Choose another item.");
+      const assetIncrease = journal.category === "Assets";
+      const entry = {
+        date: journal.date,
+        debitCode: assetIncrease ? itemCode : offsetCode,
+        creditCode: assetIncrease ? offsetCode : itemCode,
+        amount,
+        description: journal.description.trim(),
+        simplifiedCategory: journal.category,
+        simplifiedItemCode: itemCode,
+        simplifiedOffsetCode: offsetCode,
+      };
       if (editingJournalId) {
-        await updateDoc(doc(db, "accountJournals", editingJournalId), { ...journal, amount });
+        await updateDoc(doc(db, "accountJournals", editingJournalId), entry);
       } else {
-        await addDoc(collection(db, "accountJournals"), { ...journal, amount, createdAt: Timestamp.now(), createdBy: userRole?.uid });
+        await addDoc(collection(db, "accountJournals"), { ...entry, createdAt: Timestamp.now(), createdBy: userRole?.uid });
       }
-      setJournal({ date: todayInEat(), debitCode: "", creditCode: "", amount: "", description: "" });
-      setJournalPaths({ debitCode: { category: "", section: "" }, creditCode: { category: "", section: "" } });
-      setEditingJournalId(null);
+      resetJournalForm();
       setMessage(editingJournalId ? "Entry updated successfully." : "Journal recorded successfully.");
     } catch (e) { setMessage(e instanceof Error ? e.message : "Unable to save journal."); }
     finally { setSaving(false); }
   }
   function editJournal(entry: Journal) {
-    setJournal({ date: entry.date, debitCode: entry.debitCode, creditCode: entry.creditCode, amount: String(entry.amount), description: entry.description });
-    const pathFor = (code: string) => journalPathForCode(report, code) ?? { category: "" as const, section: "" as const };
-    setJournalPaths({ debitCode: pathFor(entry.debitCode), creditCode: pathFor(entry.creditCode) });
+    const display = journalDisplay(entry);
+    if (!display.mapped || !display.category || !display.itemCode) {
+      setMessage("This historical entry cannot be mapped cleanly to one Balance Sheet item and was left unchanged.");
+      return;
+    }
+    setJournal({ date: entry.date, category: display.category, itemCode: display.itemCode, amount: String(entry.amount), description: entry.description });
+    setEditingJournalOffsetCode(display.offsetCode);
     setEditingJournalId(entry.id);
     setEntriesStatement("balance");
     setView("entries");
@@ -183,9 +220,7 @@ export default function AccountsPage() {
     try {
       await deleteDoc(doc(db, "accountJournals", entry.id));
       if (editingJournalId === entry.id) {
-        setEditingJournalId(null);
-        setJournal({ date: todayInEat(), debitCode: "", creditCode: "", amount: "", description: "" });
-        setJournalPaths({ debitCode: { category: "", section: "" }, creditCode: { category: "", section: "" } });
+        resetJournalForm();
       }
       setMessage("Entry deleted successfully.");
     } catch (e) { setMessage(e instanceof Error ? e.message : "Unable to delete entry."); }
@@ -247,18 +282,6 @@ export default function AccountsPage() {
       setMessage("Tax entry deleted successfully.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to delete tax entry."); }
   }
-  const journalSide = (side: "debitCode" | "creditCode") => {
-    const path = journalPaths[side];
-    const label = side === "debitCode" ? "Debit" : "Credit";
-    const sections = path.category ? JOURNAL_STRUCTURE[path.category] : [];
-    const lines = path.section ? journalLines(report, path.section) : [];
-    const historical = editingJournalId && journal[side] && !journalPathForCode(report, journal[side]);
-    return <fieldset key={side} className="rounded-lg border p-4"><legend className="px-1 font-semibold">{label} account</legend><div className="grid gap-3 sm:grid-cols-3">
-      <label>{label} category<select required={!historical} className={input} value={path.category} onChange={e => { const category = e.target.value as JournalCategory | ""; setJournalPaths(previous => ({ ...previous, [side]: { category, section: "" } })); setJournal(previous => ({ ...previous, [side]: "" })); }}><option value="">{historical ? "Historical account" : "Select category..."}</option>{(Object.keys(JOURNAL_STRUCTURE) as JournalCategory[]).map(category => <option key={category} value={category}>{category}</option>)}</select></label>
-      <label>{label} section<select required={!historical} className={input} value={path.section} onChange={e => { const section = e.target.value as JournalSection | ""; setJournalPaths(previous => ({ ...previous, [side]: { ...previous[side], section } })); setJournal(previous => ({ ...previous, [side]: "" })); }}><option value="">{historical ? "Historical entry" : "Select section..."}</option>{sections.map(section => <option key={section.label} value={section.label}>{section.label}</option>)}</select></label>
-      <label>{label} Balance Sheet line<select required className={input} value={journal[side]} onChange={e => setJournal(previous => ({ ...previous, [side]: e.target.value }))}><option value="">Select line...</option>{lines.map(line => <option key={line.code} value={line.accountCode ?? ""} disabled={!line.accountCode}>{line.name}{line.reason ? " — unavailable for manual posting" : ""}</option>)}{historical && <option value={journal[side]}>{accountName(journal[side])} — historical entry</option>}</select></label>
-    </div>{lines.filter(line => line.reason).map(line => <p key={line.code} className="mt-2 text-xs text-amber-800">{line.name}: {line.reason}</p>)}</fieldset>;
-  };
   return <RouteGuard><main className="accounts-page space-y-6">
     <div className="accounts-no-print"><AccountsSwitcher /></div>
     <div className="accounts-no-print"><h1 className="text-2xl font-bold">Accounts</h1><p className="text-sm text-gray-500">Live financial statements and chart of accounts · UGX</p></div>
@@ -318,7 +341,24 @@ export default function AccountsPage() {
       </form>}
       <section className="accounts-no-print overflow-hidden rounded-xl border bg-white"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Tax Entries</h2></div><div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Description</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>{sortedTaxEntries.length === 0 ? <tr><td colSpan={canPost ? 4 : 3} className="p-8 text-center text-gray-500">No tax entries have been recorded.</td></tr> : sortedTaxEntries.map(entry => <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{entry.description || "—"}</td><td className="p-3 text-right tabular-nums">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" onClick={() => editTaxEntry(entry)} className="mr-3 text-blue-700 hover:underline">Edit</button><button type="button" onClick={() => removeTaxEntry(entry)} className="text-red-700 hover:underline">Delete</button></td>}</tr>)}</tbody></table></div></section>
     </>}
-    {view === "entries" && entriesStatement === "balance" && <section className="accounts-no-print rounded-xl border bg-white overflow-hidden"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Account Entries</h2><p className="text-sm text-gray-500">All entries recorded from the Accounts form.</p></div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Description</th><th className="p-3 text-left">Debit account</th><th className="p-3 text-left">Credit account</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>{journalEntries.length === 0 ? <tr><td className="p-8 text-center text-gray-500" colSpan={canPost ? 6 : 5}>No account entries have been recorded.</td></tr> : journalEntries.map(entry => <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{entry.description}</td><td className="p-3">{accountName(entry.debitCode)}</td><td className="p-3">{accountName(entry.creditCode)}</td><td className="p-3 text-right tabular-nums">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" onClick={() => editJournal(entry)} className="mr-3 text-blue-700 hover:underline">Edit</button><button type="button" onClick={() => removeJournal(entry)} className="text-red-700 hover:underline">Delete</button></td>}</tr>)}</tbody></table></div></section>}
-    {canPost && view === "entries" && entriesStatement === "balance" && <form onSubmit={saveJournal} className="accounts-no-print rounded-xl border bg-white p-5 space-y-4"><div className="flex items-center justify-between gap-3"><h2 className="font-semibold">{editingJournalId ? "Edit account entry" : "Record Journal"}</h2>{editingJournalId && <button type="button" onClick={() => { setEditingJournalId(null); setJournal({ date: todayInEat(), debitCode: "", creditCode: "", amount: "", description: "" }); setJournalPaths({ debitCode: { category: "", section: "" }, creditCode: { category: "", section: "" } }); setMessage(""); }} className="text-sm text-gray-600 hover:underline">Cancel edit</button>}</div><p className="text-sm text-gray-500">Record an equal debit and credit. Choose a Balance Sheet category, section and line for each side. Sales and expenses are included automatically through their own entry forms; do not enter them again here.</p><div className="grid gap-4 sm:grid-cols-2"><label>Date<input required type="date" className={input} value={journal.date} onChange={e => setJournal({ ...journal, date: e.target.value })} /></label><label>Amount (UGX)<input required type="number" min="0.01" step="0.01" className={input} value={journal.amount} onChange={e => setJournal({ ...journal, amount: e.target.value })} /></label></div>{journalSide("debitCode")}{journalSide("creditCode")}<label className="block">Description<input required className={input} value={journal.description} onChange={e => setJournal({ ...journal, description: e.target.value })} /></label><button disabled={saving} className="rounded-lg bg-gray-900 text-white px-4 py-2 disabled:opacity-50">{saving ? "Saving..." : editingJournalId ? "Update entry" : "Record journal"}</button><p role="status">{message}</p></form>}
+    {view === "entries" && entriesStatement === "balance" && <section className="accounts-no-print overflow-hidden rounded-xl border bg-white">
+      <div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Account Entries</h2><p className="text-sm text-gray-500">Simplified entries show their selected Balance Sheet item and the automatic balancing account. Historical debit/credit postings remain unchanged.</p></div>
+      <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Category</th><th className="p-3 text-left">Item</th><th className="p-3 text-left">Description</th><th className="p-3 text-left">Offset account</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>
+        {journalEntries.length === 0 ? <tr><td className="p-8 text-center text-gray-500" colSpan={canPost ? 7 : 6}>No account entries have been recorded.</td></tr> : journalEntries.map(entry => { const display = journalDisplay(entry); return <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{display.mapped ? display.category : "Historical — unmapped"}</td><td className="p-3">{display.mapped ? accountName(display.itemCode) : `${accountName(entry.debitCode)} / ${accountName(entry.creditCode)}`}</td><td className="p-3">{entry.description}</td><td className="p-3">{display.mapped ? accountName(display.offsetCode) : "See stored debit / credit"}</td><td className="p-3 text-right tabular-nums">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" onClick={() => editJournal(entry)} className="mr-3 text-blue-700 hover:underline">Edit</button><button type="button" onClick={() => removeJournal(entry)} className="text-red-700 hover:underline">Delete</button></td>}</tr>; })}
+      </tbody></table></div>
+    </section>}
+    {canPost && view === "entries" && entriesStatement === "balance" && <form onSubmit={saveJournal} className="accounts-no-print space-y-4 rounded-xl border bg-white p-5">
+      <div className="flex items-center justify-between gap-3"><h2 className="font-semibold">{editingJournalId ? "Edit account entry" : "Record Journal"}</h2>{editingJournalId && <button type="button" onClick={() => { resetJournalForm(); setMessage(""); }} className="text-sm text-gray-600 hover:underline">Cancel edit</button>}</div>
+      <p className="text-sm text-gray-500">Choose the Balance Sheet item to increase. The system records the balancing side automatically so the Balance Sheet remains balanced.</p>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <label>Date<input required type="date" className={input} value={journal.date} onChange={e => setJournal({ ...journal, date: e.target.value })} /></label>
+        <label>Amount (UGX)<input required type="number" min="0.01" step="0.01" className={input} value={journal.amount} onChange={e => setJournal({ ...journal, amount: e.target.value })} /></label>
+        <label>Category<select required className={input} value={journal.category} onChange={e => { const category = e.target.value as JournalCategory | ""; setJournal(previous => ({ ...previous, category, itemCode: "" })); setEditingJournalOffsetCode(null); }}><option value="">Select category...</option>{(Object.keys(JOURNAL_STRUCTURE) as JournalCategory[]).map(category => <option key={category} value={category}>{category}</option>)}</select></label>
+        <label>Item<select required disabled={!journal.category} className={`${input} disabled:bg-gray-100 disabled:text-gray-500`} value={journal.itemCode} onChange={e => setJournal(previous => ({ ...previous, itemCode: e.target.value }))}><option value="">{journal.category ? "Select item..." : "Select a category first"}</option>{journalItemGroups.map(section => <optgroup key={section.label} label={section.label}>{section.lines.map(line => <option key={line.code} value={line.accountCode ?? ""}>{line.name}</option>)}</optgroup>)}</select></label>
+        <label className="sm:col-span-2">Description<input required className={input} value={journal.description} onChange={e => setJournal({ ...journal, description: e.target.value })} /></label>
+      </div>
+      <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">{journalEffect}</p>
+      <button disabled={saving} className="rounded-lg bg-gray-900 px-4 py-2 text-white disabled:opacity-50">{saving ? "Saving..." : editingJournalId ? "Update entry" : "Record journal"}</button><p role="status">{message}</p>
+    </form>}
   </main></RouteGuard>;
 }
