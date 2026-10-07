@@ -34,7 +34,36 @@ export const COST_OF_PRODUCTION_LINES = [
 ] as const;
 export type ProductionCostItem = Extract<(typeof COST_OF_PRODUCTION_LINES)[number], { entrySelectable: true }>["id"];
 export const PRODUCTION_COST_ENTRY_LINES = COST_OF_PRODUCTION_LINES.filter(line => line.entrySelectable);
-export const productionCostItem = (entry: Pick<ProductionCostEntry, "item">): ProductionCostItem => entry.item ?? "other_costs";
+const PRODUCTION_COST_ITEM_ALIASES: Record<string, ProductionCostItem> = {
+  purchases_raw_materials: "purchases_raw_materials",
+  "purchases of raw materials": "purchases_raw_materials",
+  "purchase of raw materials": "purchases_raw_materials",
+  "raw materials": "purchases_raw_materials",
+  direct_materials: "purchases_raw_materials",
+  "direct materials": "purchases_raw_materials",
+  carriage_inwards: "carriage_inwards",
+  "carriage inwards": "carriage_inwards",
+  "carriage inward": "carriage_inwards",
+  "transport costs for raw materials": "carriage_inwards",
+  other_costs: "other_costs",
+  "other costs": "other_costs",
+};
+const normaliseProductionCostItem = (value: unknown) => String(value ?? "").trim().toLowerCase().replace(/[-\s]+/g, "_");
+export const productionCostItem = (entry: Pick<ProductionCostEntry, "item" | "productionCostItem" | "category" | "costType" | "description">): ProductionCostItem => {
+  // Current records use `item`. The remaining fields preserve entries created by
+  // earlier versions of the Accounts form before that field was introduced.
+  const explicitValues = [entry.item, entry.productionCostItem, entry.category, entry.costType];
+  for (const value of explicitValues) {
+    const normalised = normaliseProductionCostItem(value);
+    const matched = PRODUCTION_COST_ITEM_ALIASES[normalised] ?? PRODUCTION_COST_ITEM_ALIASES[normalised.replaceAll("_", " ")];
+    if (matched) return matched;
+  }
+  // Records created before the selector existed have no reliable line mapping.
+  // Keep them in Other Costs rather than guessing from free-text descriptions.
+  return "other_costs";
+};
+export const hasSavedProductionCostItem = (entry: Pick<ProductionCostEntry, "item" | "productionCostItem" | "category" | "costType">) =>
+  [entry.item, entry.productionCostItem, entry.category, entry.costType].some(value => Boolean(String(value ?? "").trim()));
 export function validateAccounting(value: AccountingSelection, kind: "sale" | "expense") {
   const allowed = kind === "sale" ? ["Income", "Other Income"] : ["Cost of Sales", "Expenses"];
   const known = ACCOUNTS.find(a => a.code === value.accountCode);
@@ -61,7 +90,20 @@ export interface Journal {
   simplifiedItemCode?: string;
   simplifiedOffsetCode?: string;
 }
-export interface ProductionCostEntry { id: string; date: string; description: string; amount: number; settlementCode: "1000" | "1030"; item?: ProductionCostItem; reference?: string; notes?: string }
+export interface ProductionCostEntry {
+  id: string;
+  date: string;
+  description: string;
+  amount: number;
+  settlementCode: "1000" | "1030";
+  item?: ProductionCostItem;
+  /** Legacy field names retained so previously saved entries remain reportable. */
+  productionCostItem?: string;
+  category?: string;
+  costType?: string;
+  reference?: string;
+  notes?: string;
+}
 export interface TaxEntry { id: string; date: string; description: string; amount: number }
 export interface PayrollProductionEntry { id: string; date: string; earningsUgx: number; paymentStatus?: string; paymentId?: string }
 export interface PayrollPaymentEntry { id: string; paidDate: string; status?: string; payrollVersion?: number; grossAmount?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; paymentSourceCode?: string }
@@ -143,7 +185,9 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
     const amount = Number(remittance.amount);
     if (amount > 0) post(remittance.paymentDate, "2125", remittance.paymentSourceCode, amount);
   });
-  journals.forEach(j => post(j.date, j.debitCode, j.creditCode, j.amount));
+  // Coerce historical values because early journal versions could persist the
+  // amount as a numeric string. New entries are still validated and saved as numbers.
+  journals.forEach(j => post(j.date, j.debitCode, j.creditCode, Number(j.amount)));
   const rows = [...catalog.values()].map(a => {
     const creditNormal = ["Current Liabilities", "Non-Current Liabilities", "Equity", "Income", "Other Income"].includes(a.group);
     return { ...a, balance: (balances[a.code] || 0) * (creditNormal ? -1 : 1), movement: (movement[a.code] || 0) * (creditNormal ? -1 : 1) };
