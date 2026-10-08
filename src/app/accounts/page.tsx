@@ -1,5 +1,5 @@
 "use client";
-import { useMemo, useState, type FormEvent } from "react";
+import { useMemo, useRef, useState, type FormEvent } from "react";
 import { addDoc, collection, deleteDoc, doc, Timestamp, updateDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
@@ -28,7 +28,7 @@ export default function AccountsPage() {
   const [entriesStatement, setEntriesStatement] = useState<"balance" | "income">("balance");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
-  const [journal, setJournal] = useState({ date: todayInEat(), category: "" as JournalCategory | "", itemCode: "", amount: "", description: "" });
+  const [journal, setJournal] = useState({ date: todayInEat(), action: "add" as "add" | "deduct", category: "" as JournalCategory | "", itemCode: "", amount: "", description: "" });
   const [editingJournalOffsetCode, setEditingJournalOffsetCode] = useState<string | null>(null);
   const [cashActivityOpen, setCashActivityOpen] = useState(false);
   const [productionCost, setProductionCost] = useState({ date: todayInEat(), item: "" as "" | ProductionCostItem, description: "", amount: "", settlementCode: "" as "" | "1000" | "1030", reference: "", notes: "" });
@@ -39,6 +39,7 @@ export default function AccountsPage() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [editingJournalId, setEditingJournalId] = useState<string | null>(null);
   const [message, setMessage] = useState("");
+  const journalSavingRef = useRef(false);
   const sales = useRealtimeCollection<LedgerSource>("saleTransactions");
   const expenses = useRealtimeCollection<LedgerSource>("expenses");
   const journals = useRealtimeCollection<Journal>("accountJournals");
@@ -102,23 +103,31 @@ export default function AccountsPage() {
   const selectedJournalLine = journalItemGroups.flatMap(section => section.lines).find(line => line.accountCode === journal.itemCode);
   const automaticJournalOffsetCode = journal.category === "Equity" ? "1000" : "3060";
   const journalOffsetCode = editingJournalOffsetCode ?? automaticJournalOffsetCode;
+  const journalAmount = Number(journal.amount);
   const journalEffect = selectedJournalLine && journalOffsetCode && selectedJournalLine.accountCode !== journalOffsetCode
-    ? `Increases ${selectedJournalLine.name}; offset to ${accountName(journalOffsetCode)}.`
+    ? `${journal.action === "add" ? "Increases" : "Reduces"} ${selectedJournalLine.name}${Number.isFinite(journalAmount) && journalAmount > 0 ? ` by ${money(journalAmount)}` : ""}; offset to ${accountName(journalOffsetCode)}.`
     : "Select a category and item to preview the balanced entry.";
+  const journalBalanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data.filter(entry => entry.id !== editingJournalId), "", journal.date || todayInEat(), productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, editingJournalId, journal.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
+  const selectedJournalBalance = selectedJournalLine?.accountCode ? journalBalanceReport.rows.find(row => row.code === selectedJournalLine.accountCode)?.balance ?? 0 : 0;
   const resetJournalForm = () => {
-    setJournal({ date: todayInEat(), category: "", itemCode: "", amount: "", description: "" });
+    setJournal({ date: todayInEat(), action: "add", category: "", itemCode: "", amount: "", description: "" });
     setEditingJournalId(null);
     setEditingJournalOffsetCode(null);
   };
   const journalDisplay = (entry: Journal) => {
-    if (entry.simplifiedCategory && entry.simplifiedItemCode) return { category: entry.simplifiedCategory, itemCode: entry.simplifiedItemCode, offsetCode: entry.simplifiedOffsetCode ?? (entry.debitCode === entry.simplifiedItemCode ? entry.creditCode : entry.debitCode), mapped: true };
+    if (entry.simplifiedCategory && entry.simplifiedItemCode) {
+      const itemIsDebit = entry.debitCode === entry.simplifiedItemCode;
+      const inferredAction = entry.simplifiedCategory === "Assets" ? (itemIsDebit ? "add" : "deduct") : (itemIsDebit ? "deduct" : "add");
+      return { category: entry.simplifiedCategory, itemCode: entry.simplifiedItemCode, offsetCode: entry.simplifiedOffsetCode ?? (itemIsDebit ? entry.creditCode : entry.debitCode), action: entry.simplifiedAction ?? inferredAction, mapped: true };
+    }
     const debitPath = journalPathForCode(report, entry.debitCode);
     const creditPath = journalPathForCode(report, entry.creditCode);
-    if (debitPath?.category === "Assets") return { category: debitPath.category, itemCode: entry.debitCode, offsetCode: entry.creditCode, mapped: true };
-    if (creditPath && ["Liabilities", "Equity"].includes(creditPath.category)) return { category: creditPath.category, itemCode: entry.creditCode, offsetCode: entry.debitCode, mapped: true };
-    if (debitPath) return { category: debitPath.category, itemCode: entry.debitCode, offsetCode: entry.creditCode, mapped: true };
-    if (creditPath) return { category: creditPath.category, itemCode: entry.creditCode, offsetCode: entry.debitCode, mapped: true };
-    return { category: "" as const, itemCode: "", offsetCode: "", mapped: false };
+    if (debitPath && creditPath) return { category: "" as const, itemCode: "", offsetCode: "", action: null, mapped: false, ambiguous: true };
+    if (debitPath?.category === "Assets") return { category: debitPath.category, itemCode: entry.debitCode, offsetCode: entry.creditCode, action: "add" as const, mapped: true };
+    if (creditPath && ["Liabilities", "Equity"].includes(creditPath.category)) return { category: creditPath.category, itemCode: entry.creditCode, offsetCode: entry.debitCode, action: "add" as const, mapped: true };
+    if (debitPath) return { category: debitPath.category, itemCode: entry.debitCode, offsetCode: entry.creditCode, action: "deduct" as const, mapped: true };
+    if (creditPath) return { category: creditPath.category, itemCode: entry.creditCode, offsetCode: entry.debitCode, action: "deduct" as const, mapped: true };
+    return { category: "" as const, itemCode: "", offsetCode: "", action: null, mapped: false };
   };
   const legacyProductionCostEntries = productionCostEntries.filter(entry => !hasSavedProductionCostItem(entry));
   const invalidProductionCostEntries = productionCostEntries.filter(entry => !/^\d{4}-\d{2}-\d{2}$/.test(entry.date) || !Number.isFinite(Number(entry.amount)) || Number(entry.amount) <= 0);
@@ -129,6 +138,7 @@ export default function AccountsPage() {
     || !ACCOUNTS.some(account => account.code === entry.debitCode)
     || !ACCOUNTS.some(account => account.code === entry.creditCode)
   );
+  const ambiguousHistoricalJournals = journalEntries.filter(entry => !journalDisplay(entry).mapped);
   const reportTitle = view === "income" ? "Income Statement (Profit & Loss)" : view === "balance" ? "Balance Sheet" : "Cash Flow Statement";
   const pdfSections = useMemo<AccountsPdfSection[]>(() => {
     if (view === "income") return [
@@ -183,23 +193,36 @@ export default function AccountsPage() {
     }
   }
   async function saveJournal(e: FormEvent) {
-    e.preventDefault(); setSaving(true); setMessage("");
+    e.preventDefault();
+    if (journalSavingRef.current) return;
+    journalSavingRef.current = true;
+    setSaving(true); setMessage("");
     try {
       const amount = Number(journal.amount);
       const itemCode = selectedJournalLine?.accountCode ?? "";
       const offsetCode = journalOffsetCode;
-      if (!canPost || !/^\d{4}-\d{2}-\d{2}$/.test(journal.date) || !journal.category || !itemCode || !Number.isFinite(amount) || amount <= 0 || !journal.description.trim()) throw new Error("Enter a valid date, Category, Item, description and an amount greater than zero.");
+      if (!canPost || !/^\d{4}-\d{2}-\d{2}$/.test(journal.date) || !["add", "deduct"].includes(journal.action) || !journal.category || !itemCode || !Number.isFinite(amount) || amount <= 0 || !journal.description.trim()) throw new Error("Enter a valid date, Action, Category, Item, description and an amount greater than zero. Do not use a negative amount; choose Deduct Funds instead.");
       if (!ACCOUNTS.some(account => account.code === itemCode) || !ACCOUNTS.some(account => account.code === offsetCode) || itemCode === offsetCode) throw new Error("The selected item cannot be posted with its balancing account. Choose another item.");
-      const assetIncrease = journal.category === "Assets";
+      if (journal.action === "deduct" && amount > selectedJournalBalance + 0.005) throw new Error(`Deduction blocked: ${selectedJournalLine?.name ?? "the selected item"} has ${money(selectedJournalBalance)} available as at ${journal.date}.`);
+      const normalIncreaseIsDebit = journal.category === "Assets";
+      const itemIsDebit = journal.action === "add" ? normalIncreaseIsDebit : !normalIncreaseIsDebit;
+      const debitCode = itemIsDebit ? itemCode : offsetCode;
+      const creditCode = itemIsDebit ? offsetCode : itemCode;
+      if (creditCode === "1000") {
+        const availableBank = journalBalanceReport.rows.find(row => row.code === "1000")?.balance ?? 0;
+        if (amount > availableBank + 0.005) throw new Error(`Deduction blocked: Bank has ${money(availableBank)} available as at ${journal.date}.`);
+      }
+      const wasEditing = Boolean(editingJournalId);
       const entry = {
         date: journal.date,
-        debitCode: assetIncrease ? itemCode : offsetCode,
-        creditCode: assetIncrease ? offsetCode : itemCode,
+        debitCode,
+        creditCode,
         amount,
         description: journal.description.trim(),
         simplifiedCategory: journal.category,
         simplifiedItemCode: itemCode,
         simplifiedOffsetCode: offsetCode,
+        simplifiedAction: journal.action,
       };
       if (editingJournalId) {
         await updateDoc(doc(db, "accountJournals", editingJournalId), entry);
@@ -207,9 +230,9 @@ export default function AccountsPage() {
         await addDoc(collection(db, "accountJournals"), { ...entry, createdAt: Timestamp.now(), createdBy: userRole?.uid });
       }
       resetJournalForm();
-      setMessage(editingJournalId ? "Entry updated successfully." : "Journal recorded successfully.");
+      setMessage(wasEditing ? "Entry updated successfully." : "Journal recorded successfully.");
     } catch (e) { setMessage(e instanceof Error ? e.message : "Unable to save journal."); }
-    finally { setSaving(false); }
+    finally { journalSavingRef.current = false; setSaving(false); }
   }
   function editJournal(entry: Journal) {
     const display = journalDisplay(entry);
@@ -217,7 +240,7 @@ export default function AccountsPage() {
       setMessage("This historical entry cannot be mapped cleanly to one Balance Sheet item and was left unchanged.");
       return;
     }
-    setJournal({ date: entry.date, category: display.category, itemCode: display.itemCode, amount: String(entry.amount), description: entry.description });
+    setJournal({ date: entry.date, action: display.action ?? "add", category: display.category, itemCode: display.itemCode, amount: String(entry.amount), description: entry.description });
     setEditingJournalOffsetCode(display.offsetCode);
     setEditingJournalId(entry.id);
     setEntriesStatement("balance");
@@ -354,22 +377,26 @@ export default function AccountsPage() {
       <section className="accounts-no-print overflow-hidden rounded-xl border bg-white"><div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Tax Entries</h2></div><div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Description</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>{sortedTaxEntries.length === 0 ? <tr><td colSpan={canPost ? 4 : 3} className="p-8 text-center text-gray-500">No tax entries have been recorded.</td></tr> : sortedTaxEntries.map(entry => <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{entry.description || "—"}</td><td className="p-3 text-right tabular-nums">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" onClick={() => editTaxEntry(entry)} className="mr-3 text-blue-700 hover:underline">Edit</button><button type="button" onClick={() => removeTaxEntry(entry)} className="text-red-700 hover:underline">Delete</button></td>}</tr>)}</tbody></table></div></section>
     </>}
     {view === "entries" && entriesStatement === "balance" && <section className="accounts-no-print overflow-hidden rounded-xl border bg-white">
-      <div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Account Entries</h2><p className="text-sm text-gray-500">Simplified entries show their selected Balance Sheet item and the automatic balancing account. Historical debit/credit postings remain unchanged.</p></div>
-      <div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Category</th><th className="p-3 text-left">Item</th><th className="p-3 text-left">Description</th><th className="p-3 text-left">Offset account</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>
-        {journalEntries.length === 0 ? <tr><td className="p-8 text-center text-gray-500" colSpan={canPost ? 7 : 6}>No account entries have been recorded.</td></tr> : journalEntries.map(entry => { const display = journalDisplay(entry); return <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className="p-3">{display.mapped ? display.category : "Historical — unmapped"}</td><td className="p-3">{display.mapped ? accountName(display.itemCode) : `${accountName(entry.debitCode)} / ${accountName(entry.creditCode)}`}</td><td className="p-3">{entry.description}</td><td className="p-3">{display.mapped ? accountName(display.offsetCode) : "See stored debit / credit"}</td><td className="p-3 text-right tabular-nums">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" onClick={() => editJournal(entry)} className="mr-3 text-blue-700 hover:underline">Edit</button><button type="button" onClick={() => removeJournal(entry)} className="text-red-700 hover:underline">Delete</button></td>}</tr>; })}
+      <div className="border-b px-5 py-4"><h2 className="text-lg font-semibold">Account Entries</h2><p className="text-sm text-gray-500">Simplified entries show their selected Balance Sheet item, action and automatic balancing account. Historical debit/credit postings remain unchanged.</p></div>
+      {ambiguousHistoricalJournals.length > 0 && <div role="alert" className="border-b border-amber-200 bg-amber-50 px-5 py-3 text-sm text-amber-900">{ambiguousHistoricalJournals.length} historical {ambiguousHistoricalJournals.length === 1 ? "entry has" : "entries have"} no reliable selected-item metadata. Their stored debit and credit postings remain active, but their Add/Deduct direction is shown as “Unable to determine” and editing is disabled.</div>}
+      <div className="overflow-x-auto"><table className="w-full min-w-[980px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Action</th><th className="p-3 text-left">Category</th><th className="p-3 text-left">Item</th><th className="p-3 text-left">Description</th><th className="p-3 text-left">Offset account</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>
+        {journalEntries.length === 0 ? <tr><td className="p-8 text-center text-gray-500" colSpan={canPost ? 8 : 7}>No account entries have been recorded.</td></tr> : journalEntries.map(entry => { const display = journalDisplay(entry); const deduct = display.action === "deduct"; return <tr key={entry.id} className="border-t"><td className="p-3 whitespace-nowrap">{entry.date}</td><td className={`p-3 font-medium ${deduct ? "text-red-700" : "text-green-700"}`}>{display.action ? (deduct ? "Deduct" : "Add") : "Unable to determine"}</td><td className="p-3">{display.mapped ? display.category : "Historical — unmapped"}</td><td className="p-3">{display.mapped ? accountName(display.itemCode) : `${accountName(entry.debitCode)} / ${accountName(entry.creditCode)}`}</td><td className="p-3">{entry.description}</td><td className="p-3">{display.mapped ? accountName(display.offsetCode) : "See stored debit / credit"}</td><td className={`p-3 text-right tabular-nums ${deduct ? "text-red-700" : ""}`}>{deduct ? `−${money(Number(entry.amount))}` : money(Number(entry.amount))}</td>{canPost && <td className="p-3 text-right whitespace-nowrap">{display.mapped && <button type="button" onClick={() => editJournal(entry)} className="mr-3 text-blue-700 hover:underline">Edit</button>}<button type="button" onClick={() => removeJournal(entry)} className="text-red-700 hover:underline">Delete</button></td>}</tr>; })}
       </tbody></table></div>
     </section>}
     {canPost && view === "entries" && entriesStatement === "balance" && <form onSubmit={saveJournal} className="accounts-no-print space-y-4 rounded-xl border bg-white p-5">
       <div className="flex items-center justify-between gap-3"><h2 className="font-semibold">{editingJournalId ? "Edit account entry" : "Record Journal"}</h2>{editingJournalId && <button type="button" onClick={() => { resetJournalForm(); setMessage(""); }} className="text-sm text-gray-600 hover:underline">Cancel edit</button>}</div>
-      <p className="text-sm text-gray-500">Choose the Balance Sheet item to increase. The system records the balancing side automatically so the Balance Sheet remains balanced.</p>
+      <p className="text-sm text-gray-500">Choose whether to add to or deduct from a Balance Sheet item. The system reverses both posting sides when deducting so the Balance Sheet remains balanced.</p>
       <div className="grid gap-4 sm:grid-cols-2">
         <label>Date<input required type="date" className={input} value={journal.date} onChange={e => setJournal({ ...journal, date: e.target.value })} /></label>
         <label>Amount (UGX)<input required type="number" min="0.01" step="0.01" className={input} value={journal.amount} onChange={e => setJournal({ ...journal, amount: e.target.value })} /></label>
+        <label>Action<select required className={input} value={journal.action} onChange={e => setJournal({ ...journal, action: e.target.value as "add" | "deduct" })}><option value="add">Add Funds</option><option value="deduct">Deduct Funds</option></select></label>
         <label>Category<select required className={input} value={journal.category} onChange={e => { const category = e.target.value as JournalCategory | ""; setJournal(previous => ({ ...previous, category, itemCode: "" })); setEditingJournalOffsetCode(null); }}><option value="">Select category...</option>{(Object.keys(JOURNAL_STRUCTURE) as JournalCategory[]).map(category => <option key={category} value={category}>{category}</option>)}</select></label>
         <label>Item<select required disabled={!journal.category} className={`${input} disabled:bg-gray-100 disabled:text-gray-500`} value={journal.itemCode} onChange={e => setJournal(previous => ({ ...previous, itemCode: e.target.value }))}><option value="">{journal.category ? "Select item..." : "Select a category first"}</option>{journalItemGroups.map(section => <optgroup key={section.label} label={section.label}>{section.lines.map(line => <option key={line.code} value={line.accountCode ?? ""}>{line.name}</option>)}</optgroup>)}</select></label>
         <label className="sm:col-span-2">Description<input required className={input} value={journal.description} onChange={e => setJournal({ ...journal, description: e.target.value })} /></label>
       </div>
       <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">{journalEffect}</p>
+      {journal.action === "deduct" && selectedJournalLine && Number.isFinite(journalAmount) && journalAmount > selectedJournalBalance + 0.005 && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">This deduction exceeds the current {selectedJournalLine.name} balance of {money(selectedJournalBalance)} as at {journal.date}. Saving is blocked.</p>}
+      {selectedJournalLine?.accountCode === "3100" && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">Dividends currently follows the existing Equity sign treatment: Add Funds increases the Dividends equity balance; Deduct Funds reduces it. Review this treatment before using it as a contra-equity withdrawal.</p>}
       <button disabled={saving} className="rounded-lg bg-gray-900 px-4 py-2 text-white disabled:opacity-50">{saving ? "Saving..." : editingJournalId ? "Update entry" : "Record journal"}</button><p role="status">{message}</p>
     </form>}
   </main></RouteGuard>;

@@ -90,6 +90,7 @@ export interface Journal {
   simplifiedCategory?: "Assets" | "Liabilities" | "Equity";
   simplifiedItemCode?: string;
   simplifiedOffsetCode?: string;
+  simplifiedAction?: "add" | "deduct";
 }
 export interface ProductionCostEntry {
   id: string;
