@@ -80,12 +80,14 @@ export default function AccountsPage() {
       const debitCash = SETTLEMENT_CODES.includes(entry.debitCode);
       const creditCash = SETTLEMENT_CODES.includes(entry.creditCode);
       if (entry.bankingKind === "transfer" && debitCash && creditCash) return [
-        { id: `transfer-${entry.id}-out`, date: entry.date, source: entry.bankingStatus === "awaiting_deposit_details" ? "Transfer · Awaiting deposit details" : "Transfer", description: entry.description, account: cashAccountName(entry.creditCode), amount: -entry.amount },
-        { id: `transfer-${entry.id}-in`, date: entry.date, source: entry.bankingStatus === "awaiting_deposit_details" ? "Deposit · Awaiting details" : "Deposit · Linked transfer", description: entry.description, account: cashAccountName(entry.debitCode), amount: entry.amount },
+        { id: `transfer-${entry.id}-out`, date: entry.date, source: entry.bankingStatus === "awaiting_deposit_details" ? "Transfer · Awaiting deposit details" : "Transfer", description: entry.description, account: entry.creditCode === "1000" ? `${cashAccountName(entry.creditCode)} · ${entry.bankName || "Bank (not specified)"}` : cashAccountName(entry.creditCode), amount: -entry.amount },
+        { id: `transfer-${entry.id}-in`, date: entry.date, source: entry.bankingStatus === "awaiting_deposit_details" ? "Deposit · Awaiting details" : "Deposit · Linked transfer", description: entry.description, account: entry.debitCode === "1000" ? `${cashAccountName(entry.debitCode)} · ${entry.bankName || "Bank (not specified)"}` : cashAccountName(entry.debitCode), amount: entry.amount },
       ];
       if (debitCash === creditCash) return [];
       const code = debitCash ? entry.debitCode : entry.creditCode;
-      return [{ id: `journal-${entry.id}`, date: entry.date, source: entry.bankingKind === "deposit" ? "Deposit" : "Journal", description: entry.description, account: cashAccountName(code), amount: debitCash ? entry.amount : -entry.amount }];
+      const account = cashAccountName(code);
+      const taggedAccount = code === "1000" && entry.bankingKind ? `${account} · ${entry.bankName || "Bank (not specified)"}` : account;
+      return [{ id: `journal-${entry.id}`, date: entry.date, source: entry.bankingKind === "deposit" ? "Deposit" : "Journal", description: entry.description, account: taggedAccount, amount: debitCash ? entry.amount : -entry.amount }];
     });
     return [...salesRows, ...expenseRows, ...productionRows, ...payrollRows, ...payeRows, ...journalRows].filter(entry => entry.date >= start && entry.date <= end).sort((a, b) => b.date.localeCompare(a.date));
   }, [sales.data, expenses.data, productionCosts.data, payments.data, payeRemittances.data, journals.data, start, end]);

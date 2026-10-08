@@ -86,6 +86,7 @@ export interface Journal {
   receivedFrom?: string;
   paymentMethod?: "Cash" | "Cheque";
   referenceNumber?: string;
+  bankName?: string;
   simplifiedCategory?: "Assets" | "Liabilities" | "Equity";
   simplifiedItemCode?: string;
   simplifiedOffsetCode?: string;

@@ -5,6 +5,10 @@ export const cashAccounts = ACCOUNTS.filter(account => SETTLEMENT_CODES.includes
 export const isBankCode = (code: string) => bankAccounts.some(account => account.code === code);
 export const isCashCode = (code: string) => cashAccounts.some(account => account.code === code);
 export const isMoneyCode = (code: string) => isBankCode(code) || isCashCode(code);
+export const DEFAULT_BANK_NAMES = ["Bank of Baroda", "Bank of Africa"] as const;
+export const CUSTOM_BANK_VALUE = "__other__";
+export const normaliseBankNameKey = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+export const cleanBankName = (value: string) => value.trim().replace(/\s+/g, " ");
 
 export const bankingAccountName = (code: string) => {
   if (isBankCode(code)) return "Bank";
