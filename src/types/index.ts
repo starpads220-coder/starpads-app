@@ -107,6 +107,17 @@ export interface ProductionEntry {
   targetPieces: number;
   earningsUgx: number;
   performancePct: number;
+  /** Immutable copy of the target that was used when this entry was recorded. */
+  targetSnapshot?: {
+    name: string;
+    quantity: number;
+    amount: number;
+    rate: number;
+    unit: string;
+    versionId: string;
+    effectiveDate: string;
+    calculationQuantity: number;
+  };
   batchRef: string;
   materialType?: MaterialType;
   materialCategory?: MaterialCategory;
@@ -139,6 +150,10 @@ export interface StockOut {
   destination: string;
   customerRef?: string;
   dispatchedBy: string;
+  /** Sale that created this movement. Absent on historical/manual stock-outs. */
+  saleId?: string;
+  saleQuantity?: number;
+  salePackSize?: PackSize;
 }
 
 export interface Batch {
@@ -175,6 +190,8 @@ export interface SaleTransaction {
   materialQuantity?: number;
   trainingDays?: number;
   grantAmount?: number;
+  stockOutIds?: string[];
+  stockStatus?: "pending" | "recorded";
 }
 
 export type ExpenseCategory =
@@ -255,6 +272,26 @@ export interface Payment {
   status?: "due" | "paid";
 }
 
+export interface ProductionTargetVersion {
+  id: string;
+  targetKey: string;
+  stageId: StageId;
+  targetName: string;
+  variant: "stage" | "combinedStage" | "materialPieces" | "materialMeters" | "activity";
+  material?: MaterialType | null;
+  activity?: "PINNING" | "FOLDING" | null;
+  quantity: number;
+  amount: number;
+  rate: number;
+  unit: string;
+  effectiveDate: string;
+  effectiveAt?: import("firebase/firestore").Timestamp;
+  changedBy?: string;
+  previousQuantity?: number;
+  previousAmount?: number;
+  isBaseline?: boolean;
+}
+
 export interface PayeRemittance {
   id: string;
   paymentDate: string;
@@ -268,11 +305,13 @@ export interface PayeRemittance {
 }
 
 export interface TargetConfig {
+  id?: string;
   employeeId: string;
   stageId: StageId;
   effectiveDate: string;
   dailyTarget: number;
   overrideTarget: number;
+  createdAt?: import("firebase/firestore").Timestamp;
 }
 
 export interface SalesTarget {

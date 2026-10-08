@@ -12,6 +12,7 @@ import {
   doc,
   getDocs,
   Timestamp,
+  writeBatch,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { StockIn, StockOut, PackSize, Batch, ProductionEntry, StageId, STAGE_LABELS, STAGE_ORDER } from "@/types";
@@ -108,6 +109,7 @@ export default function StoragePage() {
     quantity: 0,
     dispatchedBy: "",
   });
+  const [pendingSaleId, setPendingSaleId] = useState<string | null>(null);
 
   const { data: stockIns = [] } = useCollectionQuery<StockIn>(
     "stockIns", [orderBy("date", "desc")], { staleTime: 30 * 1000 }
@@ -151,6 +153,7 @@ export default function StoragePage() {
     const destinationParam = params.get("destination");
     const packSizeParam = params.get("packSize");
     const dispatchedByParam = params.get("dispatchedBy");
+    const saleIdParam = params.get("saleId");
 
     if (tabParam === "stock-in") setActiveTab("stock-in");
     if (tabParam === "stock-out") setActiveTab("stock-out");
@@ -205,6 +208,7 @@ export default function StoragePage() {
     }
 
     if (entryIdParam) setMoveEntryId(entryIdParam);
+    if (saleIdParam) setPendingSaleId(saleIdParam);
   }, []);
 
   // Effect 2: Resolve employeeId → receivedBy once employees data arrives from Firestore
@@ -491,7 +495,23 @@ export default function StoragePage() {
         );
         return;
       }
-      await addDoc(collection(db, "stockOuts"), { ...stockOutForm, batchRef, createdAt: Timestamp.now() });
+      if (pendingSaleId) {
+        const existingLinked = await getDocs(query(collection(db, "stockOuts"), where("saleId", "==", pendingSaleId)));
+        if (!existingLinked.empty) {
+          throw new Error("Stock-out has already been recorded for this sale.");
+        }
+        const stockOutRef = doc(collection(db, "stockOuts"));
+        const atomicWrite = writeBatch(db);
+        atomicWrite.set(stockOutRef, { ...stockOutForm, batchRef, saleId: pendingSaleId, saleQuantity: stockOutForm.quantity, salePackSize: stockOutForm.packSize, createdAt: Timestamp.now() });
+        atomicWrite.update(doc(db, "saleTransactions", pendingSaleId), {
+          stockOutIds: [stockOutRef.id],
+          stockStatus: "recorded",
+        });
+        await atomicWrite.commit();
+        setPendingSaleId(null);
+      } else {
+        await addDoc(collection(db, "stockOuts"), { ...stockOutForm, batchRef, createdAt: Timestamp.now() });
+      }
       queryClient.invalidateQueries({ queryKey: ["stockOuts"] });
       setStockOutForm({ date: new Date().toISOString().split("T")[0], destination: "", customerRef: "", batchRef: "", packSize: "HALF_DOZEN", quantity: 0, dispatchedBy: "" });
     } finally {

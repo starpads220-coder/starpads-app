@@ -11,6 +11,7 @@ import {
   doc,
   updateDoc,
   deleteDoc,
+  writeBatch,
   onSnapshot,
   orderBy,
   query,
@@ -35,6 +36,8 @@ import {
   SaleTransaction,
   SalesTarget,
   Batch,
+  StockIn,
+  StockOut,
 } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
 import { ReportCard } from "@/components/reports/ReportCard";
@@ -176,8 +179,10 @@ export default function SalesPage() {
   const [salesListSnapshot, setSalesListSnapshot] = useState<{ key: string; transactions: SaleTransaction[]; error: string }>({ key: "", transactions: [], error: "" });
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [saving, setSaving] = useState(false);
+  const [deletingSaleId, setDeletingSaleId] = useState<string | null>(null);
   const [formError, setFormError] = useState("");
   const [formSuccess, setFormSuccess] = useState(false);
+  const [formSuccessMessage, setFormSuccessMessage] = useState("Sale recorded successfully.");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("dashboard");
   const [accounting, setAccounting] = useState(emptyAccounting);
@@ -243,6 +248,9 @@ export default function SalesPage() {
   const { data: batches = [] } = useCollectionQuery<Batch>("batches", [
     orderBy("startDate", "desc"),
   ], { staleTime: 2 * 60 * 1000 });
+  const { data: stockIns = [] } = useCollectionQuery<StockIn>("stockIns", [orderBy("date", "desc")], { staleTime: 30 * 1000 });
+  const { data: stockOuts = [] } = useCollectionQuery<StockOut>("stockOuts", [orderBy("date", "desc")], { staleTime: 30 * 1000 });
+  const { data: allSalesForReconciliation = [] } = useCollectionQuery<SaleTransaction>("saleTransactions", [], { staleTime: 30 * 1000 });
 
   // Sales are allocated to the oldest active batch that still has capacity.
   const currentSaleBatch = useMemo(() => {
@@ -502,6 +510,38 @@ export default function SalesPage() {
       && (isEmployeeActive(employee) || (!!editingId && employee.id === form.salespersonId)),
   );
 
+  const saleAffectsStock = (sale: Pick<SaleTransaction, "saleType">) => !sale.saleType || sale.saleType === "SALE_OF_PADS";
+  const linkedStockOutsForSale = (sale: SaleTransaction) => {
+    const explicitlyLinked = stockOuts.filter((movement) => movement.saleId === sale.id || sale.stockOutIds?.includes(movement.id));
+    if (explicitlyLinked.length > 0) return explicitlyLinked;
+    if (!saleAffectsStock(sale)) return [];
+    // Historical fallback is deliberately strict; ambiguous candidates are not guessed.
+    const candidates = stockOuts.filter((movement) => !movement.saleId
+      && movement.date === sale.date
+      && movement.batchRef === sale.batchRef
+      && movement.packSize === sale.packSize
+      && movement.quantity === sale.quantitySold
+      && (movement.customerRef || "").trim().toLowerCase() === (sale.customerName || "").trim().toLowerCase());
+    return candidates.length === 1 ? candidates : [];
+  };
+
+  const availablePacks = (batchRef: string, packSize: PackSize, excludingStockOutIds: Set<string>) => {
+    const received = stockIns.filter((movement) => movement.batchRef === batchRef && movement.packSize === packSize).reduce((sum, movement) => sum + movement.quantity, 0);
+    const dispatched = stockOuts.filter((movement) => movement.batchRef === batchRef && movement.packSize === packSize && !excludingStockOutIds.has(movement.id)).reduce((sum, movement) => sum + movement.quantity, 0);
+    return received - dispatched;
+  };
+
+  const stockReconciliation = useMemo(() => batches.map((batch) => {
+    const stockedPads = stockIns.filter((movement) => movement.batchRef === batch.id).reduce((sum, movement) => sum + movement.quantity * PACK_SIZES[movement.packSize], 0);
+    const stockOutPads = stockOuts.filter((movement) => movement.batchRef === batch.id).reduce((sum, movement) => sum + movement.quantity * PACK_SIZES[movement.packSize], 0);
+    const salePads = allSalesForReconciliation.filter((sale) => sale.batchRef === batch.id && saleAffectsStock(sale)).reduce((sum, sale) => sum + sale.quantitySold * PACK_SIZES[sale.packSize], 0);
+    return { id: batch.id, name: batch.batchNumber, stockedPads, stockOutPads, salePads, difference: stockOutPads - salePads };
+  }), [batches, stockIns, stockOuts, allSalesForReconciliation]);
+
+  const unmatchedHistoricalSales = allSalesForReconciliation.filter((sale) => saleAffectsStock(sale)
+    && sale.stockStatus !== "pending"
+    && linkedStockOutsForSale(sale).length === 0);
+
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setSaving(true);
@@ -526,17 +566,64 @@ export default function SalesPage() {
       delete formWithoutOtherSubcategories.trainingDays;
       delete formWithoutOtherSubcategories.grantAmount;
       const saleData = { ...(isCustomSale ? formWithoutOtherSubcategories : formWithoutSalesperson), ...(form.saleType === "GRANTS_DONATIONS" && !isCustomSale ? { invoiceNumber: "" } : {}), ...(form.saleType === "PAD_TRAINING" && !isCustomSale ? { customerType: "RETAIL" as CustomerType } : {}), ...(["GRANTS_DONATIONS", "PAD_TRAINING"].includes(form.saleType) && !isCustomSale ? {} : { salespersonId }), ...(isCustomSale ? { saleType: "SALE_OF_PADS" as SaleType } : {}), batchRef, quantitySold, unitPrice, totalAmount, paymentMethod: paymentMethodFromSettlement(validatedAccounting.settlementCode), accounting: validatedAccounting };
+      let createdSaleId = "";
       if (editingId) {
-        await updateDoc(doc(db, "saleTransactions", editingId), {
+        const originalSale = transactions.find((transaction) => transaction.id === editingId);
+        if (!originalSale) throw new Error("The sale being edited could not be found.");
+        const originalMovements = linkedStockOutsForSale(originalSale);
+        const stockChanged = saleAffectsStock(originalSale) !== isPadSale
+          || (isPadSale && (originalSale.batchRef !== batchRef || originalSale.packSize !== form.packSize || originalSale.quantitySold !== quantitySold));
+        const saleUpdate = {
           ...saleData,
           ...(["GRANTS_DONATIONS", "PAD_TRAINING"].includes(form.saleType) ? { salespersonId: deleteField() } : {}),
           ...(isCustomSale ? { materialType: deleteField(), materialQuantity: deleteField(), trainingDays: deleteField(), grantAmount: deleteField() } : {}),
-        });
+        };
+        if (stockChanged && saleAffectsStock(originalSale) && originalMovements.length === 0) {
+          throw new Error("This historical pad sale has no reliably linked stock-out. Its stock-affecting fields cannot be edited until it is reconciled.");
+        }
+        const adjustedMovement = originalMovements.find((movement) => movement.saleQuantity !== undefined
+          && (movement.quantity !== movement.saleQuantity || movement.packSize !== movement.salePackSize));
+        if (stockChanged && adjustedMovement) {
+          throw new Error(`The linked stock-out ${adjustedMovement.id} was manually adjusted. The sale was not changed; review the movement before reconciling it.`);
+        }
+        if (stockChanged) {
+          const excludingIds = new Set(originalMovements.map((movement) => movement.id));
+          if (isPadSale) {
+            const available = availablePacks(batchRef, form.packSize, excludingIds);
+            if (quantitySold > available) throw new Error(`Only ${available.toLocaleString()} ${form.packSize.toLowerCase().replaceAll("_", " ")} packs are available in this batch.`);
+          }
+          const atomicWrite = writeBatch(db);
+          originalMovements.forEach((movement) => atomicWrite.delete(doc(db, "stockOuts", movement.id)));
+          let nextStockOutIds: string[] = [];
+          if (isPadSale) {
+            const stockOutRef = doc(collection(db, "stockOuts"));
+            atomicWrite.set(stockOutRef, {
+              date: form.date,
+              customerRef: form.customerName,
+              destination: form.customerType === "BULK" ? "BULK_CUSTOMER" : form.customerType,
+              packSize: form.packSize,
+              quantity: quantitySold,
+              dispatchedBy: form.salespersonId,
+              batchRef,
+              saleId: editingId,
+              saleQuantity: quantitySold,
+              salePackSize: form.packSize,
+              createdAt: Timestamp.now(),
+            });
+            nextStockOutIds = [stockOutRef.id];
+          }
+          atomicWrite.update(doc(db, "saleTransactions", editingId), { ...saleUpdate, stockOutIds: nextStockOutIds, stockStatus: isPadSale ? "recorded" : "pending" });
+          await atomicWrite.commit();
+        } else {
+          await updateDoc(doc(db, "saleTransactions", editingId), saleUpdate);
+        }
       } else {
-        await addDoc(collection(db, "saleTransactions"), {
+        const createdSale = await addDoc(collection(db, "saleTransactions"), {
           ...saleData,
+          ...(isPadSale ? { stockOutIds: [], stockStatus: "pending" as const } : {}),
           createdAt: Timestamp.now(),
         });
+        createdSaleId = createdSale.id;
       }
       if (!editingId && isPadSale) {
         const params = new URLSearchParams({
@@ -548,9 +635,10 @@ export default function SalesPage() {
           quantity: String(form.quantitySold),
           dispatchedBy: form.salespersonId,
           batchRef,
+          saleId: createdSaleId,
         });
         // Redirect only after the sale transaction has been saved successfully.
-        window.location.href = `/storage?${params.toString()}`;
+        window.location.assign(`/storage?${params.toString()}`);
         return;
       }
       setPadsInput(0);
@@ -577,6 +665,7 @@ export default function SalesPage() {
         grantAmount: 0,
       });
       setFormSuccess(true);
+      setFormSuccessMessage("Sale recorded successfully.");
       setTimeout(() => setFormSuccess(false), 5000);
     } catch (err) {
       console.error("Failed to save sale:", err);
@@ -617,11 +706,40 @@ export default function SalesPage() {
   };
 
   const handleDeleteSale = async (id: string) => {
-    if (!confirm("Delete this sale entry? This action cannot be undone.")) return;
+    if (deletingSaleId) return;
+    const sale = transactions.find((transaction) => transaction.id === id);
+    if (!sale) return;
+    const linkedMovements = linkedStockOutsForSale(sale);
+    if (saleAffectsStock(sale) && linkedMovements.length === 0 && sale.stockStatus !== "pending") {
+      setFormError("This historical pad sale has no reliably matched stock-out. It was not deleted because its stock cannot be reversed safely.");
+      return;
+    }
+    const adjustedMovement = linkedMovements.find((movement) => movement.saleQuantity !== undefined
+      && (movement.quantity !== movement.saleQuantity || movement.packSize !== movement.salePackSize));
+    if (adjustedMovement) {
+      setFormError(`Linked stock-out ${adjustedMovement.id} was manually adjusted. The sale was not deleted because only its original sale quantity may be reversed.`);
+      return;
+    }
+    const padsReturned = linkedMovements.reduce((sum, movement) => sum + movement.quantity * PACK_SIZES[movement.packSize], 0);
+    const batchNames = [...new Set(linkedMovements.map((movement) => batches.find((batch) => batch.id === movement.batchRef)?.batchNumber ?? movement.batchRef))].join(", ");
+    const message = padsReturned > 0
+      ? `Delete this sale? This will return ${padsReturned.toLocaleString()} pads to batch ${batchNames}.`
+      : "Delete this sale entry? No linked stock-out will be changed.";
+    if (!confirm(message)) return;
+    setDeletingSaleId(id);
     try {
-      await deleteDoc(doc(db, "saleTransactions", id));
+      const atomicWrite = writeBatch(db);
+      linkedMovements.forEach((movement) => atomicWrite.delete(doc(db, "stockOuts", movement.id)));
+      atomicWrite.delete(doc(db, "saleTransactions", id));
+      await atomicWrite.commit();
+      setFormSuccess(true);
+      setFormError("");
+      setFormSuccessMessage(padsReturned > 0 ? `Sale deleted. ${padsReturned.toLocaleString()} pads were returned to ${batchNames}.` : "Sale deleted. No linked stock-out was found.");
     } catch (err) {
       console.error("Failed to delete sale:", err);
+      setFormError(err instanceof Error ? err.message : "The sale could not be deleted. No stock was changed.");
+    } finally {
+      setDeletingSaleId(null);
     }
   };
 
@@ -1229,6 +1347,7 @@ export default function SalesPage() {
       )}
 
       {activeTab === "sales-list" && (
+        <>
         <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
@@ -1298,7 +1417,7 @@ export default function SalesPage() {
                         <td className="px-4 py-3 text-gray-600 whitespace-nowrap">{employees.find((e) => e.id === t.salespersonId)?.name || t.salespersonId}</td>
                         <td className="px-4 py-3 text-right whitespace-nowrap">
                           <button onClick={() => handleEditSale(t)} className="text-xs font-medium text-blue-600 hover:text-blue-800 mr-3">Edit</button>
-                          <button onClick={() => handleDeleteSale(t.id)} className="text-xs font-medium text-red-600 hover:text-red-800">Delete</button>
+                          <button disabled={deletingSaleId !== null} onClick={() => handleDeleteSale(t.id)} className="text-xs font-medium text-red-600 hover:text-red-800 disabled:cursor-not-allowed disabled:opacity-50">{deletingSaleId === t.id ? "Deleting…" : "Delete"}</button>
                         </td>
                       </tr>
                     ))
@@ -1307,6 +1426,15 @@ export default function SalesPage() {
               </table>
             </div>
         </div>
+        <div className="rounded-lg border border-gray-200 bg-white p-5 shadow-sm">
+          <h2 className="text-base font-semibold text-gray-900">Sales and Stock Reconciliation</h2>
+          <p className="mt-1 text-sm text-gray-500">Read-only comparison. No historical stock or sales records are changed here.</p>
+          <div className="mt-4 overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200 text-sm"><thead className="bg-gray-50"><tr><th className="px-3 py-2 text-left">Batch</th><th className="px-3 py-2 text-right">Stocked pads</th><th className="px-3 py-2 text-right">Stock-out pads</th><th className="px-3 py-2 text-right">Pads on existing sales</th><th className="px-3 py-2 text-right">Difference</th><th className="px-3 py-2 text-left">Status</th></tr></thead><tbody className="divide-y divide-gray-100">{stockReconciliation.map((row) => <tr key={row.id}><td className="px-3 py-2 font-medium">{row.name}</td><td className="px-3 py-2 text-right">{row.stockedPads.toLocaleString()}</td><td className="px-3 py-2 text-right">{row.stockOutPads.toLocaleString()}</td><td className="px-3 py-2 text-right">{row.salePads.toLocaleString()}</td><td className="px-3 py-2 text-right">{row.difference.toLocaleString()}</td><td className={`px-3 py-2 ${row.stockOutPads > row.salePads ? "font-medium text-red-700" : row.difference === 0 ? "text-emerald-700" : "text-amber-700"}`}>{row.stockOutPads > row.salePads ? "Stock-outs exceed existing sales" : row.difference === 0 ? "Matched" : "Review difference"}</td></tr>)}</tbody></table>
+          </div>
+          {unmatchedHistoricalSales.length > 0 && <div className="mt-4 rounded border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><p className="font-semibold">Unmatched historical pad sales ({unmatchedHistoricalSales.length})</p><p className="mt-1">These were not guessed or modified. Match requires one stock-out with the same date, batch, pack size, quantity and customer.</p><ul className="mt-2 max-h-40 list-disc overflow-auto pl-5">{unmatchedHistoricalSales.map((sale) => <li key={sale.id}>{sale.date} · {sale.customerName} · {sale.batchRef || "No batch"} · sale {sale.id}</li>)}</ul></div>}
+        </div>
+        </>
       )}
 
       {activeTab === "entry" && (
@@ -1368,7 +1496,7 @@ export default function SalesPage() {
           )}
           {formSuccess && (
             <div className="bg-green-50 border border-green-200 text-green-700 text-sm p-4 rounded-xl">
-              Sale recorded successfully.
+              {formSuccessMessage}
             </div>
           )}
 

@@ -14,8 +14,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { db } from "@/lib/firebase";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { STAGE_LABELS, STAGE_ORDER, StageId, MaterialType } from "@/types";
+import type { ProductionEntry, ProductionTargetVersion } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
 import { isEmployeeActive } from "@/lib/employees";
+import { useAuth } from "@/lib/auth-context";
 
 interface StageTarget {
   id?: string;
@@ -86,6 +88,7 @@ interface WorkerTarget {
 }
 
 export default function AdminTargetsPage() {
+  const { userRole } = useAuth();
   const queryClient = useQueryClient();
   const [editingStage, setEditingStage] = useState<string | null>(null);
   const [editingMaterial, setEditingMaterial] = useState<MaterialType | null>(null);
@@ -93,6 +96,7 @@ export default function AdminTargetsPage() {
   const [editingVariant, setEditingVariant] = useState<TargetVariant | null>(null);
   const [editValue, setEditValue] = useState(0);
   const [editWageRate, setEditWageRate] = useState(0);
+  const [editEffectiveDate, setEditEffectiveDate] = useState(new Date().toISOString().split("T")[0]);
   const [saving, setSaving] = useState(false);
 
   const [showWorkerForm, setShowWorkerForm] = useState(false);
@@ -122,6 +126,16 @@ export default function AdminTargetsPage() {
   const { data: workerTargets = [], isLoading } = useCollectionQuery<WorkerTarget>("targetConfigs", [
     orderBy("effectiveDate", "desc"),
   ], { staleTime: 5 * 60 * 1000 });
+  const { data: targetVersions = [] } = useCollectionQuery<ProductionTargetVersion>("productionTargetVersions", [
+    orderBy("effectiveDate", "desc"),
+  ], { staleTime: 0 });
+  const { data: productionEntries = [] } = useCollectionQuery<ProductionEntry>("productionEntries", [
+    orderBy("date", "desc"),
+  ], { staleTime: 5 * 60 * 1000 });
+  const legacyEntries = useMemo(
+    () => productionEntries.filter((entry) => !entry.targetSnapshot),
+    [productionEntries]
+  );
 
   const stageRows: StageRow[] = [];
   for (const stageId of STAGE_ORDER) {
@@ -220,6 +234,20 @@ export default function AdminTargetsPage() {
   const handleApplyRevisedTargets = async () => {
     setSaving(true);
     try {
+      const effectiveDate = new Date().toISOString().split("T")[0];
+      for (const row of orderedStageRows) {
+        const quantity = row.variant === "materialPieces" && row.material
+          ? REVISED_MATERIAL_TARGETS[row.material as keyof typeof REVISED_MATERIAL_TARGETS]
+          : row.variant === "materialMeters" && row.material
+            ? REVISED_METER_TARGETS[row.material as keyof typeof REVISED_METER_TARGETS]
+            : row.variant === "activity" && row.activity
+              ? REVISED_ACTIVITY_TARGETS[row.activity]
+              : REVISED_TARGETS[row.stageId].defaultTarget;
+        await saveTargetVersion(row, row.stageId, rowQuantity(row), quantity, REVISED_TARGETS[row.stageId].defaultWageRate, effectiveDate);
+        if (row.variant === "combinedStage" && row.secondaryStageId) {
+          await saveTargetVersion(row, row.secondaryStageId, rowQuantity(row), quantity, REVISED_TARGETS[row.secondaryStageId].defaultWageRate, effectiveDate);
+        }
+      }
       for (const stageId of STAGE_ORDER) {
         await setDoc(doc(db, "productionStages", stageId), {
           stageId,
@@ -231,6 +259,7 @@ export default function AdminTargetsPage() {
         }, { merge: true });
       }
       queryClient.invalidateQueries({ queryKey: ["productionStages"] });
+      queryClient.invalidateQueries({ queryKey: ["productionTargetVersions"] });
     } finally {
       setSaving(false);
     }
@@ -254,12 +283,72 @@ export default function AdminTargetsPage() {
       setEditValue(row.defaultTarget);
     }
     setEditWageRate(row.defaultWageRate || 0);
+    setEditEffectiveDate(new Date().toISOString().split("T")[0]);
+  };
+
+  const rowKey = (row: StageRow, stageId = row.stageId) =>
+    `${stageId}:${row.variant}:${row.material ?? row.activity ?? "default"}`;
+
+  const rowQuantity = (row: StageRow) => row.variant === "materialPieces" && row.material
+    ? row.materialTargets?.[row.material] ?? 0
+    : row.variant === "materialMeters" && row.material
+      ? row.materialMeterTargets?.[row.material] ?? 0
+      : row.variant === "activity" && row.activity
+        ? row.activityTargets?.[row.activity] ?? 0
+        : row.defaultTarget;
+
+  const saveTargetVersion = async (
+    row: StageRow,
+    stageId: StageId,
+    oldQuantity: number,
+    nextQuantity = editValue,
+    nextAmount = editWageRate,
+    effectiveDate = editEffectiveDate,
+  ) => {
+    const targetKey = rowKey(row, stageId);
+    const common = {
+      targetKey,
+      stageId,
+      targetName: row.label,
+      variant: row.variant,
+      material: row.material,
+      activity: row.activity,
+      unit: row.unit,
+    };
+    if (!targetVersions.some((version) => version.targetKey === targetKey)) {
+      await addDoc(collection(db, "productionTargetVersions"), {
+        ...common,
+        quantity: oldQuantity,
+        amount: row.defaultWageRate,
+        rate: oldQuantity > 0 ? row.defaultWageRate / oldQuantity : 0,
+        effectiveDate: "0001-01-01",
+        effectiveAt: Timestamp.fromMillis(0),
+        changedBy: "System baseline",
+        isBaseline: true,
+      });
+    }
+    await addDoc(collection(db, "productionTargetVersions"), {
+      ...common,
+      quantity: nextQuantity,
+      amount: nextAmount,
+      rate: nextQuantity > 0 ? nextAmount / nextQuantity : 0,
+      effectiveDate,
+      effectiveAt: Timestamp.now(),
+      changedBy: userRole?.name || userRole?.email || userRole?.uid || "Authorized user",
+      previousQuantity: oldQuantity,
+      previousAmount: row.defaultWageRate,
+    });
   };
 
   const handleSave = async (row: StageRow) => {
     setSaving(true);
     try {
       const existing = stages.find((s) => s.stageId === row.stageId);
+      const oldQuantity = rowQuantity(row);
+      await saveTargetVersion(row, row.stageId, oldQuantity);
+      if (row.variant === "combinedStage" && row.secondaryStageId) {
+        await saveTargetVersion(row, row.secondaryStageId, oldQuantity);
+      }
       if (row.variant === "materialPieces" && row.material) {
         await updateDoc(doc(db, "productionStages", row.stageId), {
           materialTargets: {
@@ -294,6 +383,7 @@ export default function AdminTargetsPage() {
         });
       }
       queryClient.invalidateQueries({ queryKey: ["productionStages"] });
+      queryClient.invalidateQueries({ queryKey: ["productionTargetVersions"] });
       setEditingStage(null);
       setEditingMaterial(null);
       setEditingActivity(null);
@@ -342,6 +432,7 @@ export default function AdminTargetsPage() {
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Amount (UGX)</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Rate per Unit (UGX)</th>
                 <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Unit</th>
+                <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Effective From</th>
                 <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Actions</th>
               </tr>
             </thead>
@@ -365,7 +456,7 @@ export default function AdminTargetsPage() {
                 const groupHeading = i === 0 ? "Piece-count targets · Number of Pieces · Price per Piece" : i === pieceTargetRows.length ? "Meter-count targets · Number of Meters · Per Meter" : null;
                 return (
                   <Fragment key={editKey}>
-                  {groupHeading && <tr className="bg-blue-50"><th colSpan={6} className="px-4 py-3 text-left text-sm font-semibold text-blue-900">{groupHeading}</th></tr>}
+                  {groupHeading && <tr className="bg-blue-50"><th colSpan={7} className="px-4 py-3 text-left text-sm font-semibold text-blue-900">{groupHeading}</th></tr>}
                   <tr key={editKey} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       {row.stageId} — {row.label}
@@ -397,6 +488,11 @@ export default function AdminTargetsPage() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-3 text-right text-sm text-gray-700">{pricePerUnit ? pricePerUnit.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}</td>
                     <td className="px-4 py-3 text-sm text-gray-500">{row.unit}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-sm text-gray-600">
+                      {isEditing ? (
+                        <input type="date" value={editEffectiveDate} onChange={(event) => setEditEffectiveDate(event.target.value)} required className="rounded border border-gray-300 px-2 py-1 text-sm" />
+                      ) : (targetVersions.find((version) => version.targetKey === rowKey(row) && !version.isBaseline)?.effectiveDate ?? "Current")}
+                    </td>
                     <td className="px-4 py-3 text-right">
                       {!row.exists ? (
                         <button
@@ -432,6 +528,7 @@ export default function AdminTargetsPage() {
                       )}
                     </td>
                   </tr>
+                  {isEditing && <tr className="bg-amber-50"><td colSpan={7} className="px-4 py-2 text-sm text-amber-900">Changes apply to new entries from <strong>{editEffectiveDate}</strong>. Existing entries are not changed.</td></tr>}
                   </Fragment>
                 );
               })}
@@ -455,6 +552,31 @@ export default function AdminTargetsPage() {
         )}
         {extraOrDuplicateStages.length > 0 && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900"><p className="font-semibold">Additional or duplicate stored stage definitions need review</p><p className="mt-1">Left unchanged: {extraOrDuplicateStages.map(stage => `${stage.stageId}${stage.id ? ` (${stage.id})` : ""}`).join(", ")}.</p></div>}
       </section>
+
+      <section className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">
+        <h2 className="text-lg font-semibold text-gray-900">Target Change History</h2>
+        <p className="mt-1 text-sm text-gray-500">Each save creates a permanent version. Earlier production entries keep their saved target snapshot.</p>
+        <div className="mt-4 overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200 text-sm">
+            <thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left">Target</th><th className="px-4 py-3 text-left">Effective from</th><th className="px-4 py-3 text-right">Previous</th><th className="px-4 py-3 text-right">New quantity</th><th className="px-4 py-3 text-right">New amount</th><th className="px-4 py-3 text-left">Changed by</th></tr></thead>
+            <tbody className="divide-y divide-gray-100">
+              {targetVersions.filter((version) => !version.isBaseline).map((version) => <tr key={version.id}><td className="px-4 py-3 font-medium">{version.targetName}</td><td className="px-4 py-3">{version.effectiveDate}</td><td className="px-4 py-3 text-right">{version.previousQuantity?.toLocaleString() ?? "—"} / UGX {version.previousAmount?.toLocaleString() ?? "—"}</td><td className="px-4 py-3 text-right">{version.quantity.toLocaleString()} {version.unit}</td><td className="px-4 py-3 text-right">UGX {version.amount.toLocaleString()}</td><td className="px-4 py-3">{version.changedBy ?? "—"}</td></tr>)}
+              {!targetVersions.some((version) => !version.isBaseline) && <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-500">No target changes have been saved yet.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      {legacyEntries.length > 0 && <section className="rounded-lg border border-amber-200 bg-amber-50 p-6">
+        <h2 className="text-lg font-semibold text-amber-950">Legacy entries awaiting an approved backfill ({legacyEntries.length})</h2>
+        <p className="mt-1 text-sm text-amber-900">These records predate target snapshots. Their stored target quantity, earnings and performance remain unchanged. No target name, amount, rate, unit or version has been guessed or written.</p>
+        <div className="mt-4 max-h-72 overflow-auto rounded border border-amber-200 bg-white">
+          <table className="min-w-full divide-y divide-amber-100 text-sm">
+            <thead className="sticky top-0 bg-amber-100"><tr><th className="px-3 py-2 text-left">Entry</th><th className="px-3 py-2 text-left">Date</th><th className="px-3 py-2 text-left">Stage</th><th className="px-3 py-2 text-right">Stored target</th><th className="px-3 py-2 text-left">Reason flagged</th></tr></thead>
+            <tbody className="divide-y divide-amber-100">{legacyEntries.map((entry) => <tr key={entry.id}><td className="px-3 py-2 font-mono text-xs">{entry.id}</td><td className="px-3 py-2">{entry.date}</td><td className="px-3 py-2">{STAGE_LABELS[entry.stageId] ?? entry.stageId}</td><td className="px-3 py-2 text-right">{entry.targetPieces.toLocaleString()}</td><td className="px-3 py-2">Original amount/rate/version cannot be proven from the record alone.</td></tr>)}</tbody>
+          </table>
+        </div>
+      </section>}
 
       <section className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
         <div className="flex items-center justify-between mb-4">

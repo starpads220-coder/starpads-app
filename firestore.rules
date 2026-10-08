@@ -150,6 +150,13 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Immutable target revisions used to preserve the values applied to entries.
+    match /productionTargetVersions/{versionId} {
+      allow read: if isAuthenticated();
+      allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+      allow update, delete: if false;
+    }
+
     // PAYE schedule is shared by payroll and editable by finance/admin only.
     match /payeSettings/{settingId} {
       allow read: if isAuthenticated();
@@ -220,7 +227,11 @@ service cloud.firestore {
     match /saleTransactions/{transactionId} {
       allow read: if isAuthenticated();
       allow create: if hasAnyRole(['ADMIN', 'SALES_STAFF', 'FINANCIAL_MANAGER', 'SALES_MANAGER']);
-      allow update, delete: if isAdmin();
+      allow update: if isAdmin() || (
+        hasAnyRole(['STORE_MANAGER', 'PRODUCTION_SUPERVISOR'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockOutIds', 'stockStatus'])
+      );
+      allow delete: if isAdmin();
     }
 
 

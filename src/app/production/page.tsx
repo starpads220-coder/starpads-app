@@ -24,6 +24,7 @@ import {
   MaterialCategory,
   Employee,
   ProductionStage,
+  ProductionTargetVersion,
   TargetConfig,
   Batch,
   STAGE_LABELS,
@@ -128,6 +129,7 @@ export default function ProductionPage() {
   }, [employees, form.employeeId, editingEntryId]);
 
   const { data: stages = [], loading: stagesLoading } = useRealtimeCollection<ProductionStage>("productionStages");
+  const { data: targetVersions = [] } = useRealtimeCollection<ProductionTargetVersion>("productionTargetVersions");
 
   const { data: targetConfigs = [] } = useCollectionQuery<TargetConfig>("targetConfigs", [], {
     staleTime: 10 * 60 * 1000,
@@ -191,6 +193,10 @@ export default function ProductionPage() {
   );
 
   const selectedStage = stages.find((s) => s.stageId === form.stageId);
+  const editingEntry = useMemo(
+    () => editingEntryId ? entries.find((entry) => entry.id === editingEntryId) ?? null : null,
+    [editingEntryId, entries]
+  );
 
   const activeOverride = useMemo(() => {
     if (!form.employeeId || !form.stageId) return null;
@@ -201,15 +207,38 @@ export default function ProductionPage() {
           tc.stageId === form.stageId &&
           tc.effectiveDate <= form.date
       )
-      .sort((a, b) => b.effectiveDate.localeCompare(a.effectiveDate))[0] ?? null;
+      .sort((a, b) => {
+        const dateOrder = b.effectiveDate.localeCompare(a.effectiveDate);
+        if (dateOrder) return dateOrder;
+        return (b.createdAt?.seconds ?? 0) - (a.createdAt?.seconds ?? 0);
+      })[0] ?? null;
   }, [targetConfigs, form.employeeId, form.stageId, form.date]);
 
   const cuttingMaterial = form.materialTypes[0];
+  const targetVariant = form.stageId === "STG-01" && form.inputMode === "measure"
+    ? "materialMeters"
+    : form.stageId === "STG-01" && cuttingMaterial
+      ? "materialPieces"
+      : form.stageId === "STG-09" && form.productionActivity
+        ? "activity"
+        : form.stageId === "STG-05" || form.stageId === "STG-06"
+          ? "combinedStage"
+          : "stage";
+  const targetKey = `${form.stageId}:${targetVariant}:${cuttingMaterial ?? form.productionActivity ?? "default"}`;
+  const applicableTargetVersion = useMemo(() => targetVersions
+    .filter((version) => version.targetKey === targetKey && version.effectiveDate <= form.date)
+    .sort((a, b) => {
+      const dateOrder = b.effectiveDate.localeCompare(a.effectiveDate);
+      if (dateOrder) return dateOrder;
+      return (b.effectiveAt?.seconds ?? 0) - (a.effectiveAt?.seconds ?? 0);
+    })[0] ?? null, [targetVersions, targetKey, form.date]);
   const measuredCuttingTarget = cuttingMaterial && selectedStage?.materialMeterTargets?.[cuttingMaterial]
     ? selectedStage.materialMeterTargets[cuttingMaterial]! * (CUTTING_RATIOS[cuttingMaterial] || 0)
     : 0;
-  const dailyTarget = activeOverride
+  const liveDailyTarget = activeOverride
     ? activeOverride.dailyTarget
+    : applicableTargetVersion
+      ? applicableTargetVersion.quantity * (targetVariant === "materialMeters" && cuttingMaterial ? (CUTTING_RATIOS[cuttingMaterial] || 0) : 1)
     : form.stageId === "STG-09" && form.productionActivity && selectedStage?.activityTargets?.[form.productionActivity]
       ? selectedStage.activityTargets[form.productionActivity]!
     : form.stageId === "STG-01" && form.inputMode === "measure" && measuredCuttingTarget
@@ -220,7 +249,9 @@ export default function ProductionPage() {
         ? selectedStage.defaultTarget
         : 0;
 
-  const dailyWageRate = selectedStage ? selectedStage.defaultWageRate : 0;
+  const liveDailyWageRate = applicableTargetVersion?.amount ?? (selectedStage ? selectedStage.defaultWageRate : 0);
+  const dailyTarget = editingEntry ? editingEntry.targetPieces : liveDailyTarget;
+  const dailyWageRate = editingEntry?.targetSnapshot?.amount ?? liveDailyWageRate;
 
   const effectiveActualPieces = useMemo(
     () => form.stageId === "STG-01" && form.inputMode === "measure" && form.materialTypes.length > 0 && form.metersInput > 0
@@ -230,18 +261,41 @@ export default function ProductionPage() {
   );
 
   const performance = useMemo(
-    () => (dailyTarget > 0 && effectiveActualPieces > 0
+    () => (editingEntry && !editingEntry.targetSnapshot ? editingEntry.performancePct : dailyTarget > 0 && effectiveActualPieces > 0
       ? Math.round((effectiveActualPieces / dailyTarget) * 100)
       : 0),
-    [dailyTarget, effectiveActualPieces]
+    [dailyTarget, effectiveActualPieces, editingEntry]
   );
 
   const estimatedEarnings = useMemo(
-    () => (dailyTarget > 0 && effectiveActualPieces > 0
+    () => (editingEntry && !editingEntry.targetSnapshot ? editingEntry.earningsUgx : dailyTarget > 0 && effectiveActualPieces > 0
       ? Math.round((effectiveActualPieces / dailyTarget) * dailyWageRate)
       : 0),
-    [dailyTarget, effectiveActualPieces, dailyWageRate]
+    [dailyTarget, effectiveActualPieces, dailyWageRate, editingEntry]
   );
+
+  const currentTargetSnapshot = useMemo(() => {
+    if (editingEntry?.targetSnapshot) return editingEntry.targetSnapshot;
+    const sourceQuantity = applicableTargetVersion?.quantity ?? liveDailyTarget;
+    const unit = applicableTargetVersion?.unit ?? stageUnit[form.stageId];
+    const name = applicableTargetVersion?.targetName
+      ?? (form.stageId === "STG-09" && form.productionActivity
+        ? `${STAGE_LABELS[form.stageId]} - ${form.productionActivity === "PINNING" ? "Pinning" : "Folding"}`
+        : cuttingMaterial
+          ? `${STAGE_LABELS[form.stageId]} - ${cuttingMaterial === "MICROFIBER" ? "Microfiber" : cuttingMaterial.charAt(0) + cuttingMaterial.slice(1).toLowerCase()}`
+          : STAGE_LABELS[form.stageId]);
+    const amount = applicableTargetVersion?.amount ?? liveDailyWageRate;
+    return {
+      name,
+      quantity: sourceQuantity,
+      amount,
+      rate: sourceQuantity > 0 ? amount / sourceQuantity : 0,
+      unit,
+      versionId: activeOverride?.id ? `worker:${activeOverride.id}|stage:${applicableTargetVersion?.id ?? "current"}` : applicableTargetVersion?.id ?? "stage-current",
+      effectiveDate: activeOverride?.effectiveDate ?? applicableTargetVersion?.effectiveDate ?? form.date,
+      calculationQuantity: liveDailyTarget,
+    };
+  }, [editingEntry, applicableTargetVersion, liveDailyTarget, liveDailyWageRate, form.stageId, form.productionActivity, form.date, cuttingMaterial, activeOverride]);
 
   const toggleMaterial = (mat: MaterialType) => {
     setForm(prev => ({
@@ -317,6 +371,7 @@ export default function ProductionPage() {
         metersInput: isMeasureCutting ? form.metersInput : null,
         wastePct: null,
         targetPieces: dailyTarget,
+        targetSnapshot: editingEntry?.targetSnapshot ?? currentTargetSnapshot,
         actualPieces: isMeasureCutting ? calculatedCuttingPieces : form.actualPieces,
         batchRef: form.stageId === "STG-10" ? form.batchRef : "",
         performancePct: performance,
@@ -1115,7 +1170,10 @@ const totalPackagedPads = useMemo(
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       {entry.actualPieces}
                     </td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{entry.targetPieces}</td>
+                    <td className="px-4 py-3 text-sm text-gray-500">
+                      <span>{entry.targetSnapshot?.quantity ?? entry.targetPieces}{entry.targetSnapshot ? ` ${entry.targetSnapshot.unit}` : ""}</span>
+                      {!entry.targetSnapshot && <span className="ml-2 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-800" title="This entry predates target snapshots. Its stored target, earnings and performance have not been changed.">Legacy</span>}
+                    </td>
                     <td className="px-4 py-3">
                       <StatusBadge value={entry.performancePct} />
                     </td>
