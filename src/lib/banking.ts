@@ -7,6 +7,8 @@ export const isCashCode = (code: string) => cashAccounts.some(account => account
 export const isMoneyCode = (code: string) => isBankCode(code) || isCashCode(code);
 export const DEFAULT_BANK_NAMES = ["Bank of Baroda", "Bank of Africa"] as const;
 export const CUSTOM_BANK_VALUE = "__other__";
+/** Single configurable offset for new standalone deposits. */
+export const DEPOSIT_OFFSET_ACCOUNT_CODE = "3000";
 export const normaliseBankNameKey = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 export const cleanBankName = (value: string) => value.trim().replace(/\s+/g, " ");
 

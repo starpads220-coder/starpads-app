@@ -6,8 +6,8 @@ import { RouteGuard } from "@/components/auth/RouteGuard";
 import { useAuth } from "@/lib/auth-context";
 import { useRealtimeCollection } from "@/hooks/use-firestore-query";
 import { db } from "@/lib/firebase";
-import { ACCOUNTS, REMOVED_ACCOUNT_CODES, SETTLEMENT_CODES, buildAccounts, type Journal, type LedgerSource, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
-import { CUSTOM_BANK_VALUE, DEFAULT_BANK_NAMES, bankAccounts, bankingAccountName, cashAccounts, cleanBankName, isBankCode, isCashCode, isCashToBank, normaliseBankNameKey, transferDirection, validateTransfer } from "@/lib/banking";
+import { ACCOUNTS, SETTLEMENT_CODES, buildAccounts, type Journal, type LedgerSource, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
+import { CUSTOM_BANK_VALUE, DEFAULT_BANK_NAMES, DEPOSIT_OFFSET_ACCOUNT_CODE, bankAccounts, bankingAccountName, cashAccounts, cleanBankName, isBankCode, isCashCode, isCashToBank, normaliseBankNameKey, transferDirection, validateTransfer } from "@/lib/banking";
 import { todayInEat } from "@/lib/account-period";
 
 type AccountType = "Bank" | "Cash";
@@ -17,8 +17,7 @@ const money = (value: number) => `UGX ${value.toLocaleString("en-US", { maximumF
 const input = "mt-1 w-full rounded-md border border-gray-300 px-3 py-2 text-sm";
 const emptyDeposit = () => ({ date: today(), receivedFrom: "", accountCode: bankAccounts[0]?.code ?? "", bankName: "", customBankName: "", description: "", paymentMethod: "Cash" as "Cash" | "Cheque", referenceNumber: "", amount: "", offsetCode: "" });
 const emptyTransfer = () => ({ date: today(), fromType: "Cash" as AccountType, fromCode: "", fromBankName: "", fromCustomBankName: "", toType: "Bank" as AccountType, toCode: bankAccounts[0]?.code ?? "", toBankName: "", toCustomBankName: "", amount: "", description: "" });
-const offsetAccounts = ACCOUNTS.filter(account => ["Current Assets", "Non-Current Assets", "Current Liabilities", "Non-Current Liabilities", "Equity"].includes(account.group)
-  && !SETTLEMENT_CODES.includes(account.code) && !REMOVED_ACCOUNT_CODES.has(account.code) && !["1110", "1650", "2350", "3050"].includes(account.code));
+const configuredDepositOffset = ACCOUNTS.find(account => account.code === DEPOSIT_OFFSET_ACCOUNT_CODE);
 
 export default function BankingPage() {
   const { user, userRole } = useAuth();
@@ -65,8 +64,12 @@ export default function BankingPage() {
     if (entry.bankingKind === "transfer") return !entry.bankName || !(Number(entry.amount) > 0) || isBankCode(entry.debitCode) === isBankCode(entry.creditCode) || (isCashToBank(entry) && entry.bankingLinkId !== entry.id);
     return false;
   }), [journals.data]);
+  const depositsUsingAnotherOffset = useMemo(() => journals.data.filter(entry => entry.bankingKind === "deposit" && entry.creditCode !== DEPOSIT_OFFSET_ACCOUNT_CODE), [journals.data]);
   const selectedDeposit = journals.data.find(entry => entry.id === selectedDepositId) ?? (pendingLinked?.id === selectedDepositId ? pendingLinked : null);
   const linkedDeposit = selectedDeposit?.bankingKind === "transfer" && isCashToBank(selectedDeposit);
+  const displayedDepositOffset = selectedDeposit?.bankingKind === "deposit"
+    ? ACCOUNTS.find(account => account.code === selectedDeposit.creditCode)
+    : configuredDepositOffset;
   const editingTransfer = journals.data.find(entry => entry.id === editingTransferId);
   const balanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", transfer.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, transfer.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
   const currentBalanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", todayInEat(), productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
@@ -190,7 +193,7 @@ export default function BankingPage() {
       const depositBankName = linkedDeposit ? cleanBankName(selectedDeposit?.bankName ?? "") : resolveSelectedBankName(deposit.bankName, deposit.customBankName);
       if (!depositBankName) errors.depositBankName = "Choose a bank, or enter the custom bank name.";
       if (!deposit.paymentMethod) errors.depositMethod = "Choose a payment method.";
-      if (!linkedDeposit && !offsetAccounts.some(account => account.code === deposit.offsetCode)) errors.depositOffset = deposit.offsetCode === "CASH" ? "Funds already in Cash must use Transfers." : "Choose where these funds came from.";
+      if (!linkedDeposit && !selectedDepositId && (!configuredDepositOffset || configuredDepositOffset.group !== "Equity")) errors.depositOffset = "The configured Deposit Offset Account is missing or inactive. Contact an administrator before saving.";
       if (Object.keys(errors).length) { setFieldErrors(errors); throw new Error(Object.values(errors)[0]); }
       setSaving(true);
       if (linkedDeposit && selectedDeposit) {
@@ -204,8 +207,6 @@ export default function BankingPage() {
         });
         setMessage("Linked deposit details completed. The transfer remains the only posting.");
       } else {
-        if (deposit.offsetCode === "CASH" || SETTLEMENT_CODES.includes(deposit.offsetCode)) throw new Error("Funds already in Cash must use Transfers → Cash to Bank, not a standalone deposit.");
-        if (!offsetAccounts.some(account => account.code === deposit.offsetCode)) throw new Error("Choose a valid offset account so the deposit balances. Do not post a sale or expense twice.");
         if (selectedDepositId) {
           const prior = journals.data.find(entry => entry.id === selectedDepositId);
           if (!prior || prior.bankingKind !== "deposit") throw new Error("This deposit is no longer available for editing.");
@@ -213,13 +214,15 @@ export default function BankingPage() {
           await runTransaction(db, async transaction => {
             const current = await transaction.get(ref);
             if (!current.exists() || current.data().bankingKind !== "deposit") throw new Error("This deposit no longer exists. Reload the page and try again.");
-            transaction.update(ref, { date: deposit.date, debitCode: deposit.accountCode, creditCode: deposit.offsetCode, amount, description: deposit.description.trim(), receivedFrom: deposit.receivedFrom.trim(), paymentMethod: deposit.paymentMethod, referenceNumber: deposit.referenceNumber.trim(), bankName: depositBankName });
+            const storedOffsetCode = String(current.data().creditCode ?? "");
+            if (!ACCOUNTS.some(account => account.code === storedOffsetCode)) throw new Error("This deposit's stored offset account no longer exists. It was not changed.");
+            transaction.update(ref, { date: deposit.date, debitCode: deposit.accountCode, amount, description: deposit.description.trim(), receivedFrom: deposit.receivedFrom.trim(), paymentMethod: deposit.paymentMethod, referenceNumber: deposit.referenceNumber.trim(), bankName: depositBankName });
           });
           setMessage("Deposit updated successfully.");
         } else {
           const ref = doc(collection(db, "accountJournals"));
           await runTransaction(db, async transaction => {
-            transaction.set(ref, { date: deposit.date, debitCode: deposit.accountCode, creditCode: deposit.offsetCode, amount, description: deposit.description.trim(), bankingKind: "deposit", bankingStatus: "completed", receivedFrom: deposit.receivedFrom.trim(), paymentMethod: deposit.paymentMethod, referenceNumber: deposit.referenceNumber.trim(), bankName: depositBankName, createdAt: Timestamp.now(), createdBy: user.uid });
+            transaction.set(ref, { date: deposit.date, debitCode: deposit.accountCode, creditCode: configuredDepositOffset!.code, offsetAccountCode: configuredDepositOffset!.code, offsetAccountName: configuredDepositOffset!.name, amount, description: deposit.description.trim(), bankingKind: "deposit", bankingStatus: "completed", receivedFrom: deposit.receivedFrom.trim(), paymentMethod: deposit.paymentMethod, referenceNumber: deposit.referenceNumber.trim(), bankName: depositBankName, createdAt: Timestamp.now(), createdBy: user.uid });
           });
           setMessage("Deposit recorded once in Bank and its offset account.");
         }
@@ -251,6 +254,7 @@ export default function BankingPage() {
     {!loading && !error && !serverConfirmed && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Some ledger records are still synchronizing. Deposits are committed through a server transaction; balance-sensitive transfers remain paused until the source balance is fully confirmed.</p>}
     {error && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">Banking records could not be loaded: {error}. Posting is unavailable until the account data loads.</p>}
     {entriesNeedingReview.length > 0 && <div role="alert" className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900"><p className="font-semibold">Existing banking entries requiring review</p><p className="mt-1">These records were not modified automatically: {entriesNeedingReview.map(entry => entry.id).join(", ")}.</p></div>}
+    {depositsUsingAnotherOffset.length > 0 && <div role="status" className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900"><p className="font-semibold">Existing deposits retain their original offset</p><p className="mt-1">These deposits differ from Capital Investments and were not changed: {depositsUsingAnotherOffset.map(entry => `${entry.id} (${bankingAccountName(entry.creditCode)})`).join(", ")}.</p></div>}
     {bankAccounts.length === 0 && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">No mapped Bank account exists in the Chart of Accounts. Banking entries are disabled.</p>}
     {message && <p role="status" className="rounded-lg border bg-white p-3 text-sm">{message}</p>}
     {tab === "transfers" && <>
@@ -274,12 +278,11 @@ export default function BankingPage() {
           <label>Received From<input required type="text" className={input} value={deposit.receivedFrom} onChange={event => setDeposit({ ...deposit, receivedFrom: event.target.value })} />{fieldErrors.receivedFrom && <span className="mt-1 block text-xs text-red-700">{fieldErrors.receivedFrom}</span>}</label><label>Account (Bank)<select required disabled={linkedDeposit} className={input} value={linkedDeposit ? selectedDeposit!.bankName ?? "" : deposit.bankName} onChange={event => setDeposit({ ...deposit, accountCode: bankAccounts[0]?.code ?? "", bankName: event.target.value, customBankName: event.target.value === CUSTOM_BANK_VALUE ? deposit.customBankName : "" })}><option value="">Select bank...</option>{bankNames.map(name => <option key={normaliseBankNameKey(name)} value={name}>{name}</option>)}<option value={CUSTOM_BANK_VALUE}>Other (custom bank)</option></select>{!linkedDeposit && deposit.bankName === CUSTOM_BANK_VALUE && <><span className="mt-2 block text-sm">Bank Name</span><input required className={input} value={deposit.customBankName} onChange={event => setDeposit({ ...deposit, customBankName: event.target.value })} /></>}{fieldErrors.depositBankName && <span className="mt-1 block text-xs text-red-700">{fieldErrors.depositBankName}</span>}{fieldErrors.depositAccount && <span className="mt-1 block text-xs text-red-700">{fieldErrors.depositAccount}</span>}</label>
           <label>Payment Method<select required disabled={linkedDeposit} className={input} value={linkedDeposit ? "Cash" : deposit.paymentMethod} onChange={event => setDeposit({ ...deposit, paymentMethod: event.target.value as "Cash" | "Cheque" })}><option>Cash</option><option>Cheque</option></select>{fieldErrors.depositMethod && <span className="mt-1 block text-xs text-red-700">{fieldErrors.depositMethod}</span>}</label><label>Reference Number (optional)<input className={input} value={deposit.referenceNumber} onChange={event => setDeposit({ ...deposit, referenceNumber: event.target.value })} /></label>
           <label className="sm:col-span-2">Description<input className={input} value={deposit.description} onChange={event => setDeposit({ ...deposit, description: event.target.value })} /></label>
-          {!linkedDeposit && <label className="sm:col-span-2">Offset account (required to balance the deposit)<select required className={input} value={deposit.offsetCode} onChange={event => setDeposit({ ...deposit, offsetCode: event.target.value })}><option value="">Select where these funds came from...</option><option value="CASH">Funds already in Cash — use Transfers instead</option>{offsetAccounts.map(account => <option key={account.code} value={account.code}>{account.name}</option>)}</select>{fieldErrors.depositOffset && <span className="mt-1 block text-xs text-red-700">{fieldErrors.depositOffset}</span>}</label>}
+          {!linkedDeposit && <div className="sm:col-span-2 rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm"><span className="text-gray-500">Deposit Offset Account</span><p className="mt-1 font-semibold text-gray-900">{displayedDepositOffset ? `${displayedDepositOffset.name} (${displayedDepositOffset.code})` : "Not configured"}</p><p className="mt-1 text-xs text-gray-500">Applied automatically. Existing deposits keep the offset account stored on their record.</p>{fieldErrors.depositOffset && <span className="mt-1 block text-xs text-red-700">{fieldErrors.depositOffset}</span>}</div>}
         </div>
-        {!linkedDeposit && deposit.offsetCode === "CASH" && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">These funds are already in Cash. Record a Cash-to-Bank transfer instead; do not create a second deposit posting. <button type="button" className="font-semibold underline" onClick={() => { setTab("transfers"); setTransfer(emptyTransfer()); }}>Open Transfers</button></p>}
-        <button disabled={saving || loading || !!error || !bankAccounts.length || deposit.offsetCode === "CASH"} className="rounded-lg bg-gray-900 px-4 py-2 text-white disabled:opacity-50">{saving ? "Saving…" : linkedDeposit ? "Complete Deposit Details" : selectedDepositId ? "Update Deposit" : "Record Deposit"}</button>
+        <button disabled={saving || loading || !!error || !bankAccounts.length || (!linkedDeposit && !selectedDepositId && !configuredDepositOffset)} className="rounded-lg bg-gray-900 px-4 py-2 text-white disabled:opacity-50">{saving ? "Saving…" : linkedDeposit ? "Complete Deposit Details" : selectedDepositId ? "Update Deposit" : "Record Deposit"}</button>
       </form>}
-      <section className="overflow-hidden rounded-xl border bg-white"><h2 className="border-b px-5 py-4 font-semibold">Deposits</h2><div className="overflow-x-auto"><table className="w-full min-w-[780px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Received From</th><th className="p-3 text-left">Bank account</th><th className="p-3 text-left">Description</th><th className="p-3 text-left">Method / Reference</th><th className="p-3 text-left">Status</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>{deposits.length === 0 ? <tr><td colSpan={canPost ? 8 : 7} className="p-8 text-center text-gray-500">No deposits recorded.</td></tr> : deposits.map(entry => <tr key={entry.id} className="border-t"><td className="p-3">{entry.date}</td><td className="p-3">{entry.receivedFrom || "—"}</td><td className="p-3">{entry.bankName || "Bank (not specified)"}</td><td className="p-3">{entry.description || "—"}</td><td className="p-3">{entry.paymentMethod || "Cash"} · {entry.referenceNumber || "—"}</td><td className="p-3">{entry.bankingStatus === "awaiting_deposit_details" ? "Awaiting deposit details" : "Completed"}</td><td className="p-3 text-right">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" className="mr-3 text-blue-700" onClick={() => chooseDeposit(entry)}>{entry.bankingStatus === "awaiting_deposit_details" ? "Finish" : "Edit"}</button><button type="button" className="text-red-700" onClick={() => removeEntry(entry)}>Delete</button></td>}</tr>)}</tbody></table></div></section>
+      <section className="overflow-hidden rounded-xl border bg-white"><h2 className="border-b px-5 py-4 font-semibold">Deposits</h2><div className="overflow-x-auto"><table className="w-full min-w-[900px] text-sm"><thead className="bg-gray-50"><tr><th className="p-3 text-left">Date</th><th className="p-3 text-left">Received From</th><th className="p-3 text-left">Bank account</th><th className="p-3 text-left">Offset account</th><th className="p-3 text-left">Description</th><th className="p-3 text-left">Method / Reference</th><th className="p-3 text-left">Status</th><th className="p-3 text-right">Amount</th>{canPost && <th className="p-3 text-right">Actions</th>}</tr></thead><tbody>{deposits.length === 0 ? <tr><td colSpan={canPost ? 9 : 8} className="p-8 text-center text-gray-500">No deposits recorded.</td></tr> : deposits.map(entry => <tr key={entry.id} className="border-t"><td className="p-3">{entry.date}</td><td className="p-3">{entry.receivedFrom || "—"}</td><td className="p-3">{entry.bankName || "Bank (not specified)"}</td><td className="p-3">{entry.bankingKind === "transfer" ? "Cash (linked transfer)" : entry.offsetAccountName || bankingAccountName(entry.offsetAccountCode || entry.creditCode)}</td><td className="p-3">{entry.description || "—"}</td><td className="p-3">{entry.paymentMethod || "Cash"} · {entry.referenceNumber || "—"}</td><td className="p-3">{entry.bankingStatus === "awaiting_deposit_details" ? "Awaiting deposit details" : "Completed"}</td><td className="p-3 text-right">{money(entry.amount)}</td>{canPost && <td className="p-3 text-right whitespace-nowrap"><button type="button" className="mr-3 text-blue-700" onClick={() => chooseDeposit(entry)}>{entry.bankingStatus === "awaiting_deposit_details" ? "Finish" : "Edit"}</button><button type="button" className="text-red-700" onClick={() => removeEntry(entry)}>Delete</button></td>}</tr>)}</tbody></table></div></section>
     </>}
   </div></RouteGuard>;
 }
