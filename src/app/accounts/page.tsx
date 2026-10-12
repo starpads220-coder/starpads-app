@@ -13,7 +13,7 @@ import { balanceSheetGroupTotal, balanceSheetRows, balanceSheetTotals } from "@/
 import { JOURNAL_STRUCTURE, journalLines, journalPathForCode, type JournalCategory } from "@/lib/balance-sheet-journal-options";
 import { CashFlowStatementTab } from "@/components/accounts/CashFlowStatementTab";
 import { IncomeStatementTab } from "@/components/accounts/IncomeStatementTab";
-import { ACCOUNTS, ACCOUNT_GROUPS, PRODUCTION_COST_ENTRY_LINES, SETTLEMENT_CODES, buildAccounts, hasSavedProductionCostItem, productionCostItem, resolveAccounting, type LedgerSource, type Journal, type ProductionCostEntry, type ProductionCostItem, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
+import { ACCOUNTS, ACCOUNT_GROUPS, PRODUCTION_COST_ENTRY_LINES, SETTLEMENT_CODES, buildAccounts, hasSavedProductionCostItem, productionCostItem, resolveAccounting, type LedgerSource, type Journal, type NssfRemittanceEntry, type ProductionCostEntry, type ProductionCostItem, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
 import { buildFinancialStatements, type ConfirmedLaborPayment } from "@/lib/financial-statements";
 import { accountPeriodError, addCalendarDays, comparisonAccountPeriods, formatAccountDate, resolveAccountPeriod, todayInEat, type AccountPeriodKey } from "@/lib/account-period";
 import type { AccountsPdfSection } from "@/components/reports/AccountsStatementPDF";
@@ -45,6 +45,7 @@ export default function AccountsPage() {
   const journals = useRealtimeCollection<Journal>("accountJournals");
   const payments = useRealtimeCollection<ConfirmedLaborPayment & PayrollPaymentEntry>("payments");
   const payeRemittances = useRealtimeCollection<PayeRemittanceEntry>("payeRemittances");
+  const nssfRemittances = useRealtimeCollection<NssfRemittanceEntry>("nssfRemittances");
   const payrollEntries = useRealtimeCollection<PayrollProductionEntry>("productionEntries");
   const productionCosts = useRealtimeCollection<ProductionCostEntry>("productionCosts");
   const taxEntries = useRealtimeCollection<TaxEntry>("taxEntries");
@@ -52,13 +53,13 @@ export default function AccountsPage() {
   const { start, end } = selectedPeriod;
   const periodError = accountPeriodError(selectedPeriod);
   const valid = !periodError;
-  const report = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, start, end, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, start, end, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
+  const report = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, start, end, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data), [sales.data, expenses.data, journals.data, start, end, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data]);
   const openingEnd = valid ? addCalendarDays(start, -1) : "";
-  const openingReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", openingEnd, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, openingEnd, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
+  const openingReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", openingEnd, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data), [sales.data, expenses.data, journals.data, openingEnd, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data]);
   const openingCashBalance = useMemo(() => openingReport.rows.filter(row => SETTLEMENT_CODES.includes(row.code)).reduce((sum, row) => sum + row.balance, 0), [openingReport]);
   const statements = useMemo(
-    () => buildFinancialStatements(sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data, payrollEntries.data, openingCashBalance, payeRemittances.data),
-    [sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data, payrollEntries.data, openingCashBalance, payeRemittances.data],
+    () => buildFinancialStatements(sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data, payrollEntries.data, openingCashBalance, payeRemittances.data, nssfRemittances.data),
+    [sales.data, expenses.data, journals.data, report, start, end, payments.data, productionCosts.data, taxEntries.data, payrollEntries.data, openingCashBalance, payeRemittances.data, nssfRemittances.data],
   );
   const accountName = (code: string) => balanceSheetAccountName(code, report.rows.find(account => account.code === code)?.name ?? ACCOUNTS.find(account => account.code === code)?.name ?? "Account");
   const journalEntries = useMemo(() => journals.data.filter(entry => !entry.bankingKind).sort((a, b) => b.date.localeCompare(a.date)), [journals.data]);
@@ -77,6 +78,7 @@ export default function AccountsPage() {
     const productionRows = productionCosts.data.map(entry => ({ id: `production-${entry.id}`, date: entry.date, source: "Production cost", description: entry.description, account: cashAccountName(entry.settlementCode), amount: -(Number(entry.amount) || 0) }));
     const payrollRows = payments.data.filter(payment => payment.payrollVersion === 2 && payment.status === "paid" && payment.paymentSourceCode).map(payment => ({ id: `payroll-${payment.id}`, date: payment.paidDate, source: "Payroll", description: "Net wages paid", account: cashAccountName(payment.paymentSourceCode!), amount: -(Number(payment.netPayAmount) || 0) }));
     const payeRows = payeRemittances.data.map(remittance => ({ id: `paye-${remittance.id}`, date: remittance.paymentDate, source: "PAYE remittance", description: "PAYE paid to URA", account: cashAccountName(remittance.paymentSourceCode), amount: -(Number(remittance.amount) || 0) }));
+    const nssfRows = nssfRemittances.data.map(remittance => ({ id: `nssf-${remittance.id}`, date: remittance.paymentDate, source: "NSSF remittance", description: "NSSF employee contributions remitted", account: cashAccountName(remittance.paymentSourceCode), amount: -(Number(remittance.amount) || 0) }));
     const journalRows = journals.data.flatMap(entry => {
       const debitCash = SETTLEMENT_CODES.includes(entry.debitCode);
       const creditCash = SETTLEMENT_CODES.includes(entry.creditCode);
@@ -90,12 +92,12 @@ export default function AccountsPage() {
       const taggedAccount = code === "1000" && entry.bankingKind ? `${account} · ${entry.bankName || "Bank (not specified)"}` : account;
       return [{ id: `journal-${entry.id}`, date: entry.date, source: entry.bankingKind === "deposit" ? "Deposit" : "Journal", description: entry.description, account: taggedAccount, amount: debitCash ? entry.amount : -entry.amount }];
     });
-    return [...salesRows, ...expenseRows, ...productionRows, ...payrollRows, ...payeRows, ...journalRows].filter(entry => entry.date >= start && entry.date <= end).sort((a, b) => b.date.localeCompare(a.date));
-  }, [sales.data, expenses.data, productionCosts.data, payments.data, payeRemittances.data, journals.data, start, end]);
+    return [...salesRows, ...expenseRows, ...productionRows, ...payrollRows, ...payeRows, ...nssfRows, ...journalRows].filter(entry => entry.date >= start && entry.date <= end).sort((a, b) => b.date.localeCompare(a.date));
+  }, [sales.data, expenses.data, productionCosts.data, payments.data, payeRemittances.data, nssfRemittances.data, journals.data, start, end]);
   const ranges = useMemo(() => valid ? comparisonAccountPeriods(selectedPeriod) : [], [valid, selectedPeriod]);
-  const balanceSheetColumns = useMemo<BalanceSheetColumn[]>(() => ranges.map(range => ({ ...range, report: buildAccounts(sales.data, expenses.data, journals.data, range.start, range.end, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data) })), [ranges, sales.data, expenses.data, journals.data, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
-  const error = sales.error || expenses.error || journals.error || payments.error || productionCosts.error || taxEntries.error || payrollEntries.error || payeRemittances.error;
-  const loading = sales.loading || expenses.loading || journals.loading || payments.loading || productionCosts.loading || taxEntries.loading || payrollEntries.loading || payeRemittances.loading;
+  const balanceSheetColumns = useMemo<BalanceSheetColumn[]>(() => ranges.map(range => ({ ...range, report: buildAccounts(sales.data, expenses.data, journals.data, range.start, range.end, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data) })), [ranges, sales.data, expenses.data, journals.data, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data]);
+  const error = sales.error || expenses.error || journals.error || payments.error || productionCosts.error || taxEntries.error || payrollEntries.error || payeRemittances.error || nssfRemittances.error;
+  const loading = sales.loading || expenses.loading || journals.loading || payments.loading || productionCosts.loading || taxEntries.loading || payrollEntries.loading || payeRemittances.loading || nssfRemittances.loading;
   const canPost = ["ADMIN", "FINANCE", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
   const input = "w-full border border-gray-300 rounded-md px-3 py-2 text-sm";
   const journalSections = journal.category ? JOURNAL_STRUCTURE[journal.category] : [];
@@ -107,7 +109,7 @@ export default function AccountsPage() {
   const journalEffect = selectedJournalLine && journalOffsetCode && selectedJournalLine.accountCode !== journalOffsetCode
     ? `${journal.action === "add" ? "Increases" : "Reduces"} ${selectedJournalLine.name}${Number.isFinite(journalAmount) && journalAmount > 0 ? ` by ${money(journalAmount)}` : ""}; offset to ${accountName(journalOffsetCode)}.`
     : "Select a category and item to preview the balanced entry.";
-  const journalBalanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data.filter(entry => entry.id !== editingJournalId), "", journal.date || todayInEat(), productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, editingJournalId, journal.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
+  const journalBalanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data.filter(entry => entry.id !== editingJournalId), "", journal.date || todayInEat(), productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data), [sales.data, expenses.data, journals.data, editingJournalId, journal.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data]);
   const selectedJournalBalance = selectedJournalLine?.accountCode ? journalBalanceReport.rows.find(row => row.code === selectedJournalLine.accountCode)?.balance ?? 0 : 0;
   const resetJournalForm = () => {
     setJournal({ date: todayInEat(), action: "add", category: "", itemCode: "", amount: "", description: "" });

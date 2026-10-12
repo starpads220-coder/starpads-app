@@ -6,7 +6,7 @@ const group = (group: AccountGroup, rows: [string, string][]): Account[] => rows
 export const ACCOUNTS: Account[] = [
   ...group("Current Assets", [["1000", "Cash in Bank - Operating Bank"], ["1010", "Mobile Money - MTN"], ["1020", "Mobile Money - Airtel"], ["1030", "Petty Cash"], ["1100", "Accounts Receivable"], ["1110", "Allowance for Doubtful Accounts"], ["1240", "Inventory - Raw Materials"], ["1250", "Inventory - Work in Progress"], ["1260", "Inventory - Finished Goods"], ["1270", "Inventory - Packaging Material"], ["1320", "Prepaid Expenses - Insurance and Factory Rent"]]),
   ...group("Non-Current Assets", [["1540", "Factory Land and Buildings"], ["1630", "Machinery and Equipment"], ["1640", "Warehouse Equipment"], ["1650", "Quality Control and Laboratory"], ["1660", "Office Equipment and IT Infrastructure"], ["1661", "Office Furniture and Fittings"], ["1662", "Computers"], ["1830", "Accumulated Depreciation of Machinery"]]),
-  ...group("Current Liabilities", [["2110", "Accounts Payable - Suppliers"], ["2120", "Accrued Wages and Payroll Liabilities"], ["2125", "PAYE Payable"], ["2126", "NSSF Employee Contributions Payable"], ["2130", "Accrued Rent"], ["2230", "Sales Tax / VAT Payable"], ["2240", "Short-Term Factory Loans"], ["2250", "Income Tax Payable"]]),
+  ...group("Current Liabilities", [["2110", "Accounts Payable - Suppliers"], ["2120", "Accrued Wages and Payroll Liabilities"], ["2125", "PAYE Payable"], ["2126", "NSSF Payable"], ["2130", "Accrued Rent"], ["2230", "Sales Tax / VAT Payable"], ["2240", "Short-Term Factory Loans"], ["2250", "Income Tax Payable"]]),
   ...group("Non-Current Liabilities", [["2340", "Long-Term Equipment Loans / Leases"], ["2350", "Mortgages Payable"]]),
   ...group("Equity", [["3000", "Capital Investments"], ["3050", "Retained Earnings"], ["3060", "Owner's Equity"], ["3100", "Dividends"]]),
   ...group("Income", [["4080", "Sale of Pads"], ["4081", "Sale of Material"], ["4082", "Trainings"], ["4083", "Grants and Donations"], ["4084", "Wholesale Revenue - Distributors, Supermarkets and B2B"], ["4085", "Direct-to-Consumer Sales"], ["4086", "Private Label / OEM Manufacturing Revenue"], ["4087", "Sales Returns and Allowances"], ["4088", "Cash Discounts Allowed"], ["4070", "Other Income"]]),
@@ -112,6 +112,7 @@ export interface TaxEntry { id: string; date: string; description: string; amoun
 export interface PayrollProductionEntry { id: string; date: string; earningsUgx: number; paymentStatus?: string; paymentId?: string }
 export interface PayrollPaymentEntry { id: string; paidDate: string; status?: string; payrollVersion?: number; grossAmount?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; paymentSourceCode?: string }
 export interface PayeRemittanceEntry { id: string; paymentDate: string; amount: number; paymentSourceCode: string }
+export interface NssfRemittanceEntry { id: string; paymentDate: string; amount: number; paymentSourceCode: string }
 export function isRawMaterialCarriageExpense(entry: LedgerSource): boolean {
   const accounting = resolveAccounting(entry, "expense");
   const isTransport = (accounting?.accountCode ?? entry.accounting?.accountCode) === "6030" || (!entry.accounting && entry.category === "TRANSPORT");
@@ -132,7 +133,7 @@ export function resolveAccounting(entry: LedgerSource, kind: "sale" | "expense")
   }
   return null;
 }
-export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], journals: Journal[], start: string, end: string, productionCosts: ProductionCostEntry[] = [], taxEntries: TaxEntry[] = [], payrollEntries: PayrollProductionEntry[] = [], payrollPayments: PayrollPaymentEntry[] = [], payeRemittances: PayeRemittanceEntry[] = []) {
+export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], journals: Journal[], start: string, end: string, productionCosts: ProductionCostEntry[] = [], taxEntries: TaxEntry[] = [], payrollEntries: PayrollProductionEntry[] = [], payrollPayments: PayrollPaymentEntry[] = [], payeRemittances: PayeRemittanceEntry[] = [], nssfRemittances: NssfRemittanceEntry[] = []) {
   const catalog = new Map(ACCOUNTS.map(a => [a.code, a]));
   const balances: Record<string, number> = {}, movement: Record<string, number> = {};
   let unclassified = 0;
@@ -188,6 +189,13 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
     if (!["1000", "1030"].includes(remittance.paymentSourceCode)) return;
     const amount = Number(remittance.amount);
     if (amount > 0) post(remittance.paymentDate, "2125", remittance.paymentSourceCode, amount);
+  });
+  // NSSF remittances settle employee contributions already held in 2126.
+  // They reduce cash and the liability, and never create a second expense.
+  nssfRemittances.forEach(remittance => {
+    if (!["1000", "1030"].includes(remittance.paymentSourceCode)) return;
+    const amount = Number(remittance.amount);
+    if (amount > 0) post(remittance.paymentDate, "2126", remittance.paymentSourceCode, amount);
   });
   // Coerce historical values because early journal versions could persist the
   // amount as a numeric string. New entries are still validated and saved as numbers.

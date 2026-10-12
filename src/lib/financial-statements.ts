@@ -1,4 +1,4 @@
-import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, productionCostItem, resolveAccounting, type Journal, type LedgerSource, type PayeRemittanceEntry, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type buildAccounts } from "@/lib/accounts";
+import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, productionCostItem, resolveAccounting, type Journal, type LedgerSource, type NssfRemittanceEntry, type PayeRemittanceEntry, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type buildAccounts } from "@/lib/accounts";
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
 const OPERATING_EXPENSE_NAMES = ["Office and Administration", "Legal and Professional Fees", "Salaries and Wages", "Fuel and Transport", "Data and Communication Costs", "Utilities", "Machine Repair and Maintenance", "Sundries", "Other Costs", "Small Tools and Equipment", "Depreciation"];
@@ -93,6 +93,7 @@ export function buildFinancialStatements(
   _payrollEntries: PayrollProductionEntry[] = [],
   openingCashBalanceOverride?: number,
   payeRemittances: PayeRemittanceEntry[] = [],
+  nssfRemittances: NssfRemittanceEntry[] = [],
 ): FinancialStatements {
   // Kept in the public signature for compatibility with existing callers; labor
   // on this statement is deliberately recognized from confirmed payments.
@@ -193,7 +194,7 @@ export function buildFinancialStatements(
   const cashPaidForDirectLabor = payments.filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.netPayAmount) || 0), 0);
   const cashPaidForOtherProductionCosts = recordedOtherCosts;
   const cashPaidForOperatingExpenses = [...operatingCashExpenses.values()].reduce((sum, line) => sum + line.amount, 0);
-  const cashPaidForTaxes = payeRemittances.filter(entry => entry.paymentDate >= start && entry.paymentDate <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const cashPaidForTaxes = [...payeRemittances, ...nssfRemittances].filter(entry => entry.paymentDate >= start && entry.paymentDate <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
 
   const investing = new Map<string, CashFlowLine>();
   const financing = new Map<string, CashFlowLine>();

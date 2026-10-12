@@ -270,6 +270,9 @@ export interface Payment {
   totalAmount?: number;
   receiptNumber?: string;
   status?: "due" | "paid";
+  createdBy?: string;
+  createdByRole?: string;
+  createdAt?: import("firebase/firestore").Timestamp;
 }
 
 export interface ProductionTargetVersion {
@@ -301,7 +304,23 @@ export interface PayeRemittance {
   uraReference: string;
   notes?: string;
   createdBy: string;
+  createdByRole?: string;
   createdAt?: unknown;
+}
+
+export interface NssfRemittance {
+  id: string;
+  paymentDate: string;
+  returnPeriod: string;
+  amount: number;
+  paymentSourceCode: "1000" | "1030";
+  reference?: string;
+  notes?: string;
+  createdBy: string;
+  createdByRole?: string;
+  createdAt?: unknown;
+  updatedBy?: string;
+  updatedAt?: unknown;
 }
 
 export interface TargetConfig {

@@ -48,7 +48,7 @@ import { DEFAULT_PAYE_BANDS } from "@/lib/deductions";
 import { useRealtimeCollection } from "@/hooks/use-firestore-query";
 import { NssfCard } from "@/components/payments/NssfCard";
 import { PayeeCard } from "@/components/payments/PayeeCard";
-import { PayeRemittanceCard } from "@/components/payments/PayeRemittanceCard";
+import { StatutoryRemittancesCard } from "@/components/payments/StatutoryRemittancesCard";
 import { isEmployeeActive } from "@/lib/employees";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
@@ -147,7 +147,7 @@ interface DateSummary {
 
 export default function PaymentsPage() {
   const router = useRouter();
-  const { userRole } = useAuth();
+  const { user, userRole } = useAuth();
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("today");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
@@ -382,6 +382,7 @@ export default function PaymentsPage() {
 
   const isAdmin = userRole?.role === "ADMIN";
   const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
+  const canPay = ["ADMIN", "PRODUCTION_SUPERVISOR", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
   const canEdit = isAdmin || isSupervisor;
   const canDelete = isAdmin || isSupervisor;
 
@@ -429,6 +430,7 @@ export default function PaymentsPage() {
   }, [previewEmployeeId, previewGross, payeBands, payeApplicable, payePreviewKey]);
 
   const handlePayConfirm = async () => {
+    if (!canPay) { showToast("You do not have permission to confirm employee payments.", "error"); return; }
     if (!payEmployee || payEmployee.dueEntries.length === 0 || payProcessing) return;
     if (!paymentSourceCode) { showToast("Select Cash or Bank before confirming payment.", "error"); return; }
     if (payeSettingsLoading || payeSettingsError || modalPayeeTax === null) { showToast("PAYE could not be verified. Please wait or check settings before confirming.", "error"); return; }
@@ -489,7 +491,8 @@ export default function PaymentsPage() {
         receiptNumber,
         notes: "",
         createdAt: Timestamp.now(),
-        createdBy: userRole?.uid ?? "",
+        createdBy: user?.uid ?? "",
+        createdByRole: userRole?.role ?? "",
       };
       await runTransaction(db, async transaction => {
         const entryRefs = payEmployee.dueEntries.map(entry => doc(db, "productionEntries", entry.id));
@@ -809,7 +812,7 @@ export default function PaymentsPage() {
         <PayeeCard payments={periodConfirmedPayments} employees={employees} />
       </div>
 
-      <PayeRemittanceCard />
+      <StatutoryRemittancesCard />
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <ReportCard title="Payments Report" subtitle="Download a PDF summary of payment data" onGenerate={handleGenerateReport} />
@@ -916,15 +919,17 @@ export default function PaymentsPage() {
                       </td>
                       <td className="px-4 py-3 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {emp.dueAmount > 0 && isEmployeeActive(employees.find(employee => employee.id === emp.employeeId) ?? {}) ? (
+                          {canPay && emp.dueAmount > 0 && isEmployeeActive(employees.find(employee => employee.id === emp.employeeId) ?? {}) ? (
                             <button
                               onClick={(e) => { e.stopPropagation(); setPayEmployeeId(emp.employeeId); }}
                               className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-md hover:bg-gray-800"
                             >
                               Pay Due
                             </button>
-                          ) : emp.dueAmount > 0 ? (
+                          ) : emp.dueAmount > 0 && !isEmployeeActive(employees.find(employee => employee.id === emp.employeeId) ?? {}) ? (
                             <span className="text-xs font-medium text-gray-500">Due retained · Reactivate to pay</span>
+                          ) : emp.dueAmount > 0 ? (
+                            <span className="text-xs font-medium text-gray-500">View only</span>
                           ) : (
                             <span className="text-xs text-green-600 font-medium">✓ Paid</span>
                           )}
@@ -1115,7 +1120,7 @@ export default function PaymentsPage() {
             <div className="text-right"><span className="block text-xs font-medium uppercase text-gray-500">Total due (UGX)</span><strong className="text-xl text-amber-600">{allDueEntries.reduce((sum, entry) => sum + entry.earningsUgx, 0).toLocaleString()}</strong></div>
           </div>
           {allDueEmployeePayments.length === 0 ? <div className="p-8 text-center text-gray-400">There are no unpaid production entries.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[900px] divide-y divide-gray-200 text-sm"><thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Employee</th><th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Entries</th><th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Oldest due</th><th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Newest due</th><th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><span className="block text-[10px]">UGX</span>Amount due</th><th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Action</th></tr></thead><tbody className="divide-y divide-gray-200">
-            {visibleDueEmployeePayments.map((emp, index) => { const dates = emp.dueEntries.map(entry => entry.date).sort(); const employee = employees.find(item => item.id === emp.employeeId); return <React.Fragment key={emp.employeeId}><tr onClick={() => setExpandedEmployee(expandedEmployee === emp.employeeId ? null : emp.employeeId)} className={`cursor-pointer ${index % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-gray-100`}><td className="px-4 py-3 font-medium text-gray-900">{emp.employeeName}{!isEmployeeActive(employee ?? {}) && <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-500">Deactivated</span>}</td><td className="px-4 py-3 text-right">{emp.dueEntries.length}</td><td className="px-4 py-3">{dates[0]}</td><td className="px-4 py-3">{dates[dates.length - 1]}</td><td className="px-4 py-3 text-right font-semibold text-amber-600 tabular-nums">{emp.dueAmount.toLocaleString()}</td><td className="px-4 py-3 text-right">{isEmployeeActive(employee ?? {}) ? <button type="button" onClick={event => { event.stopPropagation(); setPayEmployeeId(emp.employeeId); }} className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800">Pay Due</button> : <span className="text-xs text-gray-500">Reactivate to pay</span>}<span className="ml-3 text-xs text-gray-400">{expandedEmployee === emp.employeeId ? "▲" : "▼"}</span></td></tr>
+            {visibleDueEmployeePayments.map((emp, index) => { const dates = emp.dueEntries.map(entry => entry.date).sort(); const employee = employees.find(item => item.id === emp.employeeId); return <React.Fragment key={emp.employeeId}><tr onClick={() => setExpandedEmployee(expandedEmployee === emp.employeeId ? null : emp.employeeId)} className={`cursor-pointer ${index % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-gray-100`}><td className="px-4 py-3 font-medium text-gray-900">{emp.employeeName}{!isEmployeeActive(employee ?? {}) && <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-500">Deactivated</span>}</td><td className="px-4 py-3 text-right">{emp.dueEntries.length}</td><td className="px-4 py-3">{dates[0]}</td><td className="px-4 py-3">{dates[dates.length - 1]}</td><td className="px-4 py-3 text-right font-semibold text-amber-600 tabular-nums">{emp.dueAmount.toLocaleString()}</td><td className="px-4 py-3 text-right">{canPay && isEmployeeActive(employee ?? {}) ? <button type="button" onClick={event => { event.stopPropagation(); setPayEmployeeId(emp.employeeId); }} className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800">Pay Due</button> : !isEmployeeActive(employee ?? {}) ? <span className="text-xs text-gray-500">Reactivate to pay</span> : <span className="text-xs text-gray-500">View only</span>}<span className="ml-3 text-xs text-gray-400">{expandedEmployee === emp.employeeId ? "▲" : "▼"}</span></td></tr>
               {expandedEmployee === emp.employeeId && <tr><td colSpan={6} className="bg-gray-50 p-0"><div className="overflow-x-auto px-6 py-4"><table className="w-full min-w-[760px] text-sm"><thead><tr className="border-b text-xs uppercase text-gray-500"><th className="pb-2 text-left">Date</th><th className="pb-2 text-left">Stage</th><th className="pb-2 text-left">Material</th><th className="pb-2 text-right">Pieces</th><th className="pb-2 text-right"><span className="block text-[10px]">UGX</span>Earnings</th><th className="pb-2 text-right">Actions</th></tr></thead><tbody>{emp.dueEntries.map(entry => <tr key={entry.id} className="border-b last:border-0"><td className="py-2">{entry.date}</td><td className="py-2">{getStageLabel(entry.stageId)}</td><td className="py-2 text-xs text-gray-600">{formatMaterialDisplay(entry)}</td><td className="py-2 text-right">{entry.actualPieces.toLocaleString()}</td><td className="py-2 text-right font-medium text-amber-700 tabular-nums">{entry.earningsUgx.toLocaleString()}</td><td className="py-2 text-right">{canEdit && <button type="button" onClick={() => router.push(`/production?${new URLSearchParams({ editEntryId: entry.id }).toString()}`)} className="mr-3 text-xs text-stock-blue hover:underline">Edit</button>}{canDelete && <button type="button" onClick={() => setDeleteConfirmEntryId(entry.id)} className="text-xs text-red-600 hover:underline">Delete</button>}</td></tr>)}</tbody></table></div></td></tr>}
             </React.Fragment>; })}
           </tbody></table></div>}
@@ -1269,7 +1274,7 @@ export default function PaymentsPage() {
       )}
 
       {/* Pay Due Modal */}
-      {payEmployeeId && payEmployee && (
+      {canPay && payEmployeeId && payEmployee && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
           <div className="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 max-h-[90vh] overflow-y-auto">
             <div className="flex items-center justify-between p-6 border-b border-gray-200">

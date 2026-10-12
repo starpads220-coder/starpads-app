@@ -114,6 +114,7 @@ export function PayeRemittanceCard() {
           uraReference: form.uraReference.trim(),
           notes: form.notes.trim(),
           createdBy: user.uid,
+          createdByRole: userRole?.role ?? "",
           createdAt: now,
         });
         transaction.set(balanceRef, {

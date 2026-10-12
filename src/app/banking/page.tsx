@@ -6,7 +6,7 @@ import { RouteGuard } from "@/components/auth/RouteGuard";
 import { useAuth } from "@/lib/auth-context";
 import { useRealtimeCollection } from "@/hooks/use-firestore-query";
 import { db } from "@/lib/firebase";
-import { ACCOUNTS, SETTLEMENT_CODES, buildAccounts, type Journal, type LedgerSource, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
+import { ACCOUNTS, SETTLEMENT_CODES, buildAccounts, type Journal, type LedgerSource, type NssfRemittanceEntry, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type PayrollPaymentEntry, type PayeRemittanceEntry } from "@/lib/accounts";
 import { CUSTOM_BANK_VALUE, DEFAULT_BANK_NAMES, DEPOSIT_OFFSET_ACCOUNT_CODE, bankAccounts, bankingAccountName, cashAccounts, cleanBankName, isBankCode, isCashCode, isCashToBank, normaliseBankNameKey, transferDirection, validateTransfer } from "@/lib/banking";
 import { todayInEat } from "@/lib/account-period";
 
@@ -39,10 +39,11 @@ export default function BankingPage() {
   const payrollEntries = useRealtimeCollection<PayrollProductionEntry>("productionEntries", [], true);
   const payments = useRealtimeCollection<PayrollPaymentEntry>("payments", [], true);
   const payeRemittances = useRealtimeCollection<PayeRemittanceEntry>("payeRemittances", [], true);
+  const nssfRemittances = useRealtimeCollection<NssfRemittanceEntry>("nssfRemittances", [], true);
   const canPost = ["ADMIN", "FINANCE", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
-  const error = sales.error || expenses.error || journals.error || productionCosts.error || taxEntries.error || payrollEntries.error || payments.error || payeRemittances.error;
-  const loading = sales.loading || expenses.loading || journals.loading || productionCosts.loading || taxEntries.loading || payrollEntries.loading || payments.loading || payeRemittances.loading;
-  const serverConfirmed = [sales, expenses, journals, productionCosts, taxEntries, payrollEntries, payments, payeRemittances].every(source => !source.fromCache && !source.hasPendingWrites);
+  const error = sales.error || expenses.error || journals.error || productionCosts.error || taxEntries.error || payrollEntries.error || payments.error || payeRemittances.error || nssfRemittances.error;
+  const loading = sales.loading || expenses.loading || journals.loading || productionCosts.loading || taxEntries.loading || payrollEntries.loading || payments.loading || payeRemittances.loading || nssfRemittances.loading;
+  const serverConfirmed = [sales, expenses, journals, productionCosts, taxEntries, payrollEntries, payments, payeRemittances, nssfRemittances].every(source => !source.fromCache && !source.hasPendingWrites);
   const deposits = useMemo(() => journals.data.filter(entry => entry.bankingKind === "deposit" || isCashToBank(entry)).sort((a, b) => b.date.localeCompare(a.date)), [journals.data]);
   const transfers = useMemo(() => journals.data.filter(entry => entry.bankingKind === "transfer").sort((a, b) => b.date.localeCompare(a.date)), [journals.data]);
   const bankNames = useMemo(() => {
@@ -71,8 +72,8 @@ export default function BankingPage() {
     ? ACCOUNTS.find(account => account.code === selectedDeposit.creditCode)
     : configuredDepositOffset;
   const editingTransfer = journals.data.find(entry => entry.id === editingTransferId);
-  const balanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", transfer.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, transfer.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
-  const currentBalanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", todayInEat(), productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data), [sales.data, expenses.data, journals.data, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data]);
+  const balanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", transfer.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data), [sales.data, expenses.data, journals.data, transfer.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data]);
+  const currentBalanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, journals.data, "", todayInEat(), productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data), [sales.data, expenses.data, journals.data, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data]);
   const accountBalance = (code: string) => balanceReport.rows.find(row => row.code === code)?.balance ?? 0;
   const currentAccountBalance = (code: string) => currentBalanceReport.rows.find(row => row.code === code)?.balance ?? 0;
   const bankBalancesAtTransferDate = useMemo(() => {
