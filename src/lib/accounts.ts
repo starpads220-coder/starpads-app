@@ -110,7 +110,7 @@ export interface ProductionCostEntry {
 }
 export interface TaxEntry { id: string; date: string; description: string; amount: number }
 export interface PayrollProductionEntry { id: string; date: string; earningsUgx: number; paymentStatus?: string; paymentId?: string }
-export interface PayrollPaymentEntry { id: string; paidDate: string; status?: string; payrollVersion?: number; grossAmount?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; paymentSourceCode?: string }
+export interface PayrollPaymentEntry { id: string; paidDate: string; status?: string; payrollVersion?: number; grossAmount?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number; paymentSourceCode?: string }
 export interface PayeRemittanceEntry { id: string; paymentDate: string; amount: number; paymentSourceCode: string }
 export interface NssfRemittanceEntry { id: string; paymentDate: string; amount: number; paymentSourceCode: string }
 export function isRawMaterialCarriageExpense(entry: LedgerSource): boolean {
@@ -180,9 +180,12 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
     const net = Number(payment.netPayAmount) || 0;
     const paye = Number(payment.payeeTax) || 0;
     const nssf = Number(payment.nssfEmployeeDeduction) || 0;
+    const employerNssf = Number(payment.nssfBusinessContribution) || 0;
     if (net > 0) post(payment.paidDate, "2120", payment.paymentSourceCode!, net);
     if (paye > 0) post(payment.paidDate, "2120", "2125", paye);
     if (nssf > 0) post(payment.paidDate, "2120", "2126", nssf);
+    // The employer share is an additional payroll cost, not an employee deduction.
+    if (employerNssf > 0) post(payment.paidDate, "5090", "2126", employerNssf);
   });
   // Remitting PAYE settles the withholding liability; it is not a second expense.
   payeRemittances.forEach(remittance => {

@@ -23,10 +23,10 @@ export function NssfRemittanceCard() {
   const [form, setForm] = useState(emptyForm);
   const canRemit = ["ADMIN", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
 
-  const totalWithheld = useMemo(() => payments.data.filter(payment => payment.status === "paid" && payment.payrollVersion === 2).reduce((sum, payment) => sum + (Number(payment.nssfEmployeeDeduction) || 0), 0), [payments.data]);
+  const totalWithheld = useMemo(() => payments.data.filter(payment => payment.status === "paid" && payment.payrollVersion === 2).reduce((sum, payment) => sum + (Number(payment.nssfEmployeeDeduction) || 0) + (Number(payment.nssfBusinessContribution) || 0), 0), [payments.data]);
   const totalRemitted = useMemo(() => remittances.data.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0), [remittances.data]);
   const outstanding = Math.max(0, totalWithheld - totalRemitted);
-  const periodWithheld = useMemo(() => payments.data.filter(payment => payment.status === "paid" && payment.payrollVersion === 2 && payment.paidDate?.startsWith(form.returnPeriod)).reduce((sum, payment) => sum + (Number(payment.nssfEmployeeDeduction) || 0), 0), [payments.data, form.returnPeriod]);
+  const periodWithheld = useMemo(() => payments.data.filter(payment => payment.status === "paid" && payment.payrollVersion === 2 && payment.paidDate?.startsWith(form.returnPeriod)).reduce((sum, payment) => sum + (Number(payment.nssfEmployeeDeduction) || 0) + (Number(payment.nssfBusinessContribution) || 0), 0), [payments.data, form.returnPeriod]);
   const periodRemittedOther = useMemo(() => remittances.data.filter(entry => entry.returnPeriod === form.returnPeriod && entry.id !== editingId).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0), [remittances.data, form.returnPeriod, editingId]);
   const periodOutstanding = Math.max(0, periodWithheld - periodRemittedOther);
   const sorted = useMemo(() => [...remittances.data].sort((a, b) => b.paymentDate.localeCompare(a.paymentDate)), [remittances.data]);
@@ -52,7 +52,7 @@ export function NssfRemittanceCard() {
       const [paymentSnapshot, remittanceSnapshot] = await Promise.all([getDocsFromServer(collection(db, "payments")), getDocsFromServer(collection(db, "nssfRemittances"))]);
       const serverWithheld = paymentSnapshot.docs.reduce((sum, item) => {
         const data = item.data();
-        return data.status === "paid" && data.payrollVersion === 2 && String(data.paidDate ?? "").startsWith(form.returnPeriod) ? sum + (Number(data.nssfEmployeeDeduction) || 0) : sum;
+        return data.status === "paid" && data.payrollVersion === 2 && String(data.paidDate ?? "").startsWith(form.returnPeriod) ? sum + (Number(data.nssfEmployeeDeduction) || 0) + (Number(data.nssfBusinessContribution) || 0) : sum;
       }, 0);
       const observedOther = remittanceSnapshot.docs.reduce((sum, item) => item.id !== editingId && item.data().returnPeriod === form.returnPeriod ? sum + (Number(item.data().amount) || 0) : sum, 0);
       if (amount > Math.max(0, serverWithheld - observedOther)) throw new Error(`The amount exceeds the outstanding NSSF liability of ${money(Math.max(0, serverWithheld - observedOther))}.`);
@@ -102,8 +102,8 @@ export function NssfRemittanceCard() {
   }
 
   return <section className="rounded-lg border border-gray-200 bg-white shadow-sm">
-    <div className="flex flex-wrap items-center justify-between gap-4 p-5"><div><h2 className="font-semibold text-gray-900">NSSF Remittances</h2><p className="mt-1 text-sm text-gray-500">Employee NSSF withheld less amounts remitted</p></div>{canRemit && <button type="button" onClick={() => open ? reset() : setOpen(true)} className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800">{open ? "Close" : "Remit NSSF"}</button>}</div>
-    <div className="grid grid-cols-1 gap-3 border-t border-gray-100 p-5 sm:grid-cols-3"><div><p className="text-xs uppercase text-gray-500">NSSF withheld</p><p className="mt-1 font-semibold text-gray-900">{money(totalWithheld)}</p></div><div><p className="text-xs uppercase text-gray-500">Remitted</p><p className="mt-1 font-semibold text-blue-700">{money(totalRemitted)}</p></div><div><p className="text-xs uppercase text-gray-500">Outstanding liability</p><p className="mt-1 font-semibold text-amber-700">{money(outstanding)}</p></div></div>
+    <div className="flex flex-wrap items-center justify-between gap-4 p-5"><div><h2 className="font-semibold text-gray-900">NSSF Remittances</h2><p className="mt-1 text-sm text-gray-500">Employee 5% plus employer 10%, less amounts remitted</p></div>{canRemit && <button type="button" onClick={() => open ? reset() : setOpen(true)} className="rounded-md bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800">{open ? "Close" : "Remit NSSF"}</button>}</div>
+    <div className="grid grid-cols-1 gap-3 border-t border-gray-100 p-5 sm:grid-cols-3"><div><p className="text-xs uppercase text-gray-500">Total NSSF due (5% + 10%)</p><p className="mt-1 font-semibold text-gray-900">{money(totalWithheld)}</p></div><div><p className="text-xs uppercase text-gray-500">Remitted</p><p className="mt-1 font-semibold text-blue-700">{money(totalRemitted)}</p></div><div><p className="text-xs uppercase text-gray-500">Outstanding liability</p><p className="mt-1 font-semibold text-amber-700">{money(outstanding)}</p></div></div>
     {open && canRemit && <form onSubmit={submit} className="grid grid-cols-1 gap-4 border-t border-gray-200 bg-gray-50 p-5 md:grid-cols-2">
       <label className="text-sm font-medium text-gray-700">Date<input required type="date" max={today()} value={form.paymentDate} onChange={event => setForm(value => ({ ...value, paymentDate: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2" /></label>
       <label className="text-sm font-medium text-gray-700">Period covered<input required type="month" value={form.returnPeriod} onChange={event => setForm(value => ({ ...value, returnPeriod: event.target.value }))} className="mt-1 w-full rounded-md border border-gray-300 px-3 py-2" /></label>

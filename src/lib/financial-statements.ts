@@ -2,7 +2,7 @@ import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, productionCos
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
 const OPERATING_EXPENSE_NAMES = ["Office and Administration", "Legal and Professional Fees", "Salaries and Wages", "Fuel and Transport", "Data and Communication Costs", "Utilities", "Machine Repair and Maintenance", "Sundries", "Other Costs", "Small Tools and Equipment", "Depreciation"];
-export interface ConfirmedLaborPayment { id: string; paidDate: string; status?: string; grossAmount?: number; totalAmount?: number; amountUgx?: number; payrollVersion?: number; netPayAmount?: number }
+export interface ConfirmedLaborPayment { id: string; paidDate: string; status?: string; grossAmount?: number; totalAmount?: number; amountUgx?: number; payrollVersion?: number; netPayAmount?: number; nssfBusinessContribution?: number }
 export interface CashFlowLine { name: string; amount: number }
 
 export interface FinancialStatements {
@@ -143,7 +143,7 @@ export function buildFinancialStatements(
   // entries remain in the Balance Sheet accrual ledger and are not re-posted.
   const directLabor = payments
     .filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end)
-    .reduce((sum, entry) => sum + (Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0), 0);
+    .reduce((sum, entry) => sum + (Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0) + (Number(entry.nssfBusinessContribution) || 0), 0);
   const recordedOtherCosts = productionCostTotal("other_costs");
   const legacyOtherCosts = periodExpenses.filter(isOtherProductionExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const otherProductionCosts = recordedOtherCosts + legacyOtherCosts;
