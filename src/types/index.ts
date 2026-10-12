@@ -263,6 +263,7 @@ export interface Payment {
   payeeTax?: number;
   payeBandBreakdown?: import("@/lib/deductions").PayeBandResult[];
   payePreviouslyWithheld?: number;
+  payeMonthlyGrossBasis?: number;
   payeBandsApplied?: import("@/lib/deductions").PayeBand[];
   paymentSourceCode?: "1000" | "1030";
   payrollVersion?: 2;

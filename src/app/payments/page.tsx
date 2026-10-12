@@ -87,18 +87,13 @@ async function getCumulativePayeeForEmployee(
   todayStr: string,
   bands: PayeBand[],
   applicable: boolean,
-): Promise<{ tax: number; breakdown: PayeBandResult[]; previousWithheld: number }> {
-  if (!applicable) return { tax: 0, breakdown: [], previousWithheld: 0 };
+): Promise<{ tax: number; breakdown: PayeBandResult[]; previousWithheld: number; monthlyGross: number }> {
+  if (!applicable) return { tax: 0, breakdown: [], previousWithheld: 0, monthlyGross: 0 };
   const { monthStart, monthEnd } = getMonthBounds(todayStr);
-  const existingPaymentsSnap = await getDocsFromServer(
-    query(
-      collection(db, "payments"),
-      where("employeeId", "==", employeeId),
-      where("paidDate", ">=", monthStart),
-      where("paidDate", "<=", monthEnd),
-      orderBy("paidDate", "desc")
-    )
-  );
+  const [existingPaymentsSnap, monthlyEarningsSnap] = await Promise.all([
+    getDocsFromServer(query(collection(db, "payments"), where("employeeId", "==", employeeId), where("paidDate", ">=", monthStart), where("paidDate", "<=", monthEnd), orderBy("paidDate", "desc"))),
+    getDocsFromServer(query(collection(db, "productionEntries"), where("employeeId", "==", employeeId))),
+  ]);
   const confirmed = existingPaymentsSnap.docs.filter(d => d.data().status === "paid" && d.data().payeApplicable !== false);
   const alreadyPaidPayee = confirmed.reduce(
     (sum, d) => sum + (Number(d.data().payeeTax) || 0),
@@ -108,9 +103,17 @@ async function getCumulativePayeeForEmployee(
     (sum, d) => sum + (Number(d.data().grossAmount ?? d.data().totalAmount) || 0),
     0
   );
-  const totalMonthlyGross = existingGross + currentPaymentGross;
+  // PAYE qualification is based on everything earned from the first through
+  // the last day of the calendar month, including entries not yet paid.
+  const earnedMonthlyGross = monthlyEarningsSnap.docs.reduce((sum, entry) => {
+    const data = entry.data();
+    return data.date >= monthStart && data.date <= monthEnd ? sum + (Number(data.earningsUgx) || 0) : sum;
+  }, 0);
+  // The fallback preserves older paid records whose production entries are no
+  // longer available, without double-counting current production earnings.
+  const totalMonthlyGross = Math.max(earnedMonthlyGross, existingGross + currentPaymentGross);
   const calculated = calculateProgressivePaye(totalMonthlyGross, bands);
-  return { tax: Math.max(0, calculated.tax - alreadyPaidPayee), breakdown: calculated.breakdown, previousWithheld: alreadyPaidPayee };
+  return { tax: Math.max(0, calculated.tax - alreadyPaidPayee), breakdown: calculated.breakdown, previousWithheld: alreadyPaidPayee, monthlyGross: totalMonthlyGross };
 }
 
 async function getNextReceiptNumber(): Promise<string> {
@@ -162,7 +165,7 @@ export default function PaymentsPage() {
 
   const [payEmployeeId, setPayEmployeeId] = useState<string | null>(null);
   const [payProcessing, setPayProcessing] = useState(false);
-  const [modalPayePreview, setModalPayePreview] = useState<{ key: string; tax: number; breakdown: PayeBandResult[]; previousWithheld: number } | null>(null);
+  const [modalPayePreview, setModalPayePreview] = useState<{ key: string; tax: number; breakdown: PayeBandResult[]; previousWithheld: number; monthlyGross: number } | null>(null);
   const [paymentSourceCode, setPaymentSourceCode] = useState<"" | "1000" | "1030">("");
   const { bands: payeBands, loading: payeSettingsLoading, error: payeSettingsError } = usePayeSettings();
   const confirmedPayments = useRealtimeCollection<Payment>("payments");
@@ -418,6 +421,7 @@ export default function PaymentsPage() {
   const modalPayeeTax = modalPayePreview?.key === payePreviewKey ? modalPayePreview.tax : null;
   const modalPayeBreakdown = modalPayePreview?.key === payePreviewKey ? modalPayePreview.breakdown : [];
   const modalPreviouslyWithheld = modalPayePreview?.key === payePreviewKey ? modalPayePreview.previousWithheld : 0;
+  const modalMonthlyGross = modalPayePreview?.key === payePreviewKey ? modalPayePreview.monthlyGross : null;
 
   useEffect(() => {
     if (!previewEmployeeId || !previewGross) return;
@@ -481,6 +485,7 @@ export default function PaymentsPage() {
         payeeTax,
         payeBandBreakdown: payeResult.breakdown,
         payePreviouslyWithheld: payeResult.previousWithheld,
+        payeMonthlyGrossBasis: payeResult.monthlyGross,
         payeBandsApplied: currentBands,
         payeApplicable: currentApplicable,
         paymentSourceCode,
@@ -1321,6 +1326,7 @@ export default function PaymentsPage() {
                   <span className="text-gray-600">PAYE {payeApplicable ? "(progressive monthly bands)" : "(not applicable)"}</span>
                   <span className="font-semibold text-red-600">- UGX {modalPayeeTax === null ? "Calculating…" : modalPayeeTax.toLocaleString()}</span>
                 </div>
+                {payeApplicable && <div className="flex justify-between text-xs font-medium text-gray-500"><span>Total gross earned this calendar month</span><span>{modalMonthlyGross === null ? "Calculating…" : `UGX ${modalMonthlyGross.toLocaleString()}`}</span></div>}
                 {modalPayeBreakdown.some(band => band.taxableAmount > 0) && <p className="text-xs font-medium text-gray-500">Calendar-month cumulative bands</p>}
                 {modalPayeBreakdown.filter(band => band.taxableAmount > 0).map((band, index) => <div key={index} className="flex justify-between text-xs text-gray-500"><span>{band.ratePercent}% on UGX {band.taxableAmount.toLocaleString()}</span><span>UGX {Math.round(band.taxAmount).toLocaleString()}</span></div>)}
                 {modalPreviouslyWithheld > 0 && <div className="flex justify-between text-xs text-gray-500"><span>PAYE already withheld this month</span><span>- UGX {modalPreviouslyWithheld.toLocaleString()}</span></div>}
