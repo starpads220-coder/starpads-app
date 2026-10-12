@@ -42,9 +42,7 @@ import {
   type PayeBand,
   type PayeBandResult,
 } from "@/lib/deductions";
-import { usePayeSettings } from "@/hooks/use-paye-settings";
 import { PAYE_SETTINGS_REF } from "@/hooks/use-paye-settings";
-import { DEFAULT_PAYE_BANDS } from "@/lib/deductions";
 import { useRealtimeCollection } from "@/hooks/use-firestore-query";
 import { NssfCard } from "@/components/payments/NssfCard";
 import { PayeeCard } from "@/components/payments/PayeeCard";
@@ -166,9 +164,18 @@ export default function PaymentsPage() {
   const [payEmployeeId, setPayEmployeeId] = useState<string | null>(null);
   const [payProcessing, setPayProcessing] = useState(false);
   const [modalPayePreview, setModalPayePreview] = useState<{ key: string; tax: number; breakdown: PayeBandResult[]; previousWithheld: number; monthlyGross: number } | null>(null);
+  const [popupPayeSettings, setPopupPayeSettings] = useState<{ bands: PayeBand[]; signature: string; versionLabel: string } | null>(null);
+  const [payeSettingsLoading, setPayeSettingsLoading] = useState(false);
+  const [payeSettingsError, setPayeSettingsError] = useState<string | null>(null);
   const [paymentSourceCode, setPaymentSourceCode] = useState<"" | "1000" | "1030">("");
-  const { bands: payeBands, loading: payeSettingsLoading, error: payeSettingsError } = usePayeSettings();
   const confirmedPayments = useRealtimeCollection<Payment>("payments");
+  const openPayDue = (employeeId: string) => {
+    setPopupPayeSettings(null);
+    setModalPayePreview(null);
+    setPayeSettingsError(null);
+    setPayeSettingsLoading(true);
+    setPayEmployeeId(employeeId);
+  };
 
   const { data: employees = [] } = useCollectionQuery<Employee>("employees", [
     orderBy("name"),
@@ -417,21 +424,41 @@ export default function PaymentsPage() {
   const payeApplicable = employees.find(e => e.id === payEmployeeId)?.payeApplicable !== false;
   const previewEmployeeId = payEmployee?.employeeId;
   const previewGross = payEmployee?.dueAmount;
+  const payeBands = popupPayeSettings?.bands ?? [];
   const payePreviewKey = `${previewEmployeeId ?? ""}|${previewGross ?? ""}|${payeApplicable}|${JSON.stringify(payeBands)}`;
   const modalPayeeTax = modalPayePreview?.key === payePreviewKey ? modalPayePreview.tax : null;
   const modalPayeBreakdown = modalPayePreview?.key === payePreviewKey ? modalPayePreview.breakdown : [];
   const modalPreviouslyWithheld = modalPayePreview?.key === payePreviewKey ? modalPayePreview.previousWithheld : 0;
   const modalMonthlyGross = modalPayePreview?.key === payePreviewKey ? modalPayePreview.monthlyGross : null;
 
+  // The settings document is the sole source for Pay Due. Fetch it directly
+  // from the server every time the popup opens; never calculate from defaults.
   useEffect(() => {
-    if (!previewEmployeeId || !previewGross) return;
+    if (!payEmployeeId) return;
+    let cancelled = false;
+    getDocFromServer(doc(db, "payeSettings", PAYE_SETTINGS_REF)).then(snapshot => {
+      if (!snapshot.exists()) throw new Error("PAYE Settings have not been configured. Configure them before confirming payments.");
+      const bands = snapshot.data().bands as PayeBand[] | undefined;
+      if (!bands?.length) throw new Error("PAYE Settings contain no bands. Correct the settings before confirming payments.");
+      calculateProgressivePaye(0, bands);
+      const updatedAt = snapshot.data().updatedAt;
+      const versionLabel = updatedAt?.toDate instanceof Function ? updatedAt.toDate().toLocaleString() : "Saved settings";
+      if (!cancelled) setPopupPayeSettings({ bands, signature: JSON.stringify(bands), versionLabel });
+    }).catch(error => {
+      if (!cancelled) setPayeSettingsError(error instanceof Error ? error.message : "PAYE Settings could not be loaded from the server.");
+    }).finally(() => { if (!cancelled) setPayeSettingsLoading(false); });
+    return () => { cancelled = true; };
+  }, [payEmployeeId]);
+
+  useEffect(() => {
+    if (!previewEmployeeId || !previewGross || !popupPayeSettings || payeSettingsError) return;
     let cancelled = false;
     const todayStr = new Date().toISOString().split("T")[0];
-    getCumulativePayeeForEmployee(previewEmployeeId, previewGross, todayStr, payeBands, payeApplicable)
+    getCumulativePayeeForEmployee(previewEmployeeId, previewGross, todayStr, popupPayeSettings.bands, payeApplicable)
       .then((result) => { if (!cancelled) setModalPayePreview({ key: payePreviewKey, ...result }); })
       .catch(() => { if (!cancelled) setModalPayePreview(null); });
     return () => { cancelled = true; };
-  }, [previewEmployeeId, previewGross, payeBands, payeApplicable, payePreviewKey]);
+  }, [previewEmployeeId, previewGross, popupPayeSettings, payeApplicable, payePreviewKey, payeSettingsError]);
 
   const handlePayConfirm = async () => {
     if (!canPay) { showToast("You do not have permission to confirm employee payments.", "error"); return; }
@@ -451,10 +478,15 @@ export default function PaymentsPage() {
       if (!isEmployeeActive(currentEmployee.data())) {
         throw new Error("This employee is deactivated. Reactivate them before confirming a new payment.");
       }
-      const currentBands = (currentSettings.data()?.bands as PayeBand[] | undefined) ?? DEFAULT_PAYE_BANDS;
+      if (!currentSettings.exists()) throw new Error("PAYE Settings have not been configured. Payment confirmation is blocked.");
+      const currentBands = currentSettings.data().bands as PayeBand[] | undefined;
+      if (!currentBands?.length) throw new Error("PAYE Settings contain no bands. Payment confirmation is blocked.");
       calculateProgressivePaye(0, currentBands);
-      if (currentApplicable !== payeApplicable || JSON.stringify(currentBands) !== JSON.stringify(payeBands)) {
-        throw new Error("PAYE settings or employee eligibility changed. Review the updated calculation before confirming.");
+      if (currentApplicable !== payeApplicable || !popupPayeSettings || JSON.stringify(currentBands) !== popupPayeSettings.signature) {
+        const updatedAt = currentSettings.data().updatedAt;
+        const versionLabel = updatedAt?.toDate instanceof Function ? updatedAt.toDate().toLocaleString() : "Saved settings";
+        setPopupPayeSettings({ bands: currentBands, signature: JSON.stringify(currentBands), versionLabel });
+        throw new Error("PAYE settings or employee eligibility changed. The figures are being refreshed; review them before confirming again.");
       }
 
       const grossAmount = payEmployee.dueAmount;
@@ -926,7 +958,7 @@ export default function PaymentsPage() {
                         <div className="flex items-center justify-end gap-2">
                           {canPay && emp.dueAmount > 0 && isEmployeeActive(employees.find(employee => employee.id === emp.employeeId) ?? {}) ? (
                             <button
-                              onClick={(e) => { e.stopPropagation(); setPayEmployeeId(emp.employeeId); }}
+                              onClick={(e) => { e.stopPropagation(); openPayDue(emp.employeeId); }}
                               className="px-3 py-1.5 bg-gray-900 text-white text-xs font-medium rounded-md hover:bg-gray-800"
                             >
                               Pay Due
@@ -1125,7 +1157,7 @@ export default function PaymentsPage() {
             <div className="text-right"><span className="block text-xs font-medium uppercase text-gray-500">Total due (UGX)</span><strong className="text-xl text-amber-600">{allDueEntries.reduce((sum, entry) => sum + entry.earningsUgx, 0).toLocaleString()}</strong></div>
           </div>
           {allDueEmployeePayments.length === 0 ? <div className="p-8 text-center text-gray-400">There are no unpaid production entries.</div> : <div className="overflow-x-auto"><table className="w-full min-w-[900px] divide-y divide-gray-200 text-sm"><thead className="bg-gray-50"><tr><th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Employee</th><th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Entries</th><th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Oldest due</th><th className="px-4 py-3 text-left text-xs font-medium uppercase text-gray-500">Newest due</th><th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500"><span className="block text-[10px]">UGX</span>Amount due</th><th className="px-4 py-3 text-right text-xs font-medium uppercase text-gray-500">Action</th></tr></thead><tbody className="divide-y divide-gray-200">
-            {visibleDueEmployeePayments.map((emp, index) => { const dates = emp.dueEntries.map(entry => entry.date).sort(); const employee = employees.find(item => item.id === emp.employeeId); return <React.Fragment key={emp.employeeId}><tr onClick={() => setExpandedEmployee(expandedEmployee === emp.employeeId ? null : emp.employeeId)} className={`cursor-pointer ${index % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-gray-100`}><td className="px-4 py-3 font-medium text-gray-900">{emp.employeeName}{!isEmployeeActive(employee ?? {}) && <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-500">Deactivated</span>}</td><td className="px-4 py-3 text-right">{emp.dueEntries.length}</td><td className="px-4 py-3">{dates[0]}</td><td className="px-4 py-3">{dates[dates.length - 1]}</td><td className="px-4 py-3 text-right font-semibold text-amber-600 tabular-nums">{emp.dueAmount.toLocaleString()}</td><td className="px-4 py-3 text-right">{canPay && isEmployeeActive(employee ?? {}) ? <button type="button" onClick={event => { event.stopPropagation(); setPayEmployeeId(emp.employeeId); }} className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800">Pay Due</button> : !isEmployeeActive(employee ?? {}) ? <span className="text-xs text-gray-500">Reactivate to pay</span> : <span className="text-xs text-gray-500">View only</span>}<span className="ml-3 text-xs text-gray-400">{expandedEmployee === emp.employeeId ? "▲" : "▼"}</span></td></tr>
+            {visibleDueEmployeePayments.map((emp, index) => { const dates = emp.dueEntries.map(entry => entry.date).sort(); const employee = employees.find(item => item.id === emp.employeeId); return <React.Fragment key={emp.employeeId}><tr onClick={() => setExpandedEmployee(expandedEmployee === emp.employeeId ? null : emp.employeeId)} className={`cursor-pointer ${index % 2 === 0 ? "bg-white" : "bg-gray-50/50"} hover:bg-gray-100`}><td className="px-4 py-3 font-medium text-gray-900">{emp.employeeName}{!isEmployeeActive(employee ?? {}) && <span className="ml-2 rounded-full bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-500">Deactivated</span>}</td><td className="px-4 py-3 text-right">{emp.dueEntries.length}</td><td className="px-4 py-3">{dates[0]}</td><td className="px-4 py-3">{dates[dates.length - 1]}</td><td className="px-4 py-3 text-right font-semibold text-amber-600 tabular-nums">{emp.dueAmount.toLocaleString()}</td><td className="px-4 py-3 text-right">{canPay && isEmployeeActive(employee ?? {}) ? <button type="button" onClick={event => { event.stopPropagation(); openPayDue(emp.employeeId); }} className="rounded-md bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800">Pay Due</button> : !isEmployeeActive(employee ?? {}) ? <span className="text-xs text-gray-500">Reactivate to pay</span> : <span className="text-xs text-gray-500">View only</span>}<span className="ml-3 text-xs text-gray-400">{expandedEmployee === emp.employeeId ? "▲" : "▼"}</span></td></tr>
               {expandedEmployee === emp.employeeId && <tr><td colSpan={6} className="bg-gray-50 p-0"><div className="overflow-x-auto px-6 py-4"><table className="w-full min-w-[760px] text-sm"><thead><tr className="border-b text-xs uppercase text-gray-500"><th className="pb-2 text-left">Date</th><th className="pb-2 text-left">Stage</th><th className="pb-2 text-left">Material</th><th className="pb-2 text-right">Pieces</th><th className="pb-2 text-right"><span className="block text-[10px]">UGX</span>Earnings</th><th className="pb-2 text-right">Actions</th></tr></thead><tbody>{emp.dueEntries.map(entry => <tr key={entry.id} className="border-b last:border-0"><td className="py-2">{entry.date}</td><td className="py-2">{getStageLabel(entry.stageId)}</td><td className="py-2 text-xs text-gray-600">{formatMaterialDisplay(entry)}</td><td className="py-2 text-right">{entry.actualPieces.toLocaleString()}</td><td className="py-2 text-right font-medium text-amber-700 tabular-nums">{entry.earningsUgx.toLocaleString()}</td><td className="py-2 text-right">{canEdit && <button type="button" onClick={() => router.push(`/production?${new URLSearchParams({ editEntryId: entry.id }).toString()}`)} className="mr-3 text-xs text-stock-blue hover:underline">Edit</button>}{canDelete && <button type="button" onClick={() => setDeleteConfirmEntryId(entry.id)} className="text-xs text-red-600 hover:underline">Delete</button>}</td></tr>)}</tbody></table></div></td></tr>}
             </React.Fragment>; })}
           </tbody></table></div>}
@@ -1327,8 +1359,11 @@ export default function PaymentsPage() {
                   <span className="font-semibold text-red-600">- UGX {modalPayeeTax === null ? "Calculating…" : modalPayeeTax.toLocaleString()}</span>
                 </div>
                 {payeApplicable && <div className="flex justify-between text-xs font-medium text-gray-500"><span>Total gross earned this calendar month</span><span>{modalMonthlyGross === null ? "Calculating…" : `UGX ${modalMonthlyGross.toLocaleString()}`}</span></div>}
-                {modalPayeBreakdown.some(band => band.taxableAmount > 0) && <p className="text-xs font-medium text-gray-500">Calendar-month cumulative bands</p>}
-                {modalPayeBreakdown.filter(band => band.taxableAmount > 0).map((band, index) => <div key={index} className="flex justify-between text-xs text-gray-500"><span>{band.ratePercent}% on UGX {band.taxableAmount.toLocaleString()}</span><span>UGX {Math.round(band.taxAmount).toLocaleString()}</span></div>)}
+                {popupPayeSettings && <div className="flex justify-between text-xs text-gray-500"><span>PAYE settings used</span><span>{popupPayeSettings.versionLabel}</span></div>}
+                {modalPayeBreakdown.some(band => band.taxableAmount > 0) && <div className="mt-2 overflow-hidden rounded-md border border-gray-200 text-xs">
+                  <div className="grid grid-cols-[1fr_auto_1fr] gap-3 bg-gray-100 px-3 py-2 font-medium text-gray-600"><span>Amount in band (UGX)</span><span>Rate</span><span className="text-right">PAYE (UGX)</span></div>
+                  {modalPayeBreakdown.filter(band => band.taxableAmount > 0).map((band, index) => <div key={index} className="grid grid-cols-[1fr_auto_1fr] gap-3 border-t border-gray-200 px-3 py-2 text-gray-600"><span>{band.taxableAmount.toLocaleString()}</span><span>{band.ratePercent}%</span><span className="text-right">{Math.round(band.taxAmount).toLocaleString()}</span></div>)}
+                </div>}
                 {modalPreviouslyWithheld > 0 && <div className="flex justify-between text-xs text-gray-500"><span>PAYE already withheld this month</span><span>- UGX {modalPreviouslyWithheld.toLocaleString()}</span></div>}
                 <div className="border-t border-gray-200 pt-2 flex justify-between items-center text-sm">
                   <span className="font-semibold text-gray-800">Net Pay to Employee</span>
