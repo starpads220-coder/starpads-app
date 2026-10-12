@@ -39,6 +39,7 @@ import {
   computeNssfEmployee,
   computeNssfBusiness,
   calculateProgressivePaye,
+  DEFAULT_PAYE_BANDS,
   type PayeBand,
   type PayeBandResult,
 } from "@/lib/deductions";
@@ -457,12 +458,11 @@ export default function PaymentsPage() {
     if (!payEmployeeId) return;
     let cancelled = false;
     getDocFromServer(doc(db, "payeSettings", PAYE_SETTINGS_REF)).then(snapshot => {
-      if (!snapshot.exists()) throw new Error("PAYE Settings have not been configured. Configure them before confirming payments.");
-      const bands = snapshot.data().bands as PayeBand[] | undefined;
+      const bands = snapshot.exists() ? snapshot.data().bands as PayeBand[] | undefined : DEFAULT_PAYE_BANDS;
       if (!bands?.length) throw new Error("PAYE Settings contain no bands. Correct the settings before confirming payments.");
       calculateProgressivePaye(0, bands);
-      const updatedAt = snapshot.data().updatedAt;
-      const versionLabel = updatedAt?.toDate instanceof Function ? updatedAt.toDate().toLocaleString() : "Saved settings";
+      const updatedAt = snapshot.data()?.updatedAt;
+      const versionLabel = snapshot.exists() && updatedAt?.toDate instanceof Function ? updatedAt.toDate().toLocaleString() : "Initial PAYE structure";
       if (!cancelled) setPopupPayeSettings({ bands, signature: JSON.stringify(bands), versionLabel });
     }).catch(error => {
       if (!cancelled) setPayeSettingsError(error instanceof Error ? error.message : "PAYE Settings could not be loaded from the server.");
@@ -498,13 +498,12 @@ export default function PaymentsPage() {
       if (!isEmployeeActive(currentEmployee.data())) {
         throw new Error("This employee is deactivated. Reactivate them before confirming a new payment.");
       }
-      if (!currentSettings.exists()) throw new Error("PAYE Settings have not been configured. Payment confirmation is blocked.");
-      const currentBands = currentSettings.data().bands as PayeBand[] | undefined;
+      const currentBands = currentSettings.exists() ? currentSettings.data().bands as PayeBand[] | undefined : DEFAULT_PAYE_BANDS;
       if (!currentBands?.length) throw new Error("PAYE Settings contain no bands. Payment confirmation is blocked.");
       calculateProgressivePaye(0, currentBands);
       if (currentApplicable !== payeApplicable || !popupPayeSettings || JSON.stringify(currentBands) !== popupPayeSettings.signature) {
-        const updatedAt = currentSettings.data().updatedAt;
-        const versionLabel = updatedAt?.toDate instanceof Function ? updatedAt.toDate().toLocaleString() : "Saved settings";
+        const updatedAt = currentSettings.data()?.updatedAt;
+        const versionLabel = currentSettings.exists() && updatedAt?.toDate instanceof Function ? updatedAt.toDate().toLocaleString() : "Initial PAYE structure";
         setPopupPayeSettings({ bands: currentBands, signature: JSON.stringify(currentBands), versionLabel });
         throw new Error("PAYE settings or employee eligibility changed. The figures are being refreshed; review them before confirming again.");
       }

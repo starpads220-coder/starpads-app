@@ -12,11 +12,12 @@ import { PAYE_SETTINGS_REF, usePayeSettings } from "@/hooks/use-paye-settings";
 
 export default function PayeSettingsPage() {
   const { userRole } = useAuth();
-  const { bands, loading, error } = usePayeSettings();
+  const { bands, loading, error, configured } = usePayeSettings();
   const canEdit = ["ADMIN", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
   return <RouteGuard><div className="space-y-5">
     <div className="flex items-center justify-between gap-3"><div><h1 className="text-2xl font-bold">PAYE Settings</h1><p className="text-sm text-gray-500">Monthly progressive bands. Edits affect future confirmations only.</p></div><Link href="/payments" className="text-sm text-blue-700 hover:underline">Back to Payments</Link></div>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+    {!loading && !configured && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">These are the system’s initial PAYE bands. An Administrator or Financial Manager should click <strong>Save bands</strong> once to store and activate them in Firestore.</p>}
     {loading ? <p>Loading settings…</p> : <PayeSettingsEditor key={JSON.stringify(bands)} bands={bands} canEdit={canEdit} error={error} updatedBy={userRole?.uid ?? ""} />}
   </div></RouteGuard>;
 }

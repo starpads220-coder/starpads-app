@@ -11,6 +11,7 @@ export function usePayeSettings() {
   const [bands, setBands] = useState<PayeBand[]>(DEFAULT_PAYE_BANDS);
   const [loading, setLoading] = useState(!!db);
   const [error, setError] = useState<string | null>(null);
+  const [configured, setConfigured] = useState(false);
 
   useEffect(() => {
     if (!db) return;
@@ -19,6 +20,7 @@ export function usePayeSettings() {
         const saved = snapshot.data()?.bands as PayeBand[] | undefined;
         if (saved) calculateProgressivePaye(0, saved);
         setBands(saved ?? DEFAULT_PAYE_BANDS);
+        setConfigured(snapshot.exists());
         setError(null);
       } catch {
         setError("PAYE settings contain invalid bands. Payments are unavailable until corrected.");
@@ -27,5 +29,5 @@ export function usePayeSettings() {
     }, err => { setError(err.message); setLoading(false); });
   }, []);
 
-  return { bands, loading, error };
+  return { bands, loading, error, configured };
 }
