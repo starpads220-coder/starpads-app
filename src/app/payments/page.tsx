@@ -165,6 +165,7 @@ export default function PaymentsPage() {
   const [payProcessing, setPayProcessing] = useState(false);
   const [modalPayePreview, setModalPayePreview] = useState<{ key: string; tax: number; breakdown: PayeBandResult[]; previousWithheld: number; monthlyGross: number } | null>(null);
   const [popupPayeSettings, setPopupPayeSettings] = useState<{ bands: PayeBand[]; signature: string; versionLabel: string } | null>(null);
+  const [payeDetailsOpen, setPayeDetailsOpen] = useState(false);
   const [payeSettingsLoading, setPayeSettingsLoading] = useState(false);
   const [payeSettingsError, setPayeSettingsError] = useState<string | null>(null);
   const [paymentSourceCode, setPaymentSourceCode] = useState<"" | "1000" | "1030">("");
@@ -174,6 +175,7 @@ export default function PaymentsPage() {
     setModalPayePreview(null);
     setPayeSettingsError(null);
     setPayeSettingsLoading(true);
+    setPayeDetailsOpen(false);
     setPayEmployeeId(employeeId);
   };
 
@@ -427,9 +429,27 @@ export default function PaymentsPage() {
   const payeBands = popupPayeSettings?.bands ?? [];
   const payePreviewKey = `${previewEmployeeId ?? ""}|${previewGross ?? ""}|${payeApplicable}|${JSON.stringify(payeBands)}`;
   const modalPayeeTax = modalPayePreview?.key === payePreviewKey ? modalPayePreview.tax : null;
-  const modalPayeBreakdown = modalPayePreview?.key === payePreviewKey ? modalPayePreview.breakdown : [];
+  const modalPayeBreakdown = useMemo(() => modalPayePreview?.key === payePreviewKey ? modalPayePreview.breakdown : [], [modalPayePreview, payePreviewKey]);
   const modalPreviouslyWithheld = modalPayePreview?.key === payePreviewKey ? modalPayePreview.previousWithheld : 0;
-  const modalMonthlyGross = modalPayePreview?.key === payePreviewKey ? modalPayePreview.monthlyGross : null;
+  const payePaymentBandRows = useMemo(() => {
+    let previouslyWithheld = modalPreviouslyWithheld;
+    const rows = modalPayeBreakdown.flatMap(band => {
+      const bandTax = Math.round(band.taxAmount);
+      const consumed = Math.min(previouslyWithheld, bandTax);
+      previouslyWithheld -= consumed;
+      const paymentTax = bandTax - consumed;
+      if (paymentTax <= 0 || band.ratePercent <= 0) return [];
+      return [{ ratePercent: band.ratePercent, taxableAmount: Math.round(paymentTax * 100 / band.ratePercent), taxAmount: paymentTax }];
+    });
+    const displayedTotal = rows.reduce((sum, row) => sum + row.taxAmount, 0);
+    const difference = (modalPayeeTax ?? 0) - displayedTotal;
+    if (rows.length && difference) {
+      const last = rows[rows.length - 1];
+      last.taxAmount += difference;
+      last.taxableAmount = Math.round(last.taxAmount * 100 / last.ratePercent);
+    }
+    return rows;
+  }, [modalPayeBreakdown, modalPreviouslyWithheld, modalPayeeTax]);
 
   // The settings document is the sole source for Pay Due. Fetch it directly
   // from the server every time the popup opens; never calculate from defaults.
@@ -1333,48 +1353,30 @@ export default function PaymentsPage() {
             </div>
 
             <div className="p-6">
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 mb-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-sm font-semibold text-amber-800">Gross Earnings</span>
-                  <span className="text-xl font-bold text-amber-800">
-                    UGX {payEmployee.dueAmount.toLocaleString()}
-                  </span>
-                </div>
-                <p className="text-xs text-amber-600 mt-1">
-                  {payEmployee.dueEntries.length} entry{payEmployee.dueEntries.length !== 1 ? "ies" : "y"} to be paid
-                </p>
-              </div>
-
               <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-4 space-y-2">
+                <p className="text-right text-[10px] font-semibold uppercase tracking-wider text-gray-500">Amounts (UGX)</p>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600">Gross Earnings</span>
-                  <span className="font-semibold text-gray-900">UGX {payEmployee.dueAmount.toLocaleString()}</span>
+                  <span className="text-gray-600">Gross Pay <span className="ml-1 text-xs text-gray-400">({payEmployee.dueEntries.length} {payEmployee.dueEntries.length === 1 ? "entry" : "entries"})</span></span>
+                  <span className="font-semibold text-gray-900 tabular-nums">{payEmployee.dueAmount.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600">NSSF Employee Deduction (5%)</span>
-                  <span className="font-semibold text-red-600">- UGX {computeNssfEmployee(payEmployee.dueAmount).toLocaleString()}</span>
+                  <span className="text-gray-600">NSSF (Employee) — deducted from pay</span>
+                  <span className="font-semibold text-red-600 tabular-nums">- {computeNssfEmployee(payEmployee.dueAmount).toLocaleString()}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-gray-600">PAYE {payeApplicable ? "(progressive monthly bands)" : "(not applicable)"}</span>
-                  <span className="font-semibold text-red-600">- UGX {modalPayeeTax === null ? "Calculating…" : modalPayeeTax.toLocaleString()}</span>
-                </div>
-                {payeApplicable && <div className="flex justify-between text-xs font-medium text-gray-500"><span>Total gross earned this calendar month</span><span>{modalMonthlyGross === null ? "Calculating…" : `UGX ${modalMonthlyGross.toLocaleString()}`}</span></div>}
-                {popupPayeSettings && <div className="flex justify-between text-xs text-gray-500"><span>PAYE settings used</span><span>{popupPayeSettings.versionLabel}</span></div>}
-                {modalPayeBreakdown.some(band => band.taxableAmount > 0) && <div className="mt-2 overflow-hidden rounded-md border border-gray-200 text-xs">
-                  <div className="grid grid-cols-[1fr_auto_1fr] gap-3 bg-gray-100 px-3 py-2 font-medium text-gray-600"><span>Amount in band (UGX)</span><span>Rate</span><span className="text-right">PAYE (UGX)</span></div>
-                  {modalPayeBreakdown.filter(band => band.taxableAmount > 0).map((band, index) => <div key={index} className="grid grid-cols-[1fr_auto_1fr] gap-3 border-t border-gray-200 px-3 py-2 text-gray-600"><span>{band.taxableAmount.toLocaleString()}</span><span>{band.ratePercent}%</span><span className="text-right">{Math.round(band.taxAmount).toLocaleString()}</span></div>)}
+                {payeApplicable ? <div className="flex justify-between items-center text-sm"><span className="text-gray-600">PAYE</span><span className="font-semibold text-red-600 tabular-nums">- {modalPayeeTax === null ? "Calculating…" : modalPayeeTax.toLocaleString()}</span></div> : <div className="flex justify-between items-center text-sm"><span className="text-gray-600">PAYE</span><span className="font-medium text-gray-500">Not applicable</span></div>}
+                {payeApplicable && modalPayeeTax !== null && modalPayeeTax > 0 && <div className="rounded-md border border-gray-200 bg-white">
+                  <button type="button" aria-expanded={payeDetailsOpen} onClick={() => setPayeDetailsOpen(open => !open)} className="flex w-full items-center justify-between px-3 py-2 text-left text-xs font-medium text-blue-700"><span>How PAYE was calculated</span><span aria-hidden="true">{payeDetailsOpen ? "▲" : "▼"}</span></button>
+                  {payeDetailsOpen && <div className="overflow-x-auto border-t border-gray-200"><div className="min-w-[360px]"><div className="grid grid-cols-[1fr_auto_1fr] gap-3 bg-gray-50 px-3 py-2 text-xs font-medium text-gray-600"><span>Amount in band (UGX)</span><span>Rate</span><span className="text-right">PAYE (UGX)</span></div>{payePaymentBandRows.map((band, index) => <div key={index} className="grid grid-cols-[1fr_auto_1fr] gap-3 border-t border-gray-100 px-3 py-2 text-xs text-gray-600"><span className="tabular-nums">{band.taxableAmount.toLocaleString()}</span><span>{band.ratePercent}%</span><span className="text-right tabular-nums">{band.taxAmount.toLocaleString()}</span></div>)}</div></div>}
                 </div>}
-                {modalPreviouslyWithheld > 0 && <div className="flex justify-between text-xs text-gray-500"><span>PAYE already withheld this month</span><span>- UGX {modalPreviouslyWithheld.toLocaleString()}</span></div>}
                 <div className="border-t border-gray-200 pt-2 flex justify-between items-center text-sm">
                   <span className="font-semibold text-gray-800">Net Pay to Employee</span>
-                  <span className="text-lg font-bold text-green-600">
-                    {modalPayeeTax === null ? "Calculating…" : `UGX ${(payEmployee.dueAmount - computeNssfEmployee(payEmployee.dueAmount) - modalPayeeTax).toLocaleString()}`}
-                  </span>
+                  <span className="text-lg font-bold text-green-600 tabular-nums">{modalPayeeTax === null ? "Calculating…" : (payEmployee.dueAmount - computeNssfEmployee(payEmployee.dueAmount) - modalPayeeTax).toLocaleString()}</span>
                 </div>
                 <div className="border-t border-dashed border-gray-200 pt-2 flex justify-between items-center text-sm">
-                  <span className="text-gray-500 italic">NSSF Business Contribution (10% — paid by employer)</span>
-                  <span className="font-semibold text-blue-600">UGX {computeNssfBusiness(payEmployee.dueAmount).toLocaleString()}</span>
+                  <span className="text-gray-500 italic">NSSF (Employer) — added and paid by employer</span>
+                  <span className="font-semibold text-blue-600 tabular-nums">{computeNssfBusiness(payEmployee.dueAmount).toLocaleString()}</span>
                 </div>
+                <div className="flex justify-between items-center text-sm"><span className="font-semibold text-gray-700">Total cost to the business</span><span className="font-semibold text-gray-900 tabular-nums">{(payEmployee.dueAmount + computeNssfBusiness(payEmployee.dueAmount)).toLocaleString()}</span></div>
               </div>
               <label className="block text-sm font-medium text-gray-700 mb-4">Pay from
                 <select required value={paymentSourceCode} onChange={event => setPaymentSourceCode(event.target.value as "" | "1000" | "1030")} className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2">
