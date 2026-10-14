@@ -44,6 +44,7 @@ import { ReportCard } from "@/components/reports/ReportCard";
 import { ChartCard } from "@/components/ui/ChartCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import { isEmployeeActive } from "@/lib/employees";
+import { downloadResponse } from "@/lib/file-download";
 
 const SalesCharts = dynamic(() => import("@/components/sales/SalesCharts"), {
   ssr: false,
@@ -800,17 +801,7 @@ export default function SalesPage() {
       periodLabel: selection.periodLabel,
     });
     const res = await fetch(`/api/reports?${params}`);
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `sales-report-${selection.startDate}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await downloadResponse(res, `Sales-Report_${selection.startDate}_to_${selection.endDate}.pdf`, "Sales report");
   }, []);
 
   return (

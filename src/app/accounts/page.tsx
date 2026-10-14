@@ -17,6 +17,8 @@ import { ACCOUNTS, ACCOUNT_GROUPS, PRODUCTION_COST_ENTRY_LINES, SETTLEMENT_CODES
 import { buildFinancialStatements, type ConfirmedLaborPayment } from "@/lib/financial-statements";
 import { accountPeriodError, addCalendarDays, comparisonAccountPeriods, formatAccountDate, resolveAccountPeriod, todayInEat, type AccountPeriodKey } from "@/lib/account-period";
 import type { AccountsPdfSection } from "@/components/reports/AccountsStatementPDF";
+import { showToast } from "@/components/ui/Toast";
+import { downloadBlob } from "@/lib/file-download";
 
 type AccountView = "income" | "balance" | "cashflow" | "entries";
 
@@ -73,7 +75,8 @@ export default function AccountsPage() {
     });
     const expenseRows = expenses.data.flatMap(entry => {
       const accounting = resolveAccounting(entry, "expense");
-      return accounting && SETTLEMENT_CODES.includes(accounting.settlementCode) ? [{ id: `expense-${entry.id}`, date: entry.date, source: "Expense", description: entry.description || accounting.accountName, account: cashAccountName(accounting.settlementCode), amount: -(Number(entry.amountUgx) || 0) }] : [];
+      const cashAmount = entry.payrollExpenseVersion === 2 ? Number(entry.netPayAmount) || 0 : Number(entry.amountUgx) || 0;
+      return accounting && SETTLEMENT_CODES.includes(accounting.settlementCode) ? [{ id: `expense-${entry.id}`, date: entry.date, source: "Expense", description: entry.description || accounting.accountName, account: cashAccountName(accounting.settlementCode), amount: -cashAmount }] : [];
     });
     const productionRows = productionCosts.data.map(entry => ({ id: `production-${entry.id}`, date: entry.date, source: "Production cost", description: entry.description, account: cashAccountName(entry.settlementCode), amount: -(Number(entry.amount) || 0) }));
     const payrollRows = payments.data.filter(payment => payment.payrollVersion === 2 && payment.status === "paid" && payment.paymentSourceCode).map(payment => ({ id: `payroll-${payment.id}`, date: payment.paidDate, source: "Payroll", description: "Net wages paid", account: cashAccountName(payment.paymentSourceCode!), amount: -(Number(payment.netPayAmount) || 0) }));
@@ -184,12 +187,10 @@ export default function AccountsPage() {
       const [{ pdf }, { AccountsStatementPDF }] = await Promise.all([import("@react-pdf/renderer"), import("@/components/reports/AccountsStatementPDF")]);
       const pdfPeriod = view === "balance" ? `As at ${formatAccountDate(end)}` : selectedPeriod.label;
       const blob = await pdf(<AccountsStatementPDF title={reportTitle} period={pdfPeriod} sections={pdfSections} />).toBlob();
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${view}-statement-${start}-to-${end}.pdf`;
-      link.click();
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `${reportTitle.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "")}_${start}_to_${end}.pdf`);
+      showToast(`${reportTitle} downloaded successfully.`, "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : `Could not download ${reportTitle}.`, "error");
     } finally {
       setGeneratingPdf(false);
     }

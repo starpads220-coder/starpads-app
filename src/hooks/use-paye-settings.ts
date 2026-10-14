@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { doc, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { DEFAULT_PAYE_BANDS, type PayeBand, calculateProgressivePaye } from "@/lib/deductions";
+import { DEFAULT_NSSF_EMPLOYEE_RATE_PERCENT, DEFAULT_NSSF_EMPLOYER_RATE_PERCENT, DEFAULT_PAYE_BANDS, type PayeBand, calculateProgressivePaye } from "@/lib/deductions";
 
 export const PAYE_SETTINGS_REF = "current";
 
@@ -12,6 +12,8 @@ export function usePayeSettings() {
   const [loading, setLoading] = useState(!!db);
   const [error, setError] = useState<string | null>(null);
   const [configured, setConfigured] = useState(false);
+  const [nssfEmployeeRatePercent, setNssfEmployeeRatePercent] = useState(DEFAULT_NSSF_EMPLOYEE_RATE_PERCENT);
+  const [nssfEmployerRatePercent, setNssfEmployerRatePercent] = useState(DEFAULT_NSSF_EMPLOYER_RATE_PERCENT);
 
   useEffect(() => {
     if (!db) return;
@@ -20,6 +22,8 @@ export function usePayeSettings() {
         const saved = snapshot.data()?.bands as PayeBand[] | undefined;
         if (saved) calculateProgressivePaye(0, saved);
         setBands(saved ?? DEFAULT_PAYE_BANDS);
+        setNssfEmployeeRatePercent(Number(snapshot.data()?.nssfEmployeeRatePercent) || DEFAULT_NSSF_EMPLOYEE_RATE_PERCENT);
+        setNssfEmployerRatePercent(Number(snapshot.data()?.nssfEmployerRatePercent) || DEFAULT_NSSF_EMPLOYER_RATE_PERCENT);
         setConfigured(snapshot.exists());
         setError(null);
       } catch {
@@ -29,5 +33,5 @@ export function usePayeSettings() {
     }, err => { setError(err.message); setLoading(false); });
   }, []);
 
-  return { bands, loading, error, configured };
+  return { bands, nssfEmployeeRatePercent, nssfEmployerRatePercent, loading, error, configured };
 }

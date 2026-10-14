@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from "react";
 import { PeriodSelector, type PeriodSelection, getDefaultSelection } from "./PeriodSelector";
+import { showToast } from "@/components/ui/Toast";
 
 interface ReportCardProps {
   title: string;
@@ -17,10 +18,13 @@ export function ReportCard({ title, subtitle, onGenerate }: ReportCardProps) {
     setGenerating(true);
     try {
       await onGenerate(selection);
+      showToast(`${title} downloaded successfully.`, "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : `${title} could not be downloaded.`, "error");
     } finally {
       setGenerating(false);
     }
-  }, [selection, onGenerate]);
+  }, [selection, onGenerate, title]);
 
   return (
     <div className="rounded-lg border border-gray-200 bg-white p-6 shadow-sm">

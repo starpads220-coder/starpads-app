@@ -49,6 +49,7 @@ import { NssfCard } from "@/components/payments/NssfCard";
 import { PayeeCard } from "@/components/payments/PayeeCard";
 import { StatutoryRemittancesCard } from "@/components/payments/StatutoryRemittancesCard";
 import { isEmployeeActive } from "@/lib/employees";
+import { downloadBlob, downloadResponse } from "@/lib/file-download";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
 type ActiveTab = "employees" | "dates" | "due";
@@ -541,6 +542,7 @@ export default function PaymentsPage() {
         payeApplicable: currentApplicable,
         paymentSourceCode,
         payrollVersion: 2,
+        payrollAccountingVersion: 3,
         netPayAmount,
         status: "paid",
         paidDate: todayStr,
@@ -594,13 +596,7 @@ export default function PaymentsPage() {
           />
         ).toBlob();
 
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = `receipt-${receiptNumber}.pdf`;
-        a.click();
-        URL.revokeObjectURL(url);
-        setTimeout(() => URL.revokeObjectURL(url), 10000);
+        downloadBlob(blob, `Payment-Receipt_${receiptNumber}.pdf`);
       } catch {
         showToast("Receipt PDF could not be generated, but the payment was recorded successfully.", "info");
       }
@@ -651,17 +647,7 @@ export default function PaymentsPage() {
       periodLabel: selection.periodLabel,
     });
     const res = await fetch(`/api/reports?${params}`);
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `payments-report-${selection.startDate}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await downloadResponse(res, `Payments-Report_${selection.startDate}_to_${selection.endDate}.pdf`, "Payments report");
   }, []);
 
   const handleGenerateNssfReport = useCallback(async (selection: PeriodSelection) => {
@@ -673,17 +659,7 @@ export default function PaymentsPage() {
       periodLabel: selection.periodLabel,
     });
     const res = await fetch(`/api/reports?${params}`);
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`NSSF report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `nssf-report-${selection.startDate}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await downloadResponse(res, `NSSF-Report_${selection.startDate}_to_${selection.endDate}.pdf`, "NSSF report");
   }, []);
 
   const handleGeneratePayeeReport = useCallback(async (selection: PeriodSelection) => {
@@ -695,17 +671,7 @@ export default function PaymentsPage() {
       periodLabel: selection.periodLabel,
     });
     const res = await fetch(`/api/reports?${params}`);
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`PAYEE report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `payee-report-${selection.startDate}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await downloadResponse(res, `PAYE-Report_${selection.startDate}_to_${selection.endDate}.pdf`, "PAYE report");
   }, []);
 
   if (entriesLoading) {

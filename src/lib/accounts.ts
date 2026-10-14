@@ -72,7 +72,7 @@ export function validateAccounting(value: AccountingSelection, kind: "sale" | "e
   if (!allowed.includes(value.accountGroup) || !value.accountName.trim() || (!known && !value.accountCode.startsWith("custom:")) || (known && known.group !== value.accountGroup) || (!nonCashDepreciation && !SETTLEMENT_CODES.includes(value.settlementCode)) || (needsDetail && !value.accountDetail?.trim())) throw new Error(needsDetail ? "Enter the specific direct material or direct labour details." : nonCashDepreciation ? "Select the Depreciation account." : "Select an account / subcategory and cash/bank account.");
   return { ...value, accountName: value.accountCode === "4082" ? "Trainings" : value.accountName.trim(), accountDetail: value.accountDetail?.trim() ?? "" };
 }
-export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number; paymentMethod?: string; description?: string; customerName?: string; category?: string; subcategory?: string; status?: string; paymentStatus?: string; amountReceived?: number; receivedAmount?: number; amountPaid?: number; paidAmount?: number }
+export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number; paymentMethod?: string; description?: string; customerName?: string; category?: string; subcategory?: string; status?: string; paymentStatus?: string; amountReceived?: number; receivedAmount?: number; amountPaid?: number; paidAmount?: number; payrollExpenseVersion?: number; employeeId?: string; employeeName?: string; grossAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number; netPayAmount?: number; totalBusinessCost?: number }
 export interface Journal {
   id: string;
   date: string;
@@ -110,7 +110,7 @@ export interface ProductionCostEntry {
 }
 export interface TaxEntry { id: string; date: string; description: string; amount: number }
 export interface PayrollProductionEntry { id: string; date: string; earningsUgx: number; paymentStatus?: string; paymentId?: string }
-export interface PayrollPaymentEntry { id: string; paidDate: string; status?: string; payrollVersion?: number; grossAmount?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number; paymentSourceCode?: string }
+export interface PayrollPaymentEntry { id: string; paidDate: string; status?: string; payrollVersion?: number; payrollAccountingVersion?: number; grossAmount?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number; paymentSourceCode?: string }
 export interface PayeRemittanceEntry { id: string; paymentDate: string; amount: number; paymentSourceCode: string }
 export interface NssfRemittanceEntry { id: string; paymentDate: string; amount: number; paymentSourceCode: string }
 export function isRawMaterialCarriageExpense(entry: LedgerSource): boolean {
@@ -152,6 +152,18 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
       const a = resolveAccounting(entry, kind);
       if (!a) { unclassified++; continue; }
       if (!a) continue;
+      if (kind === "expense" && entry.payrollExpenseVersion === 2 && a.accountCode === "6010") {
+        const gross = Number(entry.grossAmount) || 0;
+        const employerNssf = Number(entry.nssfBusinessContribution) || 0;
+        const net = Number(entry.netPayAmount) || 0;
+        const paye = Number(entry.payeeTax) || 0;
+        const employeeNssf = Number(entry.nssfEmployeeDeduction) || 0;
+        post(entry.date, "6010", a.settlementCode, net);
+        if (paye > 0) post(entry.date, "6010", "2125", paye);
+        if (employeeNssf + employerNssf > 0) post(entry.date, "6010", "2126", employeeNssf + employerNssf);
+        if (Math.abs(gross + employerNssf - net - paye - employeeNssf - employerNssf) > 0.005) unclassified++;
+        continue;
+      }
       const detailCode = kind === "expense" && ["5080", "5090"].includes(a.accountCode) && a.accountDetail?.trim()
         ? `detail:${a.accountCode}:${a.accountDetail.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
         : a.accountCode;
@@ -169,9 +181,9 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
   });
   // Unpaid wages are earned liabilities. New-format paid entries retain their
   // original accrual; payment then settles it. Legacy paid entries remain as-is.
-  const newPaymentIds = new Set(payrollPayments.filter(payment => payment.payrollVersion === 2).map(payment => payment.id));
+  const newPaymentIds = new Set(payrollPayments.filter(payment => payment.payrollVersion === 2 && payment.status === "paid").map(payment => payment.id));
   payrollEntries.forEach(entry => {
-    if (entry.paymentStatus === "paid" && !newPaymentIds.has(entry.paymentId ?? "")) return;
+    if (entry.paymentStatus !== "paid" || !newPaymentIds.has(entry.paymentId ?? "")) return;
     const gross = Number(entry.earningsUgx);
     if (gross > 0) post(entry.date, "5090", "2120", gross);
   });
@@ -184,8 +196,9 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
     if (net > 0) post(payment.paidDate, "2120", payment.paymentSourceCode!, net);
     if (paye > 0) post(payment.paidDate, "2120", "2125", paye);
     if (nssf > 0) post(payment.paidDate, "2120", "2126", nssf);
-    // The employer share is an additional payroll cost, not an employee deduction.
-    if (employerNssf > 0) post(payment.paidDate, "5090", "2126", employerNssf);
+    // Version 3 puts production employer NSSF in Direct Labour. Older confirmed
+    // payments keep their prior Salaries & Wages presentation.
+    if (employerNssf > 0) post(payment.paidDate, payment.payrollAccountingVersion === 3 ? "5090" : "6010", "2126", employerNssf);
   });
   // Remitting PAYE settles the withholding liability; it is not a second expense.
   payeRemittances.forEach(remittance => {

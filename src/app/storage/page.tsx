@@ -29,6 +29,7 @@ import { showToast } from "@/components/ui/Toast";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import { activeEmployeeOptions } from "@/lib/employees";
+import { downloadResponse } from "@/lib/file-download";
 
 const PADS_PER_PACK = 3;
 
@@ -528,17 +529,7 @@ export default function StoragePage() {
       periodLabel: selection.periodLabel,
     });
     const res = await fetch(`/api/reports?${params}`);
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `storage-report-${selection.startDate}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await downloadResponse(res, `Storage-Report_${selection.startDate}_to_${selection.endDate}.pdf`, "Storage report");
   }, []);
 
   return (

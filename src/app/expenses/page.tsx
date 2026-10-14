@@ -12,7 +12,7 @@ import {
 } from "firebase/firestore";
 import { useQueryClient } from "@tanstack/react-query";
 import { db } from "@/lib/firebase";
-import { Expense, ExpenseCategory } from "@/types";
+import { Expense, ExpenseCategory, Employee } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { ChartCard } from "@/components/ui/ChartCard";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
@@ -24,6 +24,9 @@ import { palette } from "@/components/charts";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import { isEmployeeActive } from "@/lib/employees";
+import { downloadResponse } from "@/lib/file-download";
+import { usePayeSettings } from "@/hooks/use-paye-settings";
+import { calculateProgressivePaye, computeNssfAtRate } from "@/lib/deductions";
 
 type AnalyticsPeriod = "day" | "week" | "month" | "12months" | "custom";
 
@@ -94,6 +97,7 @@ export default function ExpensesPage() {
   const [analyticsPeriod, setAnalyticsPeriod] = useState<AnalyticsPeriod>("month");
   const [customStart, setCustomStart] = useState("");
   const [customEnd, setCustomEnd] = useState("");
+  const { bands: payeBands, nssfEmployeeRatePercent, nssfEmployerRatePercent, loading: payrollSettingsLoading, error: payrollSettingsError } = usePayeSettings();
 
   const [form, setForm] = useState({
     date: new Date().toISOString().split("T")[0],
@@ -104,6 +108,7 @@ export default function ExpensesPage() {
     labourTotalPayments: 0,
     paidBy: "",
     receiptRef: "",
+    employeeId: "",
   });
 
   const { data: expenses = [], isLoading: loading } = useCollectionQuery<Expense>(
@@ -120,18 +125,25 @@ export default function ExpensesPage() {
     [expenses, periodBounds]
   );
 
-  const calculatedAmount = accounting.accountCode === "6010"
-    ? form.labourTotalPayments
-    : form.unitCost * form.itemCount;
   const isDepreciation = accounting.accountCode === "6200";
   const depreciationLikeRecords = useMemo(() => expenses.filter(expense => {
     if (expense.accounting?.accountCode === "6200") return false;
     return /depreciation/i.test(`${expense.accounting?.accountName ?? ""} ${expense.category ?? ""} ${expense.subcategory ?? ""} ${expense.description ?? ""}`);
   }), [expenses]);
 
-  const { data: employees = [] } = useCollectionQuery<{ id: string; name: string; isActive?: boolean; active?: boolean }>(
+  const { data: employees = [] } = useCollectionQuery<Employee>(
     "employees", [orderBy("name")], { staleTime: 10 * 60 * 1000 }
   );
+  const isSalaryExpense = accounting.accountCode === "6010";
+  const selectedSalaryEmployee = employees.find(employee => employee.id === form.employeeId);
+  const salaryGross = form.labourTotalPayments;
+  const salaryEmployeeNssf = isSalaryExpense ? computeNssfAtRate(salaryGross, nssfEmployeeRatePercent) : 0;
+  const salaryEmployerNssf = isSalaryExpense ? computeNssfAtRate(salaryGross, nssfEmployerRatePercent) : 0;
+  const salaryPayeResult = isSalaryExpense && selectedSalaryEmployee && selectedSalaryEmployee.payeApplicable !== false ? calculateProgressivePaye(salaryGross, payeBands) : { tax: 0, breakdown: [] };
+  const salaryNetPay = salaryGross - salaryEmployeeNssf - salaryPayeResult.tax;
+  const salaryTotalCost = salaryGross + salaryEmployerNssf;
+  const calculatedAmount = isSalaryExpense ? salaryTotalCost : form.unitCost * form.itemCount;
+  const otherEmployees = useMemo(() => employees.filter(employee => isEmployeeActive(employee) && employee.department !== "PRODUCTION"), [employees]);
   const expensePayers = useMemo(() => APPROVED_EXPENSE_PAYERS.flatMap(name => {
     const employee = employees.find(item => item.name.trim().toLowerCase() === name.toLowerCase());
     return employee && isEmployeeActive(employee) ? [{ id: employee.id, name: String(name) }] : [];
@@ -248,9 +260,27 @@ export default function ExpensesPage() {
     setFormSuccess(false);
     try {
       if (!Number.isFinite(calculatedAmount) || calculatedAmount <= 0) throw new Error("Enter an expense amount greater than zero.");
+      if (isSalaryExpense && payrollSettingsLoading) throw new Error("Payroll settings are still loading.");
+      if (isSalaryExpense && payrollSettingsError) throw new Error(payrollSettingsError);
+      if (isSalaryExpense && !selectedSalaryEmployee) throw new Error("Select an active non-production employee.");
       if (!isDepreciation && !expensePayers.some(person => person.id === form.paidBy)) throw new Error("Select an approved employee under Paid By.");
       if (!isDepreciation && !form.receiptRef.trim()) throw new Error("Enter a Payment Voucher No.");
       const validatedAccounting = validateAccounting(accounting, "expense");
+      const payrollFields = isSalaryExpense ? {
+        payrollExpenseVersion: 2 as const,
+        employeeId: selectedSalaryEmployee!.id,
+        employeeName: selectedSalaryEmployee!.name,
+        grossAmount: salaryGross,
+        payeeTax: salaryPayeResult.tax,
+        nssfEmployeeDeduction: salaryEmployeeNssf,
+        nssfBusinessContribution: salaryEmployerNssf,
+        netPayAmount: salaryNetPay,
+        totalBusinessCost: salaryTotalCost,
+        nssfEmployeeRatePercent,
+        nssfEmployerRatePercent,
+        payeApplicable: selectedSalaryEmployee!.payeApplicable !== false,
+        payeBandsApplied: payeBands,
+      } : {};
       await addDoc(collection(db, "expenses"), {
         accounting: validatedAccounting,
         ...form,
@@ -258,11 +288,12 @@ export default function ExpensesPage() {
         paidBy: isDepreciation ? "" : form.paidBy,
         receiptRef: isDepreciation ? "" : form.receiptRef.trim(),
         amountUgx: calculatedAmount,
+        ...payrollFields,
         createdAt: Timestamp.now(),
       });
       setForm({
         date: new Date().toISOString().split("T")[0],
-        description: "", amountUgx: 0, unitCost: 0, itemCount: 1, labourTotalPayments: 0, paidBy: "", receiptRef: "",
+        description: "", amountUgx: 0, unitCost: 0, itemCount: 1, labourTotalPayments: 0, paidBy: "", receiptRef: "", employeeId: "",
       });
       setFormSuccess(true);
       setAccounting({ ...emptyAccounting(), accountGroup: "Expenses" });
@@ -286,17 +317,7 @@ export default function ExpensesPage() {
       periodLabel: selection.periodLabel,
     });
     const res = await fetch(`/api/reports?${params}`);
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `expenses-report-${selection.startDate}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await downloadResponse(res, `Expenses-Report_${selection.startDate}_to_${selection.endDate}.pdf`, "Expenses report");
   }, []);
 
   return (
@@ -460,13 +481,18 @@ export default function ExpensesPage() {
             <input type="text" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })}
               required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
           </div>
-          {accounting.accountCode === "6010" ? (
+          {isSalaryExpense ? (<>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Total Payments (UGX)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Employee</label>
+              <select value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"><option value="">Select active non-production employee...</option>{otherEmployees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Gross Pay (UGX)</label>
               <input type="number" value={form.labourTotalPayments || ""} onChange={(e) => setForm({ ...form, labourTotalPayments: parseInt(e.target.value) || 0 })}
                 required min={0} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
             </div>
-          ) : <>
+            <div className="sm:col-span-2 lg:col-span-3 rounded-lg border bg-gray-50 p-4 text-sm space-y-1"><p>PAYE: UGX {salaryPayeResult.tax.toLocaleString()}</p><p>Employee NSSF ({nssfEmployeeRatePercent}%): UGX {salaryEmployeeNssf.toLocaleString()}</p><p>Net Pay: UGX {salaryNetPay.toLocaleString()}</p><p>Employer NSSF ({nssfEmployerRatePercent}%): UGX {salaryEmployerNssf.toLocaleString()}</p><p className="font-semibold">Total Cost: UGX {salaryTotalCost.toLocaleString()}</p></div>
+          </>) : <>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost (UGX)</label><input type="number" value={form.unitCost || ""} onChange={(e) => setForm({ ...form, unitCost: parseInt(e.target.value) || 0 })} required min={0} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Number of Items (Frequency)</label><input type="number" value={form.itemCount || ""} onChange={(e) => setForm({ ...form, itemCount: parseInt(e.target.value) || 0 })} required min={1} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" /></div>
           </>}

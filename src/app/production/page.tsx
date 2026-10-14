@@ -49,6 +49,7 @@ import { StandardBarChart } from "@/components/charts/StandardBarChart";
 import { palette, chartColors } from "@/components/charts";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
+import { downloadResponse } from "@/lib/file-download";
 import { activeEmployeeOptions, isEmployeeActive } from "@/lib/employees";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
@@ -640,17 +641,7 @@ const totalPackagedPads = useMemo(
       periodLabel: selection.periodLabel,
     });
     const res = await fetch(`/api/reports?${params}`);
-    if (!res.ok) {
-      const body = await res.text().catch(() => "");
-      throw new Error(`Report generation failed: ${res.status} ${body.replace(/<[^>]*>/g, "").slice(0, 200)}`);
-    }
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `production-report-${selection.startDate}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    await downloadResponse(res, `Production-Report_${selection.startDate}_to_${selection.endDate}.pdf`, "Production report");
   }, []);
 
   return (

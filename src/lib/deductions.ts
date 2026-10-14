@@ -69,6 +69,13 @@ export function computeNssfBusiness(grossAmount: number): number {
   return Math.round(grossAmount * 0.10);
 }
 
+export const DEFAULT_NSSF_EMPLOYEE_RATE_PERCENT = 5;
+export const DEFAULT_NSSF_EMPLOYER_RATE_PERCENT = 10;
+
+export function computeNssfAtRate(grossAmount: number, ratePercent: number): number {
+  return Math.round(grossAmount * ratePercent / 100);
+}
+
 export function computeAllDeductions(monthlyGross: number): DeductionBreakdown {
   const nssfEmployeeDeduction = computeNssfEmployee(monthlyGross);
   const nssfBusinessContribution = computeNssfBusiness(monthlyGross);

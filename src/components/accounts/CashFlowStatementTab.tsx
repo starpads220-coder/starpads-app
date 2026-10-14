@@ -33,7 +33,8 @@ export function CashFlowStatementTab({ statement, start, end }: { statement: Fin
         {row("Cash paid for other production costs", -statement.cashPaidForOtherProductionCosts, "paid-production", paidOpen ? "" : "hidden print:table-row")}
         <tr className={`border-t border-gray-100 ${paidOpen ? "" : "hidden print:table-row"}`}><td className="px-5 py-3 pl-8"><button type="button" aria-expanded={operatingExpensesOpen} onClick={() => setOperatingExpensesOpen(open => !open)} className="accounts-no-print text-blue-700 hover:underline">Cash paid for Operating Expenses <span aria-hidden="true">{operatingExpensesOpen ? "▴" : "▾"}</span></button><span className="hidden print:inline">Cash paid for Operating Expenses</span></td><td className="px-5 py-3 text-right tabular-nums">{formatUgx(-statement.cashPaidForOperatingExpenses)}</td></tr>
         {statement.operatingExpenseCashLines.map(line => row(`  ${line.name}`, -line.amount, `paid-operating-${line.name}`, paidOpen && operatingExpensesOpen ? "" : "hidden print:table-row"))}
-        {row("Cash paid for Taxes", -statement.cashPaidForTaxes, "paid-taxes", paidOpen ? "" : "hidden print:table-row")}
+        {row("Cash paid for PAYE remittances", -statement.cashPaidForPayeRemittances, "paid-paye", paidOpen ? "" : "hidden print:table-row")}
+        {row("Cash paid for NSSF remittances", -statement.cashPaidForNssfRemittances, "paid-nssf", paidOpen ? "" : "hidden print:table-row")}
         {total("Total Cash Paid", -statement.totalCashPaid)}
         {total("Net Cash from Operating Activities", statement.operatingCashFlow)}
         {section("B. Cash Flows from Investing Activities")}

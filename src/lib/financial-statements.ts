@@ -2,8 +2,9 @@ import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, productionCos
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
 const OPERATING_EXPENSE_NAMES = ["Office and Administration", "Legal and Professional Fees", "Salaries and Wages", "Fuel and Transport", "Data and Communication Costs", "Utilities", "Machine Repair and Maintenance", "Sundries", "Other Costs", "Small Tools and Equipment", "Depreciation"];
-export interface ConfirmedLaborPayment { id: string; paidDate: string; status?: string; grossAmount?: number; totalAmount?: number; amountUgx?: number; payrollVersion?: number; netPayAmount?: number; nssfBusinessContribution?: number }
+export interface ConfirmedLaborPayment { id: string; paidDate: string; status?: string; grossAmount?: number; totalAmount?: number; amountUgx?: number; payrollVersion?: number; payrollAccountingVersion?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number }
 export interface CashFlowLine { name: string; amount: number }
+export interface PayrollStatementBreakdown { netPay: number; paye: number; employeeNssf: number; employerNssf: number; notItemised: number }
 
 export interface FinancialStatements {
   revenue: number;
@@ -17,10 +18,12 @@ export interface FinancialStatements {
   purchasesOfRawMaterials: number;
   carriageInwards: number;
   directLabor: number;
+  directLaborBreakdown: PayrollStatementBreakdown;
   otherProductionCosts: number;
   grossProfit: number;
   operatingExpenses: number;
   operatingExpenseLines: Array<{ name: string; amount: number }>;
+  salariesWagesBreakdown: PayrollStatementBreakdown;
   incomeBeforeTaxes: number;
   taxDeductions: number;
   netIncome: number;
@@ -54,6 +57,8 @@ export interface FinancialStatements {
   cashPaidForOtherProductionCosts: number;
   cashPaidForOperatingExpenses: number;
   cashPaidForTaxes: number;
+  cashPaidForPayeRemittances: number;
+  cashPaidForNssfRemittances: number;
   totalCashPaid: number;
   cashActivityDifference: number;
   transfersNetEffect: number;
@@ -68,6 +73,7 @@ const saleAmount = (entry: LedgerSource) => Number(entry.totalAmount) || 0;
 const expenseAmount = (entry: LedgerSource) => Number(entry.amountUgx) || 0;
 const unpaidStatuses = new Set(["unpaid", "pending", "credit", "due", "outstanding", "not_paid"]);
 const actualCashAmount = (entry: LedgerSource, kind: "sale" | "expense") => {
+  if (kind === "expense" && entry.payrollExpenseVersion === 2) return Math.max(0, Number(entry.netPayAmount) || 0);
   const explicit = kind === "sale" ? entry.amountReceived ?? entry.receivedAmount : entry.amountPaid ?? entry.paidAmount;
   if (explicit !== undefined && Number.isFinite(Number(explicit))) return Math.max(0, Number(explicit));
   const status = String(entry.paymentStatus ?? entry.status ?? "").trim().toLowerCase().replaceAll(" ", "_");
@@ -141,9 +147,18 @@ export function buildFinancialStatements(
   const carriageInwards = periodExpenses.filter(isRawMaterialCarriageExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0) + productionCostTotal("carriage_inwards");
   // Income Statement labor is period activity by confirmation date. Production
   // entries remain in the Balance Sheet accrual ledger and are not re-posted.
-  const directLabor = payments
-    .filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end)
-    .reduce((sum, entry) => sum + (Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0) + (Number(entry.nssfBusinessContribution) || 0), 0);
+  const confirmedPeriodPayments = payments.filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end);
+  const directLaborBreakdown = confirmedPeriodPayments.reduce<PayrollStatementBreakdown>((sum, entry) => {
+    const gross = Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0;
+    const paye = Number(entry.payeeTax) || 0;
+    const employeeNssf = Number(entry.nssfEmployeeDeduction) || 0;
+    const employerNssf = entry.payrollAccountingVersion === 3 ? Number(entry.nssfBusinessContribution) || 0 : 0;
+    sum.netPay += Number(entry.netPayAmount) || Math.max(0, gross - paye - employeeNssf);
+    sum.paye += paye; sum.employeeNssf += employeeNssf; sum.employerNssf += employerNssf;
+    return sum;
+  }, { netPay: 0, paye: 0, employeeNssf: 0, employerNssf: 0, notItemised: 0 });
+  const directLabor = directLaborBreakdown.netPay + directLaborBreakdown.paye + directLaborBreakdown.employeeNssf + directLaborBreakdown.employerNssf;
+  const legacyProductionEmployerNssf = confirmedPeriodPayments.filter(entry => entry.payrollAccountingVersion !== 3).reduce((sum, entry) => sum + (Number(entry.nssfBusinessContribution) || 0), 0);
   const recordedOtherCosts = productionCostTotal("other_costs");
   const legacyOtherCosts = periodExpenses.filter(isOtherProductionExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const otherProductionCosts = recordedOtherCosts + legacyOtherCosts;
@@ -151,11 +166,26 @@ export function buildFinancialStatements(
   const operatingExpenseEntries = periodExpenses.filter(entry => !isRawMaterialPurchase(entry) && !isRawMaterialCarriageExpense(entry) && !isDirectLaborExpense(entry) && !isOtherProductionExpense(entry) && !isTaxExpense(entry));
   const operatingTotals = new Map(OPERATING_EXPENSE_NAMES.map(name => [name.toLocaleLowerCase(), { name, amount: 0 }]));
   for (const entry of operatingExpenseEntries) {
-    const name = entry.accounting?.accountName?.trim() || entry.subcategory?.trim() || entry.category?.trim() || "Uncategorised expenses";
+    const name = expenseCode(entry) === "6010"
+      ? "Salaries and Wages"
+      : entry.accounting?.accountName?.trim() || entry.subcategory?.trim() || entry.category?.trim() || "Uncategorised expenses";
     const key = name.toLocaleLowerCase();
     const previous = operatingTotals.get(key);
     operatingTotals.set(key, { name: previous?.name ?? name, amount: (previous?.amount ?? 0) + expenseAmount(entry) });
   }
+  const salaryExpenseEntries = operatingExpenseEntries.filter(entry => expenseCode(entry) === "6010");
+  const salariesWagesBreakdown = salaryExpenseEntries.reduce<PayrollStatementBreakdown>((sum, entry) => {
+    if (entry.payrollExpenseVersion === 2) {
+      sum.netPay += Number(entry.netPayAmount) || 0;
+      sum.paye += Number(entry.payeeTax) || 0;
+      sum.employeeNssf += Number(entry.nssfEmployeeDeduction) || 0;
+      sum.employerNssf += Number(entry.nssfBusinessContribution) || 0;
+    } else sum.notItemised += expenseAmount(entry);
+    return sum;
+  }, { netPay: 0, paye: 0, employeeNssf: 0, employerNssf: legacyProductionEmployerNssf, notItemised: 0 });
+  const salariesAndWagesKey = "salaries and wages";
+  const salariesAndWages = operatingTotals.get(salariesAndWagesKey)!;
+  operatingTotals.set(salariesAndWagesKey, { ...salariesAndWages, amount: salariesAndWages.amount + legacyProductionEmployerNssf });
   const operatingExpenseLines = [...operatingTotals.values()];
   const operatingExpenses = operatingExpenseLines.reduce((sum, line) => sum + line.amount, 0);
   const grossProfit = revenue - costOfProduction;
@@ -194,7 +224,9 @@ export function buildFinancialStatements(
   const cashPaidForDirectLabor = payments.filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.netPayAmount) || 0), 0);
   const cashPaidForOtherProductionCosts = recordedOtherCosts;
   const cashPaidForOperatingExpenses = [...operatingCashExpenses.values()].reduce((sum, line) => sum + line.amount, 0);
-  const cashPaidForTaxes = [...payeRemittances, ...nssfRemittances].filter(entry => entry.paymentDate >= start && entry.paymentDate <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const cashPaidForPayeRemittances = payeRemittances.filter(entry => entry.paymentDate >= start && entry.paymentDate <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const cashPaidForNssfRemittances = nssfRemittances.filter(entry => entry.paymentDate >= start && entry.paymentDate <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const cashPaidForTaxes = cashPaidForPayeRemittances + cashPaidForNssfRemittances;
 
   const investing = new Map<string, CashFlowLine>();
   const financing = new Map<string, CashFlowLine>();
@@ -272,10 +304,12 @@ export function buildFinancialStatements(
     purchasesOfRawMaterials,
     carriageInwards,
     directLabor,
+    directLaborBreakdown,
     otherProductionCosts,
     grossProfit,
     operatingExpenses,
     operatingExpenseLines,
+    salariesWagesBreakdown,
     incomeBeforeTaxes,
     taxDeductions,
     netIncome,
@@ -309,6 +343,8 @@ export function buildFinancialStatements(
     cashPaidForOtherProductionCosts,
     cashPaidForOperatingExpenses,
     cashPaidForTaxes,
+    cashPaidForPayeRemittances,
+    cashPaidForNssfRemittances,
     totalCashPaid,
     cashActivityDifference,
     transfersNetEffect,

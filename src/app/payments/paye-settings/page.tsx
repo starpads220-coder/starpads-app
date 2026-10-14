@@ -12,18 +12,20 @@ import { PAYE_SETTINGS_REF, usePayeSettings } from "@/hooks/use-paye-settings";
 
 export default function PayeSettingsPage() {
   const { userRole } = useAuth();
-  const { bands, loading, error, configured } = usePayeSettings();
+  const { bands, nssfEmployeeRatePercent, nssfEmployerRatePercent, loading, error, configured } = usePayeSettings();
   const canEdit = ["ADMIN", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
   return <RouteGuard><div className="space-y-5">
     <div className="flex items-center justify-between gap-3"><div><h1 className="text-2xl font-bold">PAYE Settings</h1><p className="text-sm text-gray-500">Monthly progressive bands. Edits affect future confirmations only.</p></div><Link href="/payments" className="text-sm text-blue-700 hover:underline">Back to Payments</Link></div>
     {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}
     {!loading && !configured && <p className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">These are the system’s initial PAYE bands. An Administrator or Financial Manager should click <strong>Save bands</strong> once to store and activate them in Firestore.</p>}
-    {loading ? <p>Loading settings…</p> : <PayeSettingsEditor key={JSON.stringify(bands)} bands={bands} canEdit={canEdit} error={error} updatedBy={userRole?.uid ?? ""} />}
+    {loading ? <p>Loading settings…</p> : <PayeSettingsEditor key={`${JSON.stringify(bands)}-${nssfEmployeeRatePercent}-${nssfEmployerRatePercent}`} bands={bands} nssfEmployeeRatePercent={nssfEmployeeRatePercent} nssfEmployerRatePercent={nssfEmployerRatePercent} canEdit={canEdit} error={error} updatedBy={userRole?.uid ?? ""} />}
   </div></RouteGuard>;
 }
 
-function PayeSettingsEditor({ bands, canEdit, error, updatedBy }: { bands: PayeBand[]; canEdit: boolean; error: string | null; updatedBy: string }) {
+function PayeSettingsEditor({ bands, nssfEmployeeRatePercent, nssfEmployerRatePercent, canEdit, error, updatedBy }: { bands: PayeBand[]; nssfEmployeeRatePercent: number; nssfEmployerRatePercent: number; canEdit: boolean; error: string | null; updatedBy: string }) {
   const [draft, setDraft] = useState<PayeBand[]>(bands);
+  const [employeeNssfRate, setEmployeeNssfRate] = useState(nssfEmployeeRatePercent);
+  const [employerNssfRate, setEmployerNssfRate] = useState(nssfEmployerRatePercent);
   const [saving, setSaving] = useState(false);
 
   const updateBand = (index: number, key: keyof PayeBand, value: number | null) => {
@@ -33,9 +35,12 @@ function PayeSettingsEditor({ bands, canEdit, error, updatedBy }: { bands: PayeB
   const save = async () => {
     try {
       calculateProgressivePaye(0, draft);
+      if (![employeeNssfRate, employerNssfRate].every(rate => Number.isFinite(rate) && rate >= 0 && rate <= 100)) throw new Error("NSSF rates must be between 0% and 100%.");
       setSaving(true);
       await setDoc(doc(db, "payeSettings", PAYE_SETTINGS_REF), {
         bands: draft,
+        nssfEmployeeRatePercent: employeeNssfRate,
+        nssfEmployerRatePercent: employerNssfRate,
         updatedAt: serverTimestamp(),
         updatedBy,
       });
@@ -48,6 +53,7 @@ function PayeSettingsEditor({ bands, canEdit, error, updatedBy }: { bands: PayeB
   };
 
   return <div className="rounded-xl border bg-white p-5 space-y-4">
+        <div className="border-b pb-4"><h2 className="font-semibold">NSSF rates for new Salaries and Wages entries</h2><p className="text-sm text-gray-500">Production payment calculations remain unchanged.</p><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="text-sm">Employee NSSF (%)<input type="number" min="0" max="100" step="0.01" disabled={!canEdit} value={employeeNssfRate} onChange={e => setEmployeeNssfRate(Number(e.target.value))} className="mt-1 w-full rounded-md border p-2" /></label><label className="text-sm">Employer NSSF (%)<input type="number" min="0" max="100" step="0.01" disabled={!canEdit} value={employerNssfRate} onChange={e => setEmployerNssfRate(Number(e.target.value))} className="mt-1 w-full rounded-md border p-2" /></label></div></div>
         <div className="grid grid-cols-3 gap-3 text-sm font-semibold text-gray-600"><span>From (UGX)</span><span>To (UGX)</span><span>Rate (%)</span></div>
         {draft.map((band, index) => <div key={index} className="grid grid-cols-3 gap-3 items-center">
           <span className="text-sm">{index === 0 ? "0" : ((draft[index - 1].upperLimit ?? 0) + 1).toLocaleString()}</span>

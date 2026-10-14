@@ -167,8 +167,7 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // PAYE remittances are immutable tax-liability settlements. The balance
-    // control document is updated in the same transaction to prevent overpayment.
+    // PAYE remittances and their balance control document are changed together.
     match /payeRemittances/{remittanceId} {
       allow read: if isAuthenticated();
       allow create: if hasAnyRole(['ADMIN', 'FINANCIAL_MANAGER'])
@@ -182,7 +181,15 @@ service cloud.firestore {
         && request.resource.data.uraReference.size() > 0
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdByRole == getUserRole();
-      allow update, delete: if false;
+      allow update: if hasAnyRole(['ADMIN', 'FINANCIAL_MANAGER'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentDate', 'returnPeriod', 'amount', 'paymentSourceCode', 'uraReference', 'notes', 'updatedBy', 'updatedAt'])
+        && request.resource.data.amount is number
+        && request.resource.data.amount > 0
+        && request.resource.data.paymentSourceCode in ['1000', '1030']
+        && request.resource.data.uraReference is string
+        && request.resource.data.uraReference.size() > 0
+        && request.resource.data.updatedBy == request.auth.uid;
+      allow delete: if hasAnyRole(['ADMIN', 'FINANCIAL_MANAGER']);
     }
 
     match /payeLiabilityBalances/{balanceId} {

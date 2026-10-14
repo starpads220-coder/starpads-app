@@ -220,6 +220,19 @@ export interface Expense {
   paidBy: string;
   receiptRef?: string;
   notes?: string;
+  payrollExpenseVersion?: 2;
+  employeeId?: string;
+  employeeName?: string;
+  grossAmount?: number;
+  payeeTax?: number;
+  nssfEmployeeDeduction?: number;
+  nssfBusinessContribution?: number;
+  netPayAmount?: number;
+  totalBusinessCost?: number;
+  nssfEmployeeRatePercent?: number;
+  nssfEmployerRatePercent?: number;
+  payeApplicable?: boolean;
+  payeBandsApplied?: import("@/lib/deductions").PayeBand[];
 }
 
 export interface Employee {
@@ -267,6 +280,7 @@ export interface Payment {
   payeBandsApplied?: import("@/lib/deductions").PayeBand[];
   paymentSourceCode?: "1000" | "1030";
   payrollVersion?: 2;
+  payrollAccountingVersion?: 3;
   netPayAmount?: number;
   totalAmount?: number;
   receiptNumber?: string;
