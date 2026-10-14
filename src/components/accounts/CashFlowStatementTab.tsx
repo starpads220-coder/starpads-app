@@ -41,10 +41,10 @@ export function CashFlowStatementTab({ statement, start, end }: { statement: Fin
         {expandable("Investing cash movements", statement.investingCashFlow, investingOpen, () => setInvestingOpen(open => !open))}
         {statement.investingCashLines.length === 0 ? row("No investing cash movements", 0, "no-investing", investingOpen ? "" : "hidden print:table-row") : statement.investingCashLines.map(line => row(line.name, line.amount, `investing-${line.name}`, investingOpen ? "" : "hidden print:table-row"))}
         {total("Net Cash from Investing Activities", statement.investingCashFlow)}
-        {section("C. Cash Flows from Financing Activities")}
-        {expandable("Financing cash movements", statement.financingCashFlow, financingOpen, () => setFinancingOpen(open => !open))}
+        {section("C. Financial Cash Movements")}
+        {expandable("Financial Cash Movements", statement.financingCashFlow, financingOpen, () => setFinancingOpen(open => !open))}
         {statement.financingCashLines.length === 0 ? row("No financing cash movements", 0, "no-financing", financingOpen ? "" : "hidden print:table-row") : statement.financingCashLines.map(line => row(line.name, line.amount, `financing-${line.name}`, financingOpen ? "" : "hidden print:table-row"))}
-        {total("Net Cash from Financing Activities", statement.financingCashFlow)}
+        {total("Net Cash from Financial Cash Movements", statement.financingCashFlow)}
         {Math.abs(statement.otherCashFlow) >= 0.01 && <>{section("Other Cash Movements — review classification")}{expandable("Other Cash Movements", statement.otherCashFlow, otherOpen, () => setOtherOpen(open => !open))}{statement.otherCashMovementLines.map(line => row(line.name, line.amount, `other-${line.name}`, otherOpen ? "" : "hidden print:table-row"))}</>}
         {total("Net Increase or Decrease in Cash", statement.netCashFlow)}
         {total(`Closing Cash at ${formatAccountDate(end)}`, statement.endingCashBalance, true)}

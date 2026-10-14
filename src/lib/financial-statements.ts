@@ -194,15 +194,19 @@ export function buildFinancialStatements(
   const netIncome = incomeBeforeTaxes - taxDeductions;
 
   const cashReceived = new Map<string, CashFlowLine>();
+  let grantsAndDonationsReceived = 0;
   for (const entry of periodSales) {
     const account = resolveAccounting(entry, "sale")!;
     const amount = actualCashAmount(entry, "sale");
     if (amount <= 0) continue;
+    if (account.accountCode === "4083") {
+      grantsAndDonationsReceived += amount;
+      continue;
+    }
     const name = account.accountCode === "4080" ? "Cash from Sales of Pads"
       : account.accountCode === "4081" ? "Cash from Sale of Materials"
         : account.accountCode === "4082" ? "Cash from Trainings"
-          : account.accountCode === "4083" ? "Grants and Donations received"
-            : `Cash from ${account.accountName.trim() || "Other Income"}`;
+          : `Cash from ${account.accountName.trim() || "Other Income"}`;
     addLine(cashReceived, name, amount);
   }
   const operatingCashExpenses = new Map(OPERATING_EXPENSE_NAMES.map(name => [name.toLocaleLowerCase(), { name, amount: 0 }]));
@@ -230,6 +234,7 @@ export function buildFinancialStatements(
 
   const investing = new Map<string, CashFlowLine>();
   const financing = new Map<string, CashFlowLine>();
+  if (grantsAndDonationsReceived > 0) addLine(financing, "Grants and Donations", grantsAndDonationsReceived);
   const otherMovements = new Map<string, CashFlowLine>();
   let transfersNetEffect = 0;
   for (const entry of journals.filter(item => item.date >= start && item.date <= end)) {
@@ -245,11 +250,15 @@ export function buildFinancialStatements(
     const counterpart = ACCOUNTS.find(account => account.code === counterpartCode);
     const name = counterpart?.name ?? entry.description?.trim() ?? "Unclassified journal movement";
     if (["Income", "Other Income"].includes(counterpart?.group ?? "") && cashMovement > 0) {
+      if (counterpartCode === "4083") {
+        grantsAndDonationsReceived += cashMovement;
+        addLine(financing, "Grants and Donations", cashMovement);
+        continue;
+      }
       const receivedName = counterpartCode === "4080" ? "Cash from Sales of Pads"
         : counterpartCode === "4081" ? "Cash from Sale of Materials"
           : counterpartCode === "4082" ? "Cash from Trainings"
-            : counterpartCode === "4083" ? "Grants and Donations received"
-              : `Cash from ${name}`;
+            : `Cash from ${name}`;
       addLine(cashReceived, receivedName, cashMovement);
       continue;
     }
@@ -262,7 +271,7 @@ export function buildFinancialStatements(
     }
     else addLine(otherMovements, name, cashMovement);
   }
-  const receivedOrder = (name: string) => name === "Cash from Sales of Pads" ? 0 : name === "Cash from Sale of Materials" ? 1 : name === "Cash from Trainings" ? 2 : name === "Grants and Donations received" ? 4 : 3;
+  const receivedOrder = (name: string) => name === "Cash from Sales of Pads" ? 0 : name === "Cash from Sale of Materials" ? 1 : name === "Cash from Trainings" ? 2 : 3;
   const cashReceivedLines = [...cashReceived.values()].sort((a, b) => receivedOrder(a.name) - receivedOrder(b.name) || a.name.localeCompare(b.name));
   const totalCashReceived = cashReceivedLines.reduce((sum, line) => sum + line.amount, 0);
   const totalCashPaid = cashPaidForRawMaterials + cashPaidForCarriageInwards + cashPaidForDirectLabor + cashPaidForOtherProductionCosts + cashPaidForOperatingExpenses + cashPaidForTaxes;
@@ -335,7 +344,7 @@ export function buildFinancialStatements(
     cashFromSalesOfPads: cashReceived.get("cash from sales of pads")?.amount ?? 0,
     cashFromSalesOfMaterials: cashReceived.get("cash from sale of materials")?.amount ?? 0,
     cashFromTrainings: cashReceived.get("cash from trainings")?.amount ?? 0,
-    grantsAndDonationsReceived: cashReceived.get("grants and donations received")?.amount ?? 0,
+    grantsAndDonationsReceived,
     totalCashReceived,
     cashPaidForRawMaterials,
     cashPaidForCarriageInwards,
