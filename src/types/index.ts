@@ -93,7 +93,7 @@ export type CustomerSubType =
 
 export type PackVariant = "" | "MAX" | "STANDARD";
 
-export type PaymentMethod = "CASH" | "BANK" | "MOBILE_MONEY_MTN" | "MOBILE_MONEY_AIRTEL" | "MOBILE_MONEY" | "BANK_TRANSFER";
+export type PaymentMethod = "CASH" | "BANK" | "MOBILE_MONEY_MTN" | "MOBILE_MONEY_AIRTEL" | "MOBILE_MONEY" | "BANK_TRANSFER" | "CREDIT";
 
 // ─── Firestore document types ────────────────────────────────────────────────
 
@@ -192,6 +192,10 @@ export interface SaleTransaction {
   grantAmount?: number;
   stockOutIds?: string[];
   stockStatus?: "pending" | "recorded";
+  paymentStatus?: "paid" | "partial" | "unpaid";
+  dueDate?: string;
+  amountReceived?: number;
+  initialSettlementCode?: string;
 }
 
 export type ExpenseCategory =
@@ -219,6 +223,11 @@ export interface Expense {
   amountUgx: number;
   paidBy: string;
   receiptRef?: string;
+  supplierName?: string;
+  paymentStatus?: "paid" | "partial" | "unpaid";
+  dueDate?: string;
+  amountPaid?: number;
+  initialSettlementCode?: string;
   notes?: string;
   payrollExpenseVersion?: 2;
   employeeId?: string;

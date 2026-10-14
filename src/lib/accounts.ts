@@ -26,6 +26,8 @@ export const REMOVED_ACCOUNT_CODES = new Set([
 export interface AccountingSelection { accountCode: string; accountGroup: AccountGroup; accountName: string; settlementCode: string; accountDetail?: string }
 export const emptyAccounting = (): AccountingSelection => ({ accountCode: "", accountGroup: "Income", accountName: "", settlementCode: "", accountDetail: "" });
 export const SETTLEMENT_CODES = ["1000", "1010", "1020", "1030"];
+export const RECEIVABLE_CODE = "1100";
+export const PAYABLE_CODE = "2110";
 export const COST_OF_PRODUCTION_LINES = [
   { id: "purchases_raw_materials", label: "Purchases of Raw Materials", accountCode: "5080", statementField: "purchasesOfRawMaterials", entrySelectable: true },
   { id: "carriage_inwards", label: "Carriage Inwards", accountCode: "6030", statementField: "carriageInwards", entrySelectable: true },
@@ -69,10 +71,11 @@ export function validateAccounting(value: AccountingSelection, kind: "sale" | "e
   const known = ACCOUNTS.find(a => a.code === value.accountCode);
   const needsDetail = kind === "expense" && ["5080", "5090"].includes(value.accountCode);
   const nonCashDepreciation = kind === "expense" && value.accountCode === "6200";
-  if (!allowed.includes(value.accountGroup) || !value.accountName.trim() || (!known && !value.accountCode.startsWith("custom:")) || (known && known.group !== value.accountGroup) || (!nonCashDepreciation && !SETTLEMENT_CODES.includes(value.settlementCode)) || (needsDetail && !value.accountDetail?.trim())) throw new Error(needsDetail ? "Enter the specific direct material or direct labour details." : nonCashDepreciation ? "Select the Depreciation account." : "Select an account / subcategory and cash/bank account.");
+  const allowedSettlementCodes = kind === "sale" ? [...SETTLEMENT_CODES, RECEIVABLE_CODE] : [...SETTLEMENT_CODES, PAYABLE_CODE];
+  if (!allowed.includes(value.accountGroup) || !value.accountName.trim() || (!known && !value.accountCode.startsWith("custom:")) || (known && known.group !== value.accountGroup) || (!nonCashDepreciation && !allowedSettlementCodes.includes(value.settlementCode)) || (needsDetail && !value.accountDetail?.trim())) throw new Error(needsDetail ? "Enter the specific direct material or direct labour details." : nonCashDepreciation ? "Select the Depreciation account." : "Select an account / subcategory and payment option.");
   return { ...value, accountName: value.accountCode === "4082" ? "Trainings" : value.accountName.trim(), accountDetail: value.accountDetail?.trim() ?? "" };
 }
-export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number; paymentMethod?: string; description?: string; customerName?: string; category?: string; subcategory?: string; status?: string; paymentStatus?: string; amountReceived?: number; receivedAmount?: number; amountPaid?: number; paidAmount?: number; payrollExpenseVersion?: number; employeeId?: string; employeeName?: string; grossAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number; netPayAmount?: number; totalBusinessCost?: number }
+export interface LedgerSource { id: string; date: string; accounting?: AccountingSelection; totalAmount?: number; amountUgx?: number; paymentMethod?: string; description?: string; customerName?: string; supplierName?: string; invoiceNumber?: string; receiptRef?: string; dueDate?: string; initialSettlementCode?: string; category?: string; subcategory?: string; status?: string; paymentStatus?: string; amountReceived?: number; receivedAmount?: number; amountPaid?: number; paidAmount?: number; payrollExpenseVersion?: number; employeeId?: string; employeeName?: string; grossAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number; netPayAmount?: number; totalBusinessCost?: number }
 export interface Journal {
   id: string;
   date: string;
@@ -93,6 +96,8 @@ export interface Journal {
   simplifiedItemCode?: string;
   simplifiedOffsetCode?: string;
   simplifiedAction?: "add" | "deduct";
+  settlementKind?: "accounts_receivable" | "accounts_payable";
+  linkedTransactionId?: string;
 }
 export interface ProductionCostEntry {
   id: string;
@@ -168,6 +173,15 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
         ? `detail:${a.accountCode}:${a.accountDetail.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
         : a.accountCode;
       catalog.set(detailCode, { code: detailCode, name: a.accountCode === "4082" ? "Trainings" : a.accountDetail?.trim() ? `${a.accountName} — ${a.accountDetail.trim()}` : a.accountName, group: a.accountGroup });
+      const total = Number(kind === "sale" ? entry.totalAmount : entry.amountUgx) || 0;
+      const isCredit = (kind === "sale" && a.settlementCode === RECEIVABLE_CODE) || (kind === "expense" && a.settlementCode === PAYABLE_CODE);
+      if (isCredit) {
+        const initial = Math.min(total, Math.max(0, Number(kind === "sale" ? entry.amountReceived : entry.amountPaid) || 0));
+        if (initial > 0 && SETTLEMENT_CODES.includes(entry.initialSettlementCode ?? "")) post(entry.date, kind === "sale" ? entry.initialSettlementCode! : detailCode, kind === "sale" ? detailCode : entry.initialSettlementCode!, initial);
+        const outstanding = total - initial;
+        if (outstanding > 0) post(entry.date, kind === "sale" ? RECEIVABLE_CODE : detailCode, kind === "sale" ? detailCode : PAYABLE_CODE, outstanding);
+        continue;
+      }
       const expenseCredit = a.accountCode === "6200" ? "1830" : a.settlementCode;
       post(entry.date, kind === "sale" ? a.settlementCode : detailCode, kind === "sale" ? detailCode : expenseCredit, kind === "sale" ? entry.totalAmount ?? 0 : entry.amountUgx ?? 0);
     }

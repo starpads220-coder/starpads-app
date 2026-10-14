@@ -9,6 +9,7 @@ const EXPENSE_ACCOUNT_OPTIONS = [
   { name: "Data and Communication Costs", code: "6113" },
   { name: "Utilities", code: "6100" },
   { name: "Machine Repair and Maintenance", code: "6131" },
+  { name: "Bank Charges", code: "6140" },
   { name: "Sundries", code: "6171" },
   { name: "Other Costs", code: "6172" },
   { name: "Small Tools and Equipment", code: "6050" },
@@ -21,12 +22,13 @@ export function AccountingFields({ value, onChange, kind }: { value: AccountingS
   const saved = [...new Map(data.flatMap(row => row.accounting?.accountCode.startsWith("custom:") && groups.includes(row.accounting.accountGroup) ? [[row.accounting.accountCode, row.accounting] as const] : [])).values()];
   const availableAccounts = ACCOUNTS.filter(account => groups.includes(account.group) && (kind !== "sale" || SALES_ENTRY_ACCOUNT_CODES.includes(account.code as typeof SALES_ENTRY_ACCOUNT_CODES[number])));
   const settlementAccounts = kind === "expense"
-    ? [{ code: "1030", name: "Cash" }, { code: "1000", name: "Bank" }]
+    ? [{ code: "1030", name: "Cash" }, { code: "1000", name: "Bank" }, { code: "2110", name: "Not Yet Paid — Accounts Payable" }]
     : [
         { code: "1030", name: "Cash" },
         { code: "1000", name: "Bank" },
         { code: "1010", name: "Mobile Money [MTN]" },
         { code: "1020", name: "Mobile Money [Airtel]" },
+        { code: "1100", name: "Not Yet Paid — Accounts Receivable" },
       ];
   const input = "w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm";
   return <fieldset className="rounded-xl border border-blue-100 bg-blue-50/40 p-4 space-y-3">
@@ -49,7 +51,7 @@ export function AccountingFields({ value, onChange, kind }: { value: AccountingS
       })}{kind === "sale" && saved.map(a => <option key={a.accountCode} value={a.accountCode}>{a.accountName} (custom)</option>)}{kind === "sale" && <option value="custom">Custom subcategory...</option>}</select></label>
       {kind === "sale" && value.accountCode.startsWith("custom:") && <label className="text-sm">Custom subcategory name<input required maxLength={100} className={input} value={value.accountName} onChange={e => onChange({ ...value, accountName: e.target.value, accountCode: `custom:${value.accountGroup}:${e.target.value.trim().toLowerCase()}` })} /></label>}
       {kind === "expense" && ["5080", "5090"].includes(value.accountCode) && <label className="text-sm">{value.accountCode === "5080" ? "Direct material details" : "Direct labour details"}<input required maxLength={120} className={input} value={value.accountDetail ?? ""} onChange={e => onChange({ ...value, accountDetail: e.target.value })} placeholder={value.accountCode === "5080" ? "Enter the material purchased or used" : "Enter the labour activity or worker details"} /></label>}
-      {!(kind === "expense" && value.accountCode === "6200") && <label className="text-sm">{kind === "sale" ? "Payment Method" : "Paid from"}<select required className={input} value={value.settlementCode} onChange={e => onChange({ ...value, settlementCode: e.target.value })}>{kind === "expense" ? <option value="" disabled hidden /> : <option value="">Select payment method...</option>}{settlementAccounts.map(account => <option key={account.code} value={account.code}>{account.name}</option>)}</select></label>}
+      {!(kind === "expense" && value.accountCode === "6200") && <label className="text-sm">{kind === "sale" ? "Payment Status / Method" : "Payment Status / Paid from"}<select required className={input} value={value.settlementCode} onChange={e => onChange({ ...value, settlementCode: e.target.value })}>{kind === "expense" ? <option value="" disabled hidden /> : <option value="">Select payment option...</option>}{settlementAccounts.map(account => <option key={account.code} value={account.code}>{account.name}</option>)}</select></label>}
     </div>
   </fieldset>;
 }

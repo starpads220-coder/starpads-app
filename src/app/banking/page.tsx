@@ -22,6 +22,7 @@ const configuredDepositOffset = ACCOUNTS.find(account => account.code === DEPOSI
 export default function BankingPage() {
   const { user, userRole } = useAuth();
   const [tab, setTab] = useState<BankingTab>("deposits");
+  const [bankBreakdownOpen, setBankBreakdownOpen] = useState(false);
   const [deposit, setDeposit] = useState(emptyDeposit);
   const [transfer, setTransfer] = useState(emptyTransfer);
   const [selectedDepositId, setSelectedDepositId] = useState<string | null>(null);
@@ -249,7 +250,23 @@ export default function BankingPage() {
 
   return <RouteGuard><div className="space-y-6">
     <header><h1 className="text-2xl font-bold">Banking</h1><p className="text-sm text-gray-500">Deposits and transfers linked to the existing Bank and Cash accounts.</p></header>
-    <section className="overflow-hidden rounded-xl border bg-white" aria-labelledby="banking-balances-title"><div className="border-b px-5 py-4"><h2 id="banking-balances-title" className="font-semibold">Current Balances</h2><p className="mt-1 text-sm text-gray-500">Live balances as at today from all recorded sales, expenses, payroll, deposits, transfers and account entries.</p></div><div className="grid sm:grid-cols-2"><div className="border-b p-5 sm:border-b-0 sm:border-r"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Bank</p><p className="mt-2 text-2xl font-bold tabular-nums">{loading ? "—" : error ? "Unavailable" : money(currentBankBalance)}</p>{!loading && !error && <div className="mt-3 space-y-1 border-t pt-3 text-sm">{currentTaggedBankBalances.map(item => <p key={item.name} className="flex justify-between gap-3"><span className="text-gray-600">{item.name}</span><span className="tabular-nums">{money(item.amount)}</span></p>)}</div>}</div><div className="p-5"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cash</p><p className="mt-2 text-2xl font-bold tabular-nums">{loading ? "—" : error ? "Unavailable" : money(currentCashBalance)}</p><p className="mt-1 text-xs text-gray-500">Physical Cash + Mobile Money [MTN] + Mobile Money [Airtel]</p></div></div></section>
+    <section className="overflow-hidden rounded-xl border bg-white" aria-labelledby="banking-balances-title">
+      <div className="border-b px-5 py-4"><h2 id="banking-balances-title" className="font-semibold">Current Balances</h2><p className="mt-1 text-sm text-gray-500">Live balances as at today from all recorded sales, expenses, payroll, deposits, transfers and account entries.</p></div>
+      <div className="grid sm:grid-cols-2">
+        <div className="border-b p-5 sm:border-b-0 sm:border-r">
+          <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Bank</p>
+          <p className="mt-2 text-2xl font-bold tabular-nums">{loading ? "—" : error ? "Unavailable" : money(currentBankBalance)}</p>
+          {!loading && !error && <div className="mt-3 border-t pt-3">
+            <button type="button" aria-expanded={bankBreakdownOpen} aria-controls="bank-balance-breakdown" onClick={() => setBankBreakdownOpen(open => !open)} className="flex w-full items-center justify-between gap-3 rounded-md px-1 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50">
+              <span>Bank account breakdown</span>
+              <span aria-hidden="true" className={`text-xs transition-transform ${bankBreakdownOpen ? "rotate-180" : ""}`}>▼</span>
+            </button>
+            {bankBreakdownOpen && <div id="bank-balance-breakdown" className="mt-2 space-y-1 border-t pt-2 text-sm">{currentTaggedBankBalances.map(item => <p key={item.name} className="flex justify-between gap-3"><span className="text-gray-600">{item.name}</span><span className="tabular-nums">{money(item.amount)}</span></p>)}</div>}
+          </div>}
+        </div>
+        <div className="p-5"><p className="text-xs font-semibold uppercase tracking-wide text-gray-500">Cash</p><p className="mt-2 text-2xl font-bold tabular-nums">{loading ? "—" : error ? "Unavailable" : money(currentCashBalance)}</p><p className="mt-1 text-xs text-gray-500">Physical Cash + Mobile Money [MTN] + Mobile Money [Airtel]</p></div>
+      </div>
+    </section>
     <div role="tablist" aria-label="Banking sections" className="grid overflow-hidden rounded-xl border bg-white sm:grid-cols-2">{(["deposits", "transfers"] as const).map(value => <button key={value} type="button" role="tab" aria-selected={tab === value} onClick={() => { setTab(value); setMessage(""); }} className={`min-h-12 px-4 py-3 text-sm font-semibold ${tab === value ? "bg-gray-900 text-white" : "bg-white text-gray-700 hover:bg-gray-50"}`}>{value === "deposits" ? "Deposits" : "Transfers"}</button>)}</div>
     {loading && <p className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm">Loading account balances and banking entries…</p>}
     {!loading && !error && !serverConfirmed && <p role="alert" className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">Some ledger records are still synchronizing. Deposits are committed through a server transaction; balance-sensitive transfers remain paused until the source balance is fully confirmed.</p>}

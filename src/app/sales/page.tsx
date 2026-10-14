@@ -45,6 +45,7 @@ import { ChartCard } from "@/components/ui/ChartCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import { isEmployeeActive } from "@/lib/employees";
 import { downloadResponse } from "@/lib/file-download";
+import { CreditSettlements } from "@/components/CreditSettlements";
 
 const SalesCharts = dynamic(() => import("@/components/sales/SalesCharts"), {
   ssr: false,
@@ -87,6 +88,7 @@ function normalizeEmployeeName(name: string) {
 const SALES_PERSON_NAME_KEYS = new Set(SALES_PERSON_NAMES.map(normalizeEmployeeName));
 
 function paymentMethodFromSettlement(settlementCode: string): PaymentMethod {
+  if (settlementCode === "1100") return "CREDIT";
   if (settlementCode === "1030") return "CASH";
   if (settlementCode === "1000") return "BANK";
   if (settlementCode === "1010") return "MOBILE_MONEY_MTN";
@@ -99,6 +101,7 @@ function paymentMethodLabel(transaction: SaleTransaction): string {
   if (code === "1000") return "Bank";
   if (code === "1010") return "Mobile Money [MTN]";
   if (code === "1020") return "Mobile Money [Airtel]";
+  if (code === "1100" || transaction.paymentMethod === "CREDIT") return "Credit — Accounts Receivable";
   if (transaction.paymentMethod === "CASH") return "Cash";
   if (["BANK", "BANK_TRANSFER"].includes(transaction.paymentMethod)) return "Bank";
   if (transaction.paymentMethod === "MOBILE_MONEY_AIRTEL") return "Mobile Money [Airtel]";
@@ -225,6 +228,9 @@ export default function SalesPage() {
     materialQuantity: 0,
     trainingDays: 0,
     grantAmount: 0,
+    dueDate: "",
+    initialPaymentAmount: 0,
+    initialSettlementCode: "1000",
   });
 
   const [recentSale, setRecentSale] = useState<{
@@ -566,7 +572,11 @@ export default function SalesPage() {
       delete formWithoutOtherSubcategories.materialQuantity;
       delete formWithoutOtherSubcategories.trainingDays;
       delete formWithoutOtherSubcategories.grantAmount;
-      const saleData = { ...(isCustomSale ? formWithoutOtherSubcategories : formWithoutSalesperson), ...(form.saleType === "GRANTS_DONATIONS" && !isCustomSale ? { invoiceNumber: "" } : {}), ...(form.saleType === "PAD_TRAINING" && !isCustomSale ? { customerType: "RETAIL" as CustomerType } : {}), ...(["GRANTS_DONATIONS", "PAD_TRAINING"].includes(form.saleType) && !isCustomSale ? {} : { salespersonId }), ...(isCustomSale ? { saleType: "SALE_OF_PADS" as SaleType } : {}), batchRef, quantitySold, unitPrice, totalAmount, paymentMethod: paymentMethodFromSettlement(validatedAccounting.settlementCode), accounting: validatedAccounting };
+      const isCreditSale = validatedAccounting.settlementCode === "1100";
+      if (isCreditSale && !form.dueDate) throw new Error("Enter the customer payment due date.");
+      if (isCreditSale && form.initialPaymentAmount > totalAmount) throw new Error("The initial payment cannot exceed the sale total.");
+      const initialPayment = isCreditSale ? Math.max(0, form.initialPaymentAmount) : totalAmount;
+      const saleData = { ...(isCustomSale ? formWithoutOtherSubcategories : formWithoutSalesperson), ...(form.saleType === "GRANTS_DONATIONS" && !isCustomSale ? { invoiceNumber: "" } : {}), ...(form.saleType === "PAD_TRAINING" && !isCustomSale ? { customerType: "RETAIL" as CustomerType } : {}), ...(["GRANTS_DONATIONS", "PAD_TRAINING"].includes(form.saleType) && !isCustomSale ? {} : { salespersonId }), ...(isCustomSale ? { saleType: "SALE_OF_PADS" as SaleType } : {}), batchRef, quantitySold, unitPrice, totalAmount, paymentMethod: paymentMethodFromSettlement(validatedAccounting.settlementCode), paymentStatus: isCreditSale ? (initialPayment > 0 ? "partial" as const : "unpaid" as const) : "paid" as const, amountReceived: initialPayment, initialSettlementCode: isCreditSale ? form.initialSettlementCode : validatedAccounting.settlementCode, dueDate: isCreditSale ? form.dueDate : "", accounting: validatedAccounting };
       let createdSaleId = "";
       if (editingId) {
         const originalSale = transactions.find((transaction) => transaction.id === editingId);
@@ -664,6 +674,9 @@ export default function SalesPage() {
         materialQuantity: 0,
         trainingDays: 0,
         grantAmount: 0,
+        dueDate: "",
+        initialPaymentAmount: 0,
+        initialSettlementCode: "1000",
       });
       setFormSuccess(true);
       setFormSuccessMessage("Sale recorded successfully.");
@@ -699,6 +712,9 @@ export default function SalesPage() {
       materialQuantity: t.materialQuantity || 0,
       trainingDays: t.trainingDays || 0,
       grantAmount: t.grantAmount || 0,
+      dueDate: t.dueDate || "",
+      initialPaymentAmount: t.amountReceived || 0,
+      initialSettlementCode: t.initialSettlementCode || "1000",
     });
     setPadsInput(t.accounting?.accountCode.startsWith("custom:") || !t.saleType || t.saleType === "SALE_OF_PADS" ? t.quantitySold * PACK_SIZES[t.packSize] : 0);
     setActiveTab("entry");
@@ -1464,6 +1480,9 @@ export default function SalesPage() {
                     materialQuantity: 0,
                     trainingDays: 0,
                     grantAmount: 0,
+                    dueDate: "",
+                    initialPaymentAmount: 0,
+                    initialSettlementCode: "1000",
                   });
                   setFormError("");
                 }}
@@ -1516,6 +1535,11 @@ export default function SalesPage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Invoice Number</label>
               <input type="text" value={form.invoiceNumber} onChange={(event) => setForm({ ...form, invoiceNumber: event.target.value })} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 outline-none transition focus:border-orange-300 focus:ring-2 focus:ring-orange-100" />
             </div>}
+            {accounting.settlementCode === "1100" && <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Payment Due Date</label>
+              <input type="date" min={form.date} value={form.dueDate} onChange={(event) => setForm({ ...form, dueDate: event.target.value })} required className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" />
+            </div>}
+            {accounting.settlementCode === "1100" && <><div><label className="block text-sm font-medium text-gray-700 mb-1">Amount Received Now (UGX)</label><input type="number" min="0" max={totalAmount} value={form.initialPaymentAmount || ""} onChange={(event) => setForm({ ...form, initialPaymentAmount: Number(event.target.value) || 0 })} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm" /><p className="mt-1 text-xs text-gray-500">Leave at zero for a fully unpaid sale.</p></div>{form.initialPaymentAmount > 0 && <div><label className="block text-sm font-medium text-gray-700 mb-1">Initial Payment Received Into</label><select value={form.initialSettlementCode} onChange={(event) => setForm({ ...form, initialSettlementCode: event.target.value })} className="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"><option value="1000">Bank</option><option value="1030">Cash</option><option value="1010">Mobile Money [MTN]</option><option value="1020">Mobile Money [Airtel]</option></select></div>}</>}
             {form.saleType !== "GRANTS_DONATIONS" && form.saleType !== "PAD_TRAINING" && <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Customer Type</label>
               <select
@@ -1726,6 +1750,7 @@ export default function SalesPage() {
           </div>
         </form>
       )}
+      <CreditSettlements kind="receivable" entries={transactions} />
     </div>
     </RouteGuard>
   );

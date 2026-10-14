@@ -324,9 +324,24 @@ service cloud.firestore {
               && data.get('bankingStatus', '') == 'completed')));
     }
 
+    function validLinkedSettlement(data) {
+      return data.get('settlementKind', '') in ['accounts_receivable', 'accounts_payable']
+        && data.get('linkedTransactionId', '') is string
+        && data.get('linkedTransactionId', '').size() > 0
+        && data.get('referenceNumber', '') is string
+        && data.get('referenceNumber', '').size() > 0
+        && ((data.settlementKind == 'accounts_receivable'
+            && data.creditCode == '1100'
+            && data.debitCode in ['1000', '1010', '1020', '1030'])
+          || (data.settlementKind == 'accounts_payable'
+            && data.debitCode == '2110'
+            && data.creditCode in ['1000', '1030']));
+    }
+
     match /accountJournals/{journalId} {
       allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF']);
-      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+      allow create: if (hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+          || (hasAnyRole(['SALES_STAFF', 'SALES_MANAGER']) && request.resource.data.get('settlementKind', '') == 'accounts_receivable'))
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.amount is number && request.resource.data.amount > 0
         && request.resource.data.debitCode is string && request.resource.data.creditCode is string
@@ -336,7 +351,8 @@ service cloud.firestore {
           || request.resource.data.simplifiedCategory in ['Assets', 'Liabilities', 'Equity'])
         && (!request.resource.data.keys().hasAny(['simplifiedAction'])
           || request.resource.data.simplifiedAction in ['add', 'deduct'])
-        && validBankingJournal(request.resource.data, journalId);
+        && validBankingJournal(request.resource.data, journalId)
+        && (!request.resource.data.keys().hasAny(['settlementKind']) || validLinkedSettlement(request.resource.data));
       allow update: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['date', 'debitCode', 'creditCode', 'amount', 'description', 'simplifiedCategory', 'simplifiedItemCode', 'simplifiedOffsetCode', 'simplifiedAction', 'bankingStatus', 'receivedFrom', 'paymentMethod', 'referenceNumber', 'bankName'])
         && request.resource.data.amount is number && request.resource.data.amount > 0

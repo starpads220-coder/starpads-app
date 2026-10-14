@@ -27,6 +27,7 @@ import { isEmployeeActive } from "@/lib/employees";
 import { downloadResponse } from "@/lib/file-download";
 import { usePayeSettings } from "@/hooks/use-paye-settings";
 import { calculateProgressivePaye, computeNssfAtRate } from "@/lib/deductions";
+import { CreditSettlements } from "@/components/CreditSettlements";
 
 type AnalyticsPeriod = "day" | "week" | "month" | "12months" | "custom";
 
@@ -109,6 +110,10 @@ export default function ExpensesPage() {
     paidBy: "",
     receiptRef: "",
     employeeId: "",
+    supplierName: "",
+    dueDate: "",
+    initialPaymentAmount: 0,
+    initialSettlementCode: "1000",
   });
 
   const { data: expenses = [], isLoading: loading } = useCollectionQuery<Expense>(
@@ -126,6 +131,7 @@ export default function ExpensesPage() {
   );
 
   const isDepreciation = accounting.accountCode === "6200";
+  const isUnpaidExpense = accounting.settlementCode === "2110";
   const depreciationLikeRecords = useMemo(() => expenses.filter(expense => {
     if (expense.accounting?.accountCode === "6200") return false;
     return /depreciation/i.test(`${expense.accounting?.accountName ?? ""} ${expense.category ?? ""} ${expense.subcategory ?? ""} ${expense.description ?? ""}`);
@@ -263,9 +269,14 @@ export default function ExpensesPage() {
       if (isSalaryExpense && payrollSettingsLoading) throw new Error("Payroll settings are still loading.");
       if (isSalaryExpense && payrollSettingsError) throw new Error(payrollSettingsError);
       if (isSalaryExpense && !selectedSalaryEmployee) throw new Error("Select an active non-production employee.");
-      if (!isDepreciation && !expensePayers.some(person => person.id === form.paidBy)) throw new Error("Select an approved employee under Paid By.");
-      if (!isDepreciation && !form.receiptRef.trim()) throw new Error("Enter a Payment Voucher No.");
+      if (isSalaryExpense && isUnpaidExpense) throw new Error("Use the employee payment workflow for unpaid salaries.");
+      if (!isDepreciation && !isUnpaidExpense && !expensePayers.some(person => person.id === form.paidBy)) throw new Error("Select an approved employee under Paid By.");
+      if (!isDepreciation && !isUnpaidExpense && !form.receiptRef.trim()) throw new Error("Enter a Payment Voucher No.");
+      if (isUnpaidExpense && !form.supplierName.trim()) throw new Error("Enter the supplier name.");
+      if (isUnpaidExpense && !form.dueDate) throw new Error("Enter the supplier payment due date.");
+      if (isUnpaidExpense && form.initialPaymentAmount > calculatedAmount) throw new Error("The initial payment cannot exceed the expense total.");
       const validatedAccounting = validateAccounting(accounting, "expense");
+      const initialPayment = isUnpaidExpense ? Math.max(0, form.initialPaymentAmount) : calculatedAmount;
       const payrollFields = isSalaryExpense ? {
         payrollExpenseVersion: 2 as const,
         employeeId: selectedSalaryEmployee!.id,
@@ -285,15 +296,20 @@ export default function ExpensesPage() {
         accounting: validatedAccounting,
         ...form,
         category: validatedAccounting.accountName,
-        paidBy: isDepreciation ? "" : form.paidBy,
-        receiptRef: isDepreciation ? "" : form.receiptRef.trim(),
+        paidBy: isDepreciation || isUnpaidExpense ? "" : form.paidBy,
+        receiptRef: isDepreciation || isUnpaidExpense ? "" : form.receiptRef.trim(),
+        supplierName: isUnpaidExpense ? form.supplierName.trim() : "",
+        dueDate: isUnpaidExpense ? form.dueDate : "",
+        paymentStatus: isUnpaidExpense ? (initialPayment > 0 ? "partial" : "unpaid") : "paid",
+        amountPaid: initialPayment,
+        initialSettlementCode: isUnpaidExpense ? form.initialSettlementCode : validatedAccounting.settlementCode,
         amountUgx: calculatedAmount,
         ...payrollFields,
         createdAt: Timestamp.now(),
       });
       setForm({
         date: new Date().toISOString().split("T")[0],
-        description: "", amountUgx: 0, unitCost: 0, itemCount: 1, labourTotalPayments: 0, paidBy: "", receiptRef: "", employeeId: "",
+        description: "", amountUgx: 0, unitCost: 0, itemCount: 1, labourTotalPayments: 0, paidBy: "", receiptRef: "", employeeId: "", supplierName: "", dueDate: "", initialPaymentAmount: 0, initialSettlementCode: "1000",
       });
       setFormSuccess(true);
       setAccounting({ ...emptyAccounting(), accountGroup: "Expenses" });
@@ -500,7 +516,8 @@ export default function ExpensesPage() {
             <label className="block text-sm font-medium text-gray-700 mb-1">Amount (UGX)</label>
             <input type="number" value={calculatedAmount || ""} readOnly required min={0} className="w-full px-3 py-2 border border-gray-200 bg-gray-50 rounded-md text-sm" />
           </div>
-          {!isDepreciation && <div>
+          {isUnpaidExpense && <><div><label className="block text-sm font-medium text-gray-700 mb-1">Supplier Name</label><input required value={form.supplierName} onChange={(e) => setForm({ ...form, supplierName: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" /></div><div><label className="block text-sm font-medium text-gray-700 mb-1">Payment Due Date</label><input required type="date" min={form.date} value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" /></div><div><label className="block text-sm font-medium text-gray-700 mb-1">Amount Paid Now (UGX)</label><input type="number" min="0" max={calculatedAmount} value={form.initialPaymentAmount || ""} onChange={(e) => setForm({ ...form, initialPaymentAmount: Number(e.target.value) || 0 })} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" /><p className="mt-1 text-xs text-gray-500">Leave at zero for a fully unpaid expense.</p></div>{form.initialPaymentAmount > 0 && <div><label className="block text-sm font-medium text-gray-700 mb-1">Initial Payment Paid From</label><select value={form.initialSettlementCode} onChange={(e) => setForm({ ...form, initialSettlementCode: e.target.value })} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"><option value="1000">Bank</option><option value="1030">Cash</option></select></div>}</>}
+          {!isDepreciation && !isUnpaidExpense && <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Paid By</label>
             <select value={form.paidBy} onChange={(e) => setForm({ ...form, paidBy: e.target.value })}
               required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
@@ -508,7 +525,7 @@ export default function ExpensesPage() {
               {expensePayers.map((employee) => (<option key={employee.id} value={employee.id}>{employee.name}</option>))}
             </select>
           </div>}
-          {!isDepreciation && <div>
+          {!isDepreciation && !isUnpaidExpense && <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Payment Voucher No</label>
             <input type="text" value={form.receiptRef} onChange={(e) => { e.currentTarget.setCustomValidity(""); setForm({ ...form, receiptRef: e.target.value }); }}
               onInvalid={(e) => e.currentTarget.setCustomValidity("Enter a Payment Voucher No.")}
@@ -522,6 +539,8 @@ export default function ExpensesPage() {
           </button>
         </div>
       </form>
+
+      <CreditSettlements kind="payable" entries={expenses} />
 
 
     </div>

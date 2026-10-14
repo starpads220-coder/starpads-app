@@ -236,6 +236,7 @@ export function buildFinancialStatements(
   const financing = new Map<string, CashFlowLine>();
   if (grantsAndDonationsReceived > 0) addLine(financing, "Grants and Donations", grantsAndDonationsReceived);
   const otherMovements = new Map<string, CashFlowLine>();
+  let cashPaidForCreditExpenses = 0;
   let transfersNetEffect = 0;
   for (const entry of journals.filter(item => item.date >= start && item.date <= end)) {
     const debitCash = SETTLEMENT_CODES.includes(entry.debitCode);
@@ -249,6 +250,15 @@ export function buildFinancialStatements(
     const counterpartCode = debitCash ? entry.creditCode : entry.debitCode;
     const counterpart = ACCOUNTS.find(account => account.code === counterpartCode);
     const name = counterpart?.name ?? entry.description?.trim() ?? "Unclassified journal movement";
+    if (counterpartCode === "1100" && cashMovement > 0) {
+      addLine(cashReceived, "Collections from Customers", cashMovement);
+      continue;
+    }
+    if (counterpartCode === "2110" && cashMovement < 0) {
+      cashPaidForCreditExpenses += Math.abs(cashMovement);
+      addLine(operatingCashExpenses, "Payments to Suppliers", Math.abs(cashMovement));
+      continue;
+    }
     if (["Income", "Other Income"].includes(counterpart?.group ?? "") && cashMovement > 0) {
       if (counterpartCode === "4083") {
         grantsAndDonationsReceived += cashMovement;
@@ -274,7 +284,7 @@ export function buildFinancialStatements(
   const receivedOrder = (name: string) => name === "Cash from Sales of Pads" ? 0 : name === "Cash from Sale of Materials" ? 1 : name === "Cash from Trainings" ? 2 : 3;
   const cashReceivedLines = [...cashReceived.values()].sort((a, b) => receivedOrder(a.name) - receivedOrder(b.name) || a.name.localeCompare(b.name));
   const totalCashReceived = cashReceivedLines.reduce((sum, line) => sum + line.amount, 0);
-  const totalCashPaid = cashPaidForRawMaterials + cashPaidForCarriageInwards + cashPaidForDirectLabor + cashPaidForOtherProductionCosts + cashPaidForOperatingExpenses + cashPaidForTaxes;
+  const totalCashPaid = cashPaidForRawMaterials + cashPaidForCarriageInwards + cashPaidForDirectLabor + cashPaidForOtherProductionCosts + cashPaidForOperatingExpenses + cashPaidForCreditExpenses + cashPaidForTaxes;
   const cashInflows = totalCashReceived;
   const cashOutflows = totalCashPaid;
   const cashAdjustments = journals.filter(entry => entry.date >= start && entry.date <= end).reduce((sum, entry) => {
