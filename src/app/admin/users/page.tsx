@@ -2,11 +2,12 @@
 
 import { useState, useCallback } from "react";
 import { orderBy } from "firebase/firestore";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "@/lib/auth-context";
 import { Employee, EmployeeRole } from "@/types";
 
 interface UserRecord {
+  id?: string;
   uid: string;
   email: string;
   role: EmployeeRole;
@@ -21,7 +22,7 @@ import { useCollectionQuery } from "@/hooks/use-firestore-query";
 type Tab = "all" | "pending";
 
 export default function AdminUsersPage() {
-  const { userRole } = useAuth();
+  const { user, userRole } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<Tab>("all");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
@@ -31,24 +32,20 @@ export default function AdminUsersPage() {
   const [rejectTarget, setRejectTarget] = useState<string | null>(null);
   const [suspendTarget, setSuspendTarget] = useState<string | null>(null);
 
-  const { data: users = [], isLoading: usersLoading } = useQuery<UserRecord[]>({
-    queryKey: ["users"],
-    queryFn: async () => {
-      const res = await fetch(`/api/users?adminUid=${userRole?.uid}`);
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Failed to fetch users");
-      return data.users;
-    },
-    enabled: !!userRole?.uid,
-    staleTime: 30 * 1000,
-  });
+  const { data: roleDocuments = [], isLoading: usersLoading, error: usersError } = useCollectionQuery<UserRecord>(
+    "userRoles", [], { enabled: userRole?.role === "ADMIN", staleTime: 30 * 1000 }
+  );
+  const users = roleDocuments
+    .map(record => ({ ...record, uid: record.uid || record.id || "" }))
+    .filter(record => record.uid)
+    .sort((a, b) => String(a.email ?? "").localeCompare(String(b.email ?? "")));
 
   const { data: employees = [] } = useCollectionQuery<Employee>("employees", [
     orderBy("name"),
   ], { staleTime: 10 * 60 * 1000 });
 
   const invalidateUsers = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["users"] });
+    queryClient.invalidateQueries({ queryKey: ["userRoles"] });
   }, [queryClient]);
 
   const displayedUsers = activeTab === "pending"
@@ -63,7 +60,7 @@ export default function AdminUsersPage() {
       const res = await fetch("/api/approve-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid, action: "approve", adminUid: userRole?.uid }),
+        body: JSON.stringify({ uid, action: "approve", adminUid: user?.uid }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -88,7 +85,7 @@ export default function AdminUsersPage() {
       const res = await fetch("/api/approve-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: rejectTarget, action: "reject", adminUid: userRole?.uid }),
+        body: JSON.stringify({ uid: rejectTarget, action: "reject", adminUid: user?.uid }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -114,7 +111,7 @@ export default function AdminUsersPage() {
       const res = await fetch("/api/approve-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: suspendTarget, action: "suspend", adminUid: userRole?.uid }),
+        body: JSON.stringify({ uid: suspendTarget, action: "suspend", adminUid: user?.uid }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -140,7 +137,7 @@ export default function AdminUsersPage() {
       const res = await fetch("/api/delete-user", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ uid: deleteTarget, adminUid: userRole?.uid }),
+        body: JSON.stringify({ uid: deleteTarget, adminUid: user?.uid }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -174,6 +171,7 @@ export default function AdminUsersPage() {
             {actionSuccess}
           </div>
         )}
+        {usersError && <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">Users could not be loaded: {usersError instanceof Error ? usersError.message : "Unknown error"}</div>}
 
         <div className="flex gap-1 bg-gray-100 rounded-lg p-1 w-fit">
           {(["all", "pending"] as const).map((tab) => (
@@ -211,6 +209,8 @@ export default function AdminUsersPage() {
             <tbody className="divide-y divide-gray-200">
               {usersLoading ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">Loading...</td></tr>
+              ) : usersError ? (
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-red-600">Unable to load users. See the error above.</td></tr>
               ) : displayedUsers.length === 0 ? (
                 <tr><td colSpan={6} className="px-4 py-8 text-center text-gray-400">
                   {activeTab === "pending" ? "No pending approvals." : "No users found."}
@@ -260,7 +260,7 @@ export default function AdminUsersPage() {
                           </button>
                         </>
                       ) : (
-                        u.uid !== userRole?.uid && (
+                        u.uid !== user?.uid && (
                           <>
                             <button
                               onClick={() => setSuspendTarget(u.uid)}
