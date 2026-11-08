@@ -1,4 +1,5 @@
 import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, productionCostItem, resolveAccounting, type Journal, type LedgerSource, type NssfRemittanceEntry, type PayeRemittanceEntry, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type buildAccounts } from "@/lib/accounts";
+import type { InventoryTransaction } from "@/lib/inventory-accounting";
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
 const OPERATING_EXPENSE_NAMES = ["Office and Administration", "Legal and Professional Fees", "Salaries and Wages", "Fuel and Transport", "Data and Communication Costs", "Utilities", "Machine Repair and Maintenance", "Sundries", "Other Costs", "Small Tools and Equipment", "Depreciation"];
@@ -16,6 +17,7 @@ export interface FinancialStatements {
   customIncome: Array<{ name: string; amount: number }>;
   costOfProduction: number;
   purchasesOfRawMaterials: number;
+  inventoryCostRecognised: number;
   carriageInwards: number;
   directLabor: number;
   directLaborBreakdown: PayrollStatementBreakdown;
@@ -100,6 +102,7 @@ export function buildFinancialStatements(
   openingCashBalanceOverride?: number,
   payeRemittances: PayeRemittanceEntry[] = [],
   nssfRemittances: NssfRemittanceEntry[] = [],
+  inventoryTransactions: InventoryTransaction[] = [],
 ): FinancialStatements {
   // Kept in the public signature for compatibility with existing callers; labor
   // on this statement is deliberately recognized from confirmed payments.
@@ -144,6 +147,9 @@ export function buildFinancialStatements(
     .filter(entry => productionCostItem(entry) === item)
     .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   const purchasesOfRawMaterials = periodExpenses.filter(isRawMaterialPurchase).reduce((sum, entry) => sum + expenseAmount(entry), 0) + productionCostTotal("purchases_raw_materials");
+  const inventoryCostRecognised = inventoryTransactions
+    .filter(entry => entry.date >= start && entry.date <= end && ["raw_material_loss", "finished_goods_sale", "finished_goods_loss", "wip_wastage"].includes(entry.type))
+    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   const carriageInwards = periodExpenses.filter(isRawMaterialCarriageExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0) + productionCostTotal("carriage_inwards");
   // Income Statement labor is period activity by confirmation date. Production
   // entries remain in the Balance Sheet accrual ledger and are not re-posted.
@@ -162,7 +168,7 @@ export function buildFinancialStatements(
   const recordedOtherCosts = productionCostTotal("other_costs");
   const legacyOtherCosts = periodExpenses.filter(isOtherProductionExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0);
   const otherProductionCosts = recordedOtherCosts + legacyOtherCosts;
-  const costOfProduction = purchasesOfRawMaterials + carriageInwards + directLabor + otherProductionCosts;
+  const costOfProduction = purchasesOfRawMaterials + inventoryCostRecognised + carriageInwards + directLabor + otherProductionCosts;
   const operatingExpenseEntries = periodExpenses.filter(entry => !isRawMaterialPurchase(entry) && !isRawMaterialCarriageExpense(entry) && !isDirectLaborExpense(entry) && !isOtherProductionExpense(entry) && !isTaxExpense(entry));
   const operatingTotals = new Map(OPERATING_EXPENSE_NAMES.map(name => [name.toLocaleLowerCase(), { name, amount: 0 }]));
   for (const entry of operatingExpenseEntries) {
@@ -224,6 +230,9 @@ export function buildFinancialStatements(
     }
   }
   cashPaidForRawMaterials += productionCostTotal("purchases_raw_materials");
+  cashPaidForRawMaterials += inventoryTransactions
+    .filter(entry => entry.date >= start && entry.date <= end && ((entry.type === "raw_material_purchase" && ["1000", "1030"].includes(entry.settlementCode ?? "")) || entry.type === "inventory_supplier_payment"))
+    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   cashPaidForCarriageInwards += productionCostTotal("carriage_inwards");
   const cashPaidForDirectLabor = payments.filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.netPayAmount) || 0), 0);
   const cashPaidForOtherProductionCosts = recordedOtherCosts;
@@ -321,6 +330,7 @@ export function buildFinancialStatements(
     customIncome,
     costOfProduction,
     purchasesOfRawMaterials,
+    inventoryCostRecognised,
     carriageInwards,
     directLabor,
     directLaborBreakdown,

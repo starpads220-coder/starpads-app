@@ -103,11 +103,12 @@ const STAGE_LABELS: Record<string, string> = {
   "STG-02": "Sewing Inner [M]",
   "STG-03": "Sewing Outer [TL]",
   "STG-04": "Overlocking",
-  "STG-05": "Pouch Making",
-  "STG-06": "Checking",
-  "STG-07": "Holling",
-  "STG-08": "Pinning and Folding",
-  "STG-09": "Packaging",
+  "STG-05": "Pouch Cutting",
+  "STG-06": "Pouch Making",
+  "STG-07": "Checking",
+  "STG-08": "Holling",
+  "STG-09": "Pinning and Folding",
+  "STG-10": "Packaging",
 };
 
 interface EntryData {

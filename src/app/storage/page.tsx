@@ -15,7 +15,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { StockIn, StockOut, PackSize, Batch, ProductionEntry, StageId, STAGE_LABELS, STAGE_ORDER } from "@/types";
+import { StockIn, StockOut, PackSize, Batch, ProductionEntry } from "@/types";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { PACK_SIZES } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
@@ -30,6 +30,7 @@ import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import { activeEmployeeOptions } from "@/lib/employees";
 import { downloadResponse } from "@/lib/file-download";
+import { WIP_KEYS, WIP_LABELS, WIP_VERSION, calculateWip } from "@/lib/wip";
 
 const PADS_PER_PACK = 3;
 
@@ -90,6 +91,7 @@ export default function StoragePage() {
   const [wipPeriod, setWipPeriod] = useState<StoragePeriod>("month");
   const [wipCustomStart, setWipCustomStart] = useState("");
   const [wipCustomEnd, setWipCustomEnd] = useState("");
+  const [wipBatchId, setWipBatchId] = useState("");
 
 
   const [stockInForm, setStockInForm] = useState({
@@ -307,22 +309,17 @@ export default function StoragePage() {
     return Math.min(100, Math.round((batchTotalPacks / dashboardBatch.maxPacks) * 100));
   }, [dashboardBatch, batchTotalPacks]);
 
-  const stageCounts = useMemo(() => {
+  const wipCounts = useMemo(() => {
     const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
-    const filtered = productionEntries.filter((e) => e.date >= wipBounds.start && e.date <= wipBounds.end);
-    const counts: Record<StageId, number> = {
-      "STG-01": 0, "STG-02": 0, "STG-03": 0, "STG-04": 0, "STG-05": 0, "STG-06": 0, "STG-09": 0, "STG-07": 0, "STG-08": 0, "STG-10": 0,
-    };
-    filtered.forEach((e) => { const sid = e.stageId as StageId; counts[sid] = (counts[sid] || 0) + e.actualPieces; });
-    return counts;
-  }, [productionEntries, wipPeriod, wipCustomStart, wipCustomEnd]);
+    return calculateWip(productionEntries, wipBatchId || undefined, wipBounds.end);
+  }, [productionEntries, wipBatchId, wipPeriod, wipCustomStart, wipCustomEnd]);
 
   const wipEntries = useMemo(() => {
     const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
     return productionEntries
-      .filter((e) => e.date >= wipBounds.start && e.date <= wipBounds.end)
+      .filter((e) => e.wipVersion === WIP_VERSION && (!wipBatchId || e.batchRef === wipBatchId) && e.date >= wipBounds.start && e.date <= wipBounds.end)
       .sort((a, b) => b.date.localeCompare(a.date));
-  }, [productionEntries, wipPeriod, wipCustomStart, wipCustomEnd]);
+  }, [productionEntries, wipBatchId, wipPeriod, wipCustomStart, wipCustomEnd]);
 
   const packsBySizeData = useMemo(() => {
     const bySize: Record<string, number> = {};
@@ -713,7 +710,7 @@ export default function StoragePage() {
             <div>
               <h2 className="text-lg font-semibold text-gray-900">Work-In-Progress (WIP) Summary</h2>
               <p className="text-sm text-gray-500">
-                {wipPeriod === "today" ? "Today" : wipPeriod === "week" ? "Last 7 days" : wipPeriod === "month" ? "Last 30 days" : wipPeriod === "12months" ? "Last 12 months" : "Custom period"}
+                Remaining balances as at {getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd).end}. Only new WIP-enabled entries are included.
               </p>
             </div>
             <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
@@ -739,16 +736,24 @@ export default function StoragePage() {
                 className="px-2 py-1.5 border border-gray-300 rounded-md text-sm w-40" />
             </div>
           )}
+          <div className="rounded-lg border bg-white p-4">
+            <label className="block text-sm font-medium text-gray-700">Production batch</label>
+            <select value={wipBatchId} onChange={(e) => setWipBatchId(e.target.value)} className="mt-1 w-full max-w-md rounded-md border border-gray-300 px-3 py-2 text-sm">
+              <option value="">All WIP-enabled batches</option>
+              {batches.map(batch => <option key={batch.id} value={batch.id}>{batch.batchNumber}</option>)}
+            </select>
+          </div>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {STAGE_ORDER.map((stageId) => {
-              const isPackStage = stageId === "STG-08" || stageId === "STG-10";
-              const unit = isPackStage ? "packs produced" : "pieces produced";
-              const color = isPackStage ? palette.emerald : palette.blue;
+            {WIP_KEYS.map((key) => {
+              const isPack = key === "finishedPacks";
+              const isPouch = key === "pouchCut" || key === "pouchMade";
+              const unit = isPack ? "finished packs" : "pieces remaining";
+              const color = isPack ? palette.emerald : isPouch ? palette.orange : palette.blue;
 
               return (
-                <ChartCard key={stageId} title={STAGE_LABELS[stageId]} subtitle={stageId} variant="gradient" accentColor={color}>
+                <ChartCard key={key} title={WIP_LABELS[key]} subtitle={isPack ? "STG-10 output" : "Current WIP"} variant="gradient" accentColor={color}>
                   <div className="flex flex-col items-center justify-center h-full">
-                    <span className="text-2xl font-bold" style={{ color }}>{stageCounts[stageId].toLocaleString()}</span>
+                    <span className="text-2xl font-bold" style={{ color }}>{Math.max(0, wipCounts[key]).toLocaleString()}</span>
                     <span className="text-xs text-gray-400 mt-1">{unit}</span>
                   </div>
                 </ChartCard>
@@ -768,6 +773,7 @@ export default function StoragePage() {
                     <tr>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Stage</th>
+                      <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Employee</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Material</th>
                       <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Pieces</th>
@@ -777,7 +783,8 @@ export default function StoragePage() {
                     {wipEntries.map((e, i) => (
                       <tr key={e.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                         <td className="px-4 py-3 text-sm text-gray-700">{e.date}</td>
-                        <td className="px-4 py-3 text-sm text-gray-700">{e.stageId}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{e.stageId}{e.productionActivity ? ` — ${e.productionActivity === "PINNING" ? "Pinning" : "Folding"}` : ""}</td>
+                        <td className="px-4 py-3 text-sm text-gray-700">{batches.find(batch => batch.id === e.batchRef)?.batchNumber ?? e.batchRef}</td>
                         <td className="px-4 py-3 text-sm text-gray-700">
                           {employees.find((emp) => emp.id === e.employeeId)?.name ?? e.employeeId}
                         </td>

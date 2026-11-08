@@ -1,19 +1,19 @@
 "use client";
 
-import { useState, useEffect, useMemo, useCallback, useRef, FormEvent } from "react";
+import { useState, useEffect, useMemo, useCallback, useRef, useSyncExternalStore, FormEvent } from "react";
 import {
   collection,
   query,
   where,
   orderBy,
   onSnapshot,
-  addDoc,
   updateDoc,
   doc,
   getDoc,
   getDocs,
   Timestamp,
   limit,
+  runTransaction,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth-context";
@@ -51,8 +51,12 @@ import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import { downloadResponse } from "@/lib/file-download";
 import { activeEmployeeOptions, isEmployeeActive } from "@/lib/employees";
+import { WIP_VERSION, applyWipEntry, emptyWipBalance, type WipBalance } from "@/lib/wip";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
+const subscribeToHydration = () => () => {};
+const clientHydratedSnapshot = () => true;
+const serverHydratedSnapshot = () => false;
 
 function getDateBounds(window: TimeWindow, customStart?: string, customEnd?: string) {
   const now = new Date();
@@ -82,16 +86,18 @@ const stageUnit: Record<StageId, string> = {
   "STG-05": "pieces",
   "STG-06": "pieces",
   "STG-07": "pieces",
-  "STG-08": "packs",
+  "STG-08": "pieces",
   "STG-09": "pieces",
   "STG-10": "packs",
 };
 
-const stagesWithMaterial: StageId[] = ["STG-01", "STG-02", "STG-03"];
+const stagesWithMaterial: StageId[] = ["STG-01"];
 
 export default function ProductionPage() {
+  const hasHydrated = useSyncExternalStore(subscribeToHydration, clientHydratedSnapshot, serverHydratedSnapshot);
   const { userRole } = useAuth();
   const [saving, setSaving] = useState(false);
+  const [wipError, setWipError] = useState("");
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("today");
   const [customStart, setCustomStart] = useState("");
@@ -198,6 +204,10 @@ export default function ProductionPage() {
     () => editingEntryId ? entries.find((entry) => entry.id === editingEntryId) ?? null : null,
     [editingEntryId, entries]
   );
+  const formUsesWipLedger = !editingEntry || editingEntry.wipVersion === WIP_VERSION;
+  // Keep the server and first browser render structurally identical. Once
+  // hydration finishes, a historical edit may hide the version-2 batch field.
+  const showWipBatchField = !hasHydrated || formUsesWipLedger;
 
   const activeOverride = useMemo(() => {
     if (!form.employeeId || !form.stageId) return null;
@@ -326,16 +336,14 @@ export default function ProductionPage() {
     const selectedEmployee = employees.find(employee => employee.id === form.employeeId);
     if (!editingEntryId && selectedEmployee && !isEmployeeActive(selectedEmployee)) return;
     if (form.stageId === "STG-09" && !form.productionActivity) return;
-    if (form.stageId === "STG-10" && !form.batchRef) return;
+    const usesWipLedger = formUsesWipLedger;
+    if (usesWipLedger && !form.batchRef) { setWipError("Select the production batch for this WIP entry."); return; }
     if (form.stageId === "STG-01") {
       if (form.inputMode === "manual" && !form.actualPieces) return;
       if (form.inputMode === "measure" && !form.metersInput) return;
     }
-    if (form.stageId === "STG-10" && form.batchRef && batchValidationError) {
-      // Already has a validation error from onChange revert, prevent submit
-      return;
-    }
-    if (form.stageId === "STG-10" && form.batchRef) {
+    if (usesWipLedger && form.batchRef && batchValidationError) return;
+    if (usesWipLedger && form.batchRef) {
       const selectedBatch = batches.find((b) => b.id === form.batchRef);
       const isActive = activeBatch ? selectedBatch?.id === activeBatch.id : false;
       if (!isActive) {
@@ -345,6 +353,7 @@ export default function ProductionPage() {
         return;
       }
     }
+    setWipError("");
     setSaving(true);
     try {
       const isMeasureCutting = form.stageId === "STG-01" && form.inputMode === "measure";
@@ -374,7 +383,7 @@ export default function ProductionPage() {
         targetPieces: dailyTarget,
         targetSnapshot: editingEntry?.targetSnapshot ?? currentTargetSnapshot,
         actualPieces: isMeasureCutting ? calculatedCuttingPieces : form.actualPieces,
-        batchRef: form.stageId === "STG-10" ? form.batchRef : "",
+        batchRef: usesWipLedger ? form.batchRef : editingEntry?.batchRef ?? "",
         performancePct: performance,
         earningsUgx: estimatedEarnings,
         notes: form.notes,
@@ -383,17 +392,44 @@ export default function ProductionPage() {
 
       if (editingEntryId) {
         const oldEntry = entries.find((e) => e.id === editingEntryId);
-        await updateDoc(doc(db, "productionEntries", editingEntryId), entryData);
+        if (!oldEntry) throw new Error("The production entry could not be found.");
+        if (oldEntry.wipVersion === WIP_VERSION) {
+          const entryRef = doc(db, "productionEntries", editingEntryId);
+          const oldBalanceRef = doc(db, "wipBalances", oldEntry.batchRef);
+          const newBalanceRef = doc(db, "wipBalances", form.batchRef);
+          await runTransaction(db, async transaction => {
+            const oldBalanceSnap = await transaction.get(oldBalanceRef);
+            const newBalanceSnap = oldEntry.batchRef === form.batchRef ? oldBalanceSnap : await transaction.get(newBalanceRef);
+            const oldBalance = oldBalanceSnap.exists() ? oldBalanceSnap.data() as WipBalance : emptyWipBalance(oldEntry.batchRef);
+            const reversed = applyWipEntry(oldBalance, oldEntry, -1, oldEntry.batchRef !== form.batchRef);
+            const nextEntry = { ...entryData, wipVersion: WIP_VERSION };
+            if (oldEntry.batchRef === form.batchRef) {
+              transaction.set(oldBalanceRef, { ...applyWipEntry(reversed, nextEntry), updatedAt: Timestamp.now() });
+            } else {
+              const newBalance = newBalanceSnap.exists() ? newBalanceSnap.data() as WipBalance : emptyWipBalance(form.batchRef);
+              transaction.set(oldBalanceRef, { ...reversed, updatedAt: Timestamp.now() });
+              transaction.set(newBalanceRef, { ...applyWipEntry(newBalance, nextEntry), updatedAt: Timestamp.now() });
+            }
+            transaction.update(entryRef, { ...entryData, wipVersion: WIP_VERSION });
+          });
+        } else {
+          // Historical entries stay outside the versioned WIP ledger.
+          await updateDoc(doc(db, "productionEntries", editingEntryId), entryData);
+        }
         setEditingEntryId(null);
         window.history.replaceState({}, "", window.location.pathname);
-        if (oldEntry?.stageId === "STG-10" && oldEntry.batchRef && oldEntry.batchRef !== form.batchRef) {
+        if (oldEntry?.stageId === "STG-10" && oldEntry.batchRef && (form.stageId !== "STG-10" || oldEntry.batchRef !== form.batchRef)) {
           try { await recalculateBatchPacks(oldEntry.batchRef); } catch {}
         }
       } else {
-        await addDoc(collection(db, "productionEntries"), {
-          ...entryData,
-          createdAt: Timestamp.now(),
-          createdBy: userRole?.uid ?? "",
+        const entryRef = doc(collection(db, "productionEntries"));
+        const balanceRef = doc(db, "wipBalances", form.batchRef);
+        await runTransaction(db, async transaction => {
+          const balanceSnap = await transaction.get(balanceRef);
+          const balance = balanceSnap.exists() ? balanceSnap.data() as WipBalance : emptyWipBalance(form.batchRef);
+          const newEntry = { ...entryData, wipVersion: WIP_VERSION };
+          transaction.set(entryRef, { ...entryData, wipVersion: WIP_VERSION, createdAt: Timestamp.now(), createdBy: userRole?.uid ?? "" });
+          transaction.set(balanceRef, { ...applyWipEntry(balance, newEntry), updatedAt: Timestamp.now() });
         });
       }
 
@@ -414,6 +450,8 @@ export default function ProductionPage() {
         actualPieces: 0,
         notes: "",
       }));
+    } catch (error) {
+      setWipError(error instanceof Error ? error.message : "The WIP entry could not be saved.");
     } finally {
       setSaving(false);
     }
@@ -856,6 +894,7 @@ const totalPackagedPads = useMemo(
         className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4"
       >
         <h2 className="text-lg font-semibold text-gray-900">{editingEntryId ? "Edit Production Entry" : "Daily Production Entry"}</h2>
+        {wipError && <div role="alert" className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">{wipError}</div>}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Worker</label>
@@ -1023,7 +1062,7 @@ const totalPackagedPads = useMemo(
           ) : (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">
-                {form.stageId === "STG-08" ? "Packs Produced" : "Pieces Produced"} ({stageUnit[form.stageId]})
+                {form.stageId === "STG-10" ? "Packs Produced" : "Pieces Produced"} ({stageUnit[form.stageId]})
               </label>
               <input
                 type="number"
@@ -1037,7 +1076,7 @@ const totalPackagedPads = useMemo(
               />
             </div>
           )}
-          {form.stageId === "STG-08" && (
+          {showWipBatchField && (
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Batch</label>
               <div className="flex gap-2">
@@ -1107,7 +1146,7 @@ const totalPackagedPads = useMemo(
         <div className="flex justify-end">
           <button
             type="submit"
-            disabled={saving || !form.employeeId || (form.stageId === "STG-08" && !form.batchRef) || (form.stageId === "STG-01" && form.inputMode === "manual" && !form.actualPieces) || (form.stageId === "STG-01" && form.inputMode === "measure" && !form.metersInput) || (form.stageId !== "STG-01" && !form.actualPieces) || batchValidationError !== null}
+            disabled={saving || !form.employeeId || (formUsesWipLedger && !form.batchRef) || (form.stageId === "STG-01" && form.inputMode === "manual" && !form.actualPieces) || (form.stageId === "STG-01" && form.inputMode === "measure" && !form.metersInput) || (form.stageId !== "STG-01" && !form.actualPieces) || Boolean(batchValidationError)}
             className="py-2 px-6 bg-gray-900 text-white text-sm font-medium rounded-md hover:bg-gray-800 disabled:opacity-50"
           >
             {saving ? "Saving..." : editingEntryId ? "Update Entry" : "Log Entry"}

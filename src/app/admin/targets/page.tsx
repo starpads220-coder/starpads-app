@@ -61,7 +61,7 @@ const REVISED_TARGETS: Record<StageId, { defaultTarget: number; defaultWageRate:
   "STG-07": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
   "STG-08": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
   "STG-09": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
-  "STG-10": { defaultTarget: 120, defaultWageRate: 10000, unit: "pieces" },
+  "STG-10": { defaultTarget: 120, defaultWageRate: 10000, unit: "packs" },
 };
 
 const REVISED_MATERIAL_TARGETS: Record<"FLEECE" | "FLANNEL" | "PUL", number> = { FLEECE: 800, FLANNEL: 1000, PUL: 1000 };

@@ -113,7 +113,16 @@ export default function BankingPage() {
       totals.set(key, { name: prior?.name ?? name, amount: (prior?.amount ?? 0) + movement });
     }
     const assigned = [...totals.values()].reduce((sum, item) => sum + item.amount, 0);
-    return [...totals.values(), { name: "Bank (not specified)", amount: currentBankBalance - assigned }];
+    let unassigned = currentBankBalance - assigned;
+    // Historical/opening Bank balances were not tagged to a particular bank.
+    // Use that unassigned pool to cover tagged withdrawals before presenting a
+    // named bank as negative; this preserves the ledger's total Bank balance.
+    const reconciled = [...totals.values()].map(item => {
+      if (item.amount >= 0) return item;
+      unassigned += item.amount;
+      return { ...item, amount: 0 };
+    });
+    return [...reconciled, { name: "Bank (not specified)", amount: unassigned }];
   }, [journals.data, currentBankBalance]);
 
   function chooseDeposit(entry: Journal) {

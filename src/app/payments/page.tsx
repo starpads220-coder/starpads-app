@@ -10,13 +10,13 @@ import {
   onSnapshot,
   runTransaction,
   doc,
-  deleteDoc,
   Timestamp,
   where,
   getDocsFromServer,
   getDocFromServer,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { WIP_VERSION, applyWipEntry, emptyWipBalance, type WipBalance } from "@/lib/wip";
 import { useAuth } from "@/lib/auth-context";
 import {
   ProductionEntry,
@@ -91,10 +91,17 @@ async function getCumulativePayeeForEmployee(
   if (!applicable) return { tax: 0, breakdown: [], previousWithheld: 0, monthlyGross: 0 };
   const { monthStart, monthEnd } = getMonthBounds(todayStr);
   const [existingPaymentsSnap, monthlyEarningsSnap] = await Promise.all([
-    getDocsFromServer(query(collection(db, "payments"), where("employeeId", "==", employeeId), where("paidDate", ">=", monthStart), where("paidDate", "<=", monthEnd), orderBy("paidDate", "desc"))),
+    // Query by employee only and apply the calendar-month bounds locally. The
+    // former range + order query required a composite Firestore index; when
+    // that index was absent the PAYE preview silently failed and Confirm Pay
+    // remained disabled forever.
+    getDocsFromServer(query(collection(db, "payments"), where("employeeId", "==", employeeId))),
     getDocsFromServer(query(collection(db, "productionEntries"), where("employeeId", "==", employeeId))),
   ]);
-  const confirmed = existingPaymentsSnap.docs.filter(d => d.data().status === "paid" && d.data().payeApplicable !== false);
+  const confirmed = existingPaymentsSnap.docs.filter(d => {
+    const data = d.data();
+    return data.status === "paid" && data.payeApplicable !== false && data.paidDate >= monthStart && data.paidDate <= monthEnd;
+  });
   const alreadyPaidPayee = confirmed.reduce(
     (sum, d) => sum + (Number(d.data().payeeTax) || 0),
     0
@@ -178,6 +185,7 @@ export default function PaymentsPage() {
     setPayeSettingsError(null);
     setPayeSettingsLoading(true);
     setPayeDetailsOpen(false);
+    setPaymentSourceCode("");
     setPayEmployeeId(employeeId);
   };
 
@@ -396,7 +404,7 @@ export default function PaymentsPage() {
 
   const isAdmin = userRole?.role === "ADMIN";
   const isSupervisor = userRole?.role === "PRODUCTION_SUPERVISOR";
-  const canPay = ["ADMIN", "PRODUCTION_SUPERVISOR", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
+  const canPay = ["ADMIN", "FINANCE", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
   const canEdit = isAdmin || isSupervisor;
   const canDelete = isAdmin || isSupervisor;
 
@@ -416,7 +424,24 @@ export default function PaymentsPage() {
 
   const handleDeleteEntry = async (entryId: string) => {
     try {
-      await deleteDoc(doc(db, "productionEntries", entryId));
+      const entry = entries.find(item => item.id === entryId);
+      if (!entry) throw new Error("The production entry could not be found.");
+      if (entry.movedToStockAt) throw new Error("This packaging entry has already been moved to stock and cannot be deleted until its stock movement is reversed.");
+      if (entry.wipVersion === WIP_VERSION && entry.batchRef) {
+        const entryRef = doc(db, "productionEntries", entryId);
+        const balanceRef = doc(db, "wipBalances", entry.batchRef);
+        const batchRef = doc(db, "batches", entry.batchRef);
+        await runTransaction(db, async transaction => {
+          const balanceSnap = await transaction.get(balanceRef);
+          const batchSnap = entry.stageId === "STG-10" ? await transaction.get(batchRef) : null;
+          const balance = balanceSnap.exists() ? balanceSnap.data() as WipBalance : emptyWipBalance(entry.batchRef);
+          transaction.set(balanceRef, { ...applyWipEntry(balance, entry, -1), updatedAt: Timestamp.now() });
+          if (batchSnap?.exists()) transaction.update(batchRef, { packsProduced: Math.max(0, (Number(batchSnap.data().packsProduced) || 0) - entry.actualPieces) });
+          transaction.delete(entryRef);
+        });
+      } else {
+        await runTransaction(db, async transaction => transaction.delete(doc(db, "productionEntries", entryId)));
+      }
       showToast("Entry deleted successfully.", "success");
       setDeleteConfirmEntryId(null);
     } catch (err: unknown) {
@@ -424,7 +449,12 @@ export default function PaymentsPage() {
     }
   };
 
-  const payEmployee = employeePayments.find((e) => e.employeeId === payEmployeeId) ?? allDueEmployeePayments.find((e) => e.employeeId === payEmployeeId);
+  // The Due Payments tab shows the employee's complete outstanding balance,
+  // independent of the period selector. Resolve the modal from the same data
+  // source so the amount shown, confirmed and marked paid always matches.
+  const payEmployee = activeTab === "due"
+    ? allDueEmployeePayments.find((e) => e.employeeId === payEmployeeId)
+    : employeePayments.find((e) => e.employeeId === payEmployeeId);
   const payeApplicable = employees.find(e => e.id === payEmployeeId)?.payeApplicable !== false;
   const previewEmployeeId = payEmployee?.employeeId;
   const previewGross = payEmployee?.dueAmount;
@@ -477,7 +507,12 @@ export default function PaymentsPage() {
     const todayStr = new Date().toISOString().split("T")[0];
     getCumulativePayeeForEmployee(previewEmployeeId, previewGross, todayStr, popupPayeSettings.bands, payeApplicable)
       .then((result) => { if (!cancelled) setModalPayePreview({ key: payePreviewKey, ...result }); })
-      .catch(() => { if (!cancelled) setModalPayePreview(null); });
+      .catch((error) => {
+        if (!cancelled) {
+          setModalPayePreview(null);
+          setPayeSettingsError(error instanceof Error ? `PAYE calculation failed: ${error.message}` : "PAYE calculation failed. Close this window and try again.");
+        }
+      });
     return () => { cancelled = true; };
   }, [previewEmployeeId, previewGross, popupPayeSettings, payeApplicable, payePreviewKey, payeSettingsError]);
 
@@ -575,8 +610,8 @@ export default function PaymentsPage() {
             receiptNumber={receiptNumber}
             employeeName={payEmployee.employeeName}
             employeeRole="WORKER — PRODUCTION"
-            periodStart={start}
-            periodEnd={end}
+            periodStart={paymentPeriodStart}
+            periodEnd={paymentPeriodEnd}
             paidDate={new Date().toISOString().split("T")[0]}
             entries={payEmployee.dueEntries.map((e) => ({
               date: e.date,
@@ -1306,7 +1341,7 @@ export default function PaymentsPage() {
                 </h2>
                 <p className="text-sm text-gray-500">
                   {payEmployee.employeeName} &mdash;{" "}
-                  {timeWindow === "today" ? "Today" : timeWindow === "week" ? "This Week" : timeWindow === "month" ? "This Month" : timeWindow === "12months" ? "12 Months" : `${start} to ${end}`}
+                  {activeTab === "due" ? "All outstanding production entries" : timeWindow === "today" ? "Today" : timeWindow === "week" ? "This Week" : timeWindow === "month" ? "This Month" : timeWindow === "12months" ? "12 Months" : `${start} to ${end}`}
                 </p>
               </div>
               <button

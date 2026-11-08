@@ -129,6 +129,8 @@ export interface ProductionEntry {
   paymentStatus?: "due" | "paid";
   paymentId?: string;
   movedToStockAt?: import("firebase/firestore").Timestamp | null;
+  /** Version 2 entries participate in the batch-based WIP movement ledger. */
+  wipVersion?: 2;
 }
 
 export interface StockIn {

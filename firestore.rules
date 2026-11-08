@@ -103,15 +103,27 @@ service cloud.firestore {
     // productionEntries - Daily production records
     // All authenticated users can read
     // Create: PRODUCTION_SUPERVISOR or ADMIN
-    // Update: ADMIN, PRODUCTION_SUPERVISOR or FINANCIAL_MANAGER.
-    // Non-admin roles may change only the payment linkage fields.
+    // Production supervisors may edit production details but cannot mark them
+    // paid. Payment linkage is restricted to finance roles and admins.
     // Delete: ADMIN only
     // ============================================================
     match /productionEntries/{entryId} {
       allow read: if isAuthenticated();
       allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
-      allow update: if isAdmin() || (hasAnyRole(['PRODUCTION_SUPERVISOR', 'FINANCIAL_MANAGER']) && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'paymentId']));
+      allow update: if isAdmin()
+        || (hasRole('PRODUCTION_SUPERVISOR')
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentStatus', 'paymentId']))
+        || (hasAnyRole(['FINANCE', 'FINANCIAL_MANAGER'])
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'paymentId']));
       allow delete: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+    }
+
+    // Atomic per-batch WIP balances. Historical production entries do not
+    // participate; only versioned entries update these documents.
+    match /wipBalances/{batchId} {
+      allow read: if isAuthenticated();
+      allow create, update: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+      allow delete: if isAdmin();
     }
 
 
@@ -142,12 +154,12 @@ service cloud.firestore {
     // ============================================================
     // payments - Payment records & receipts
     // All authenticated users can read
-    // Create: ADMIN, PRODUCTION_SUPERVISOR or FINANCIAL_MANAGER (via Pay Due flow)
+    // Create: ADMIN or finance roles only (via Pay Due flow)
     // No update/delete (immutable once created)
     // ============================================================
     match /payments/{paymentId} {
       allow read: if isAuthenticated();
-      allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR', 'FINANCIAL_MANAGER'])
+      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdByRole == getUserRole();
       allow update, delete: if false;
@@ -399,6 +411,35 @@ service cloud.firestore {
         && request.resource.data.date is string
         && request.resource.data.description is string
         && request.resource.data.amount is number && request.resource.data.amount > 0;
+      allow delete: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
+    }
+    match /inventoryTransactions/{transactionId} {
+      allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF']);
+      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.type in ['raw_material_purchase', 'raw_material_opening', 'raw_material_loss', 'raw_to_wip', 'wip_opening', 'wip_to_finished', 'wip_wastage', 'finished_goods_opening', 'finished_goods_sale', 'finished_goods_loss', 'inventory_supplier_payment']
+        && request.resource.data.date is string
+        && request.resource.data.description is string && request.resource.data.description.size() > 0
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && request.resource.data.get('metres', 0) is number && request.resource.data.get('metres', 0) >= 0
+        && request.resource.data.get('quantity', 0) is number && request.resource.data.get('quantity', 0) >= 0
+        && request.resource.data.get('rolls', 0) is number && request.resource.data.get('rolls', 0) >= 0
+        && request.resource.data.get('unitCost', 0) is number && request.resource.data.get('unitCost', 0) >= 0
+        && (!request.resource.data.keys().hasAny(['material']) || request.resource.data.material in ['PUL', 'FLANNEL', 'FLEECE'])
+        && (!request.resource.data.keys().hasAny(['settlementCode']) || request.resource.data.settlementCode in ['1000', '1030', '2110', '3060']);
+      allow update: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+        && request.resource.data.createdBy == resource.data.createdBy
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.type in ['raw_material_purchase', 'raw_material_opening', 'raw_material_loss', 'raw_to_wip', 'wip_opening', 'wip_to_finished', 'wip_wastage', 'finished_goods_opening', 'finished_goods_sale', 'finished_goods_loss', 'inventory_supplier_payment']
+        && request.resource.data.date is string
+        && request.resource.data.description is string && request.resource.data.description.size() > 0
+        && request.resource.data.amount is number && request.resource.data.amount > 0
+        && request.resource.data.get('metres', 0) is number && request.resource.data.get('metres', 0) >= 0
+        && request.resource.data.get('quantity', 0) is number && request.resource.data.get('quantity', 0) >= 0
+        && request.resource.data.get('rolls', 0) is number && request.resource.data.get('rolls', 0) >= 0
+        && request.resource.data.get('unitCost', 0) is number && request.resource.data.get('unitCost', 0) >= 0
+        && (!request.resource.data.keys().hasAny(['material']) || request.resource.data.material in ['PUL', 'FLANNEL', 'FLEECE'])
+        && (!request.resource.data.keys().hasAny(['settlementCode']) || request.resource.data.settlementCode in ['1000', '1030', '2110', '3060']);
       allow delete: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
     }
     match /expenses/{expenseId} {
