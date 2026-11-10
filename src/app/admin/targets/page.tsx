@@ -57,7 +57,6 @@ const REVISED_TARGETS: Record<StageId, { defaultTarget: number; defaultWageRate:
   "STG-03": { defaultTarget: 450, defaultWageRate: 10000, unit: "pieces" },
   "STG-04": { defaultTarget: 500, defaultWageRate: 10000, unit: "pieces" },
   "STG-05": { defaultTarget: 500, defaultWageRate: 10000, unit: "pieces" },
-  "STG-06": { defaultTarget: 500, defaultWageRate: 10000, unit: "pieces" },
   "STG-07": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
   "STG-08": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
   "STG-09": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
@@ -68,16 +67,6 @@ const REVISED_MATERIAL_TARGETS: Record<"FLEECE" | "FLANNEL" | "PUL", number> = {
 const REVISED_METER_TARGETS: Record<"FLEECE" | "FLANNEL" | "PUL", number> = { FLEECE: 26, FLANNEL: 50, PUL: 50 };
 const REVISED_ACTIVITY_TARGETS: Record<ProductionActivity, number> = { PINNING: 500, FOLDING: 700 };
 const ACTIVITY_LABELS: Record<ProductionActivity, string> = { PINNING: "Pinning", FOLDING: "Folding" };
-const TARGET_LABELS: Partial<Record<StageId, string>> = {
-  "STG-02": "Sewing inner (middle)",
-  "STG-03": "Sewing outer (top layer)",
-  "STG-04": "Overlocking",
-  "STG-05": "Pouch making & cutting",
-  "STG-07": "Checking",
-  "STG-08": "Holling",
-  "STG-10": "Packaging",
-};
-
 interface WorkerTarget {
   id: string;
   employeeId: string;
@@ -172,14 +161,11 @@ export default function AdminTargetsPage() {
         stageRows.push({ ...resolved, material, activity: null, variant: "materialMeters", unit: "meters", label: meterLabel, exists: !!stage });
       }
     } else if (stageId === "STG-05") {
-      const pairedStage = stages.find(item => item.stageId === "STG-06");
-      stageRows.push({ ...resolved, material: null, activity: null, variant: "combinedStage", label: TARGET_LABELS[stageId]!, secondaryStageId: "STG-06", exists: !!stage && !!pairedStage });
-    } else if (stageId === "STG-06") {
-      continue;
+      stageRows.push({ ...resolved, material: null, activity: null, variant: "stage", label: STAGE_LABELS[stageId], exists: !!stage });
     } else if (stageId === "STG-09") {
       for (const activity of ["PINNING", "FOLDING"] as ProductionActivity[]) stageRows.push({ ...resolved, material: null, activity, variant: "activity", label: ACTIVITY_LABELS[activity], exists: !!stage });
     } else {
-      stageRows.push({ ...resolved, material: null, activity: null, variant: "stage", label: TARGET_LABELS[stageId] ?? STAGE_LABELS[stageId], exists: !!stage });
+      stageRows.push({ ...resolved, material: null, activity: null, variant: "stage", label: STAGE_LABELS[stageId], exists: !!stage });
     }
   }
   const pieceTargetRows = stageRows.filter(row => row.variant !== "materialMeters");
@@ -201,7 +187,6 @@ export default function AdminTargetsPage() {
         activityTargets: stageId === "STG-09" ? REVISED_ACTIVITY_TARGETS : null,
         updatedAt: Timestamp.now(),
       });
-      if (stageId === "STG-05") await setDoc(doc(db, "productionStages", "STG-06"), { stageId: "STG-06", name: STAGE_LABELS["STG-06"], ...REVISED_TARGETS["STG-06"], updatedAt: Timestamp.now() });
       queryClient.invalidateQueries({ queryKey: ["productionStages"] });
     } finally {
       setSaving(false);

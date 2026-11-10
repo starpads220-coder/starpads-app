@@ -317,7 +317,7 @@ export default function StoragePage() {
   const wipEntries = useMemo(() => {
     const wipBounds = getStoragePeriodBounds(wipPeriod, wipCustomStart, wipCustomEnd);
     return productionEntries
-      .filter((e) => e.wipVersion === WIP_VERSION && (!wipBatchId || e.batchRef === wipBatchId) && e.date >= wipBounds.start && e.date <= wipBounds.end)
+      .filter((e) => e.wipVersion === WIP_VERSION && (!wipBatchId || e.stageId !== "STG-10" || e.batchRef === wipBatchId) && e.date >= wipBounds.start && e.date <= wipBounds.end)
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [productionEntries, wipBatchId, wipPeriod, wipCustomStart, wipCustomEnd]);
 

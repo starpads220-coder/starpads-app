@@ -1,8 +1,7 @@
 import React from "react";
 import { Page, Text, View, Document } from "@react-pdf/renderer";
 import { pdfStyles, colWidth } from "./PDFStyles";
-import { STAGE_LABELS } from "@/types";
-import type { StageId } from "@/types";
+import { stageLabel } from "@/lib/production-stages";
 
 interface ProdEntry {
   date: string;
@@ -69,7 +68,7 @@ export function ProductionPDF({ title, period, entries, totalPieces, totalEarnin
                 <View style={pdfStyles.tableRow} key={i}>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(14) }}><Text style={pdfStyles.tableCell}>{d.date}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(18) }}><Text style={pdfStyles.tableCell}>{d.employeeName}</Text></View>
-                  <View style={{ ...pdfStyles.tableCol, width: colWidth(20) }}><Text style={pdfStyles.tableCell}>{STAGE_LABELS[d.stageId as StageId] || d.stageId}</Text></View>
+                  <View style={{ ...pdfStyles.tableCol, width: colWidth(20) }}><Text style={pdfStyles.tableCell}>{stageLabel(d.stageId)}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(12) }}><Text style={pdfStyles.tableCell}>{d.actualPieces.toLocaleString()}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(12) }}><Text style={pdfStyles.tableCell}>{d.targetPieces.toLocaleString()}</Text></View>
                   <View style={{ ...pdfStyles.tableCol, width: colWidth(12) }}><Text style={pdfStyles.tableCell}>{perf}</Text></View>

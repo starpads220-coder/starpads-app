@@ -7,7 +7,10 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:stages": "node scripts/check_stage_consistency.js",
+    "check:wip": "node scripts/verify_wip_flow.js",
+    "check:reports": "node scripts/check_report_downloads.js"
   },
   "dependencies": {
     "@ducanh2912/next-pwa": "^10.2.9",

@@ -1,5 +1,6 @@
 import React from 'react';
 import { Page, Text, View, Document, StyleSheet } from '@react-pdf/renderer';
+import { stageLabel } from '@/lib/production-stages';
 
 const styles = StyleSheet.create({
   page: {
@@ -98,19 +99,6 @@ const styles = StyleSheet.create({
   }
 });
 
-const STAGE_LABELS: Record<string, string> = {
-  "STG-01": "Cutting",
-  "STG-02": "Sewing Inner [M]",
-  "STG-03": "Sewing Outer [TL]",
-  "STG-04": "Overlocking",
-  "STG-05": "Pouch Cutting",
-  "STG-06": "Pouch Making",
-  "STG-07": "Checking",
-  "STG-08": "Holling",
-  "STG-09": "Pinning and Folding",
-  "STG-10": "Packaging",
-};
-
 interface EntryData {
   date?: string;
   employeeId?: string;
@@ -166,7 +154,7 @@ export const ProductionReportPDF = ({ title, period, entries, totalPieces, total
             <View style={styles.tableRow} key={i}>
               <View style={styles.tableCol}><Text style={styles.tableCell}>{date}</Text></View>
               <View style={styles.tableCol}><Text style={styles.tableCell}>{employeeId}</Text></View>
-              <View style={styles.tableCol}><Text style={styles.tableCell}>{STAGE_LABELS[stageId] || stageId}</Text></View>
+              <View style={styles.tableCol}><Text style={styles.tableCell}>{stageLabel(stageId)}</Text></View>
               <View style={styles.tableCol}><Text style={styles.tableCell}>{actualPieces}</Text></View>
               <View style={styles.tableCol}><Text style={styles.tableCell}>{targetPieces}</Text></View>
               <View style={styles.tableCol}><Text style={styles.tableCell}>{perf}</Text></View>

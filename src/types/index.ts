@@ -19,24 +19,8 @@ export type MaterialType =
   | "MICROFIBER"
   | "COMBINED";
 
-export type StageId = "STG-01" | "STG-02" | "STG-03" | "STG-04" | "STG-05" | "STG-06" | "STG-07" | "STG-08" | "STG-09" | "STG-10";
-
-export const STAGE_LABELS: Record<StageId, string> = {
-  "STG-01": "Cutting & Measuring",
-  "STG-02": "Sewing Inner [Middle]",
-  "STG-03": "Sewing Outer [TopLayer]",
-  "STG-04": "Overlocking",
-  "STG-05": "Pouch Cutting",
-  "STG-06": "Pouch Making",
-  "STG-07": "Checking",
-  "STG-08": "Holling",
-  "STG-09": "Pinning and Folding",
-  "STG-10": "Packaging",
-};
-
-export const STAGE_ORDER: StageId[] = [
-  "STG-01", "STG-02", "STG-03", "STG-04", "STG-05", "STG-06", "STG-07", "STG-08", "STG-09", "STG-10"
-];
+export { PRODUCTION_STAGES, STAGE_LABELS, STAGE_ORDER, STAGE_UNITS, FINISHED_PADS_STAGE_ID, type StageId } from "@/lib/production-stages";
+import type { StageId } from "@/lib/production-stages";
 
 export const MATERIAL_CATEGORY_OPTIONS: Record<MaterialCategory, MaterialType[]> = {
   SEWING_INNER: ["MICROFIBER", "FLANNEL"],
@@ -129,8 +113,11 @@ export interface ProductionEntry {
   paymentStatus?: "due" | "paid";
   paymentId?: string;
   movedToStockAt?: import("firebase/firestore").Timestamp | null;
-  /** Version 2 entries participate in the batch-based WIP movement ledger. */
-  wipVersion?: 2;
+  /** Version 3 entries participate in the global stage-movement WIP ledger. */
+  wipVersion?: 2 | 3;
+  /** Preserves the two historical operations that were merged into canonical STG-05. */
+  combinedStageComponent?: "CUTTING" | "MAKING";
+  legacyStageId?: "STG-05" | "STG-06";
 }
 
 export interface StockIn {

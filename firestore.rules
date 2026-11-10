@@ -31,6 +31,26 @@ service cloud.firestore {
       return 'PRODUCTION';
     }
 
+    function isCanonicalProductionEntry(data) {
+      return data.stageId in ['STG-01', 'STG-02', 'STG-03', 'STG-04', 'STG-05', 'STG-07', 'STG-08', 'STG-09', 'STG-10']
+        && (data.stageId == 'STG-10'
+          ? data.batchRef is string && data.batchRef.size() > 0
+          : !('batchRef' in data) || data.batchRef == '');
+    }
+
+    function canonicalStageName(stageId) {
+      return stageId == 'STG-01' ? 'Cutting & Measuring'
+        : stageId == 'STG-02' ? 'Sewing inner (middle)'
+        : stageId == 'STG-03' ? 'Sewing outer (top layer)'
+        : stageId == 'STG-04' ? 'Overlocking'
+        : stageId == 'STG-05' ? 'Pouch making and cutting'
+        : stageId == 'STG-07' ? 'Checking'
+        : stageId == 'STG-08' ? 'Holling'
+        : stageId == 'STG-09' ? 'Pinning and Folding'
+        : stageId == 'STG-10' ? 'Packaging'
+        : null;
+    }
+
 
     // ============================================================
     // userRoles - Role assignments (sensitive)
@@ -85,7 +105,9 @@ service cloud.firestore {
     // ============================================================
     match /productionStages/{stageId} {
       allow read: if isAuthenticated();
-      allow write: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+      allow write: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR'])
+        && request.resource.data.stageId == stageId
+        && request.resource.data.name == canonicalStageName(stageId);
     }
 
 
@@ -109,17 +131,19 @@ service cloud.firestore {
     // ============================================================
     match /productionEntries/{entryId} {
       allow read: if isAuthenticated();
-      allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
-      allow update: if isAdmin()
+      allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']) && isCanonicalProductionEntry(request.resource.data);
+      allow update: if (isAdmin()
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stageId', 'batchRef']) || isCanonicalProductionEntry(request.resource.data)))
         || (hasRole('PRODUCTION_SUPERVISOR')
-          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentStatus', 'paymentId']))
+          && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentStatus', 'paymentId'])
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stageId', 'batchRef']) || isCanonicalProductionEntry(request.resource.data)))
         || (hasAnyRole(['FINANCE', 'FINANCIAL_MANAGER'])
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'paymentId']));
       allow delete: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
     }
 
-    // Atomic per-batch WIP balances. Historical production entries do not
-    // participate; only versioned entries update these documents.
+    // Atomic global WIP balance. Historical records are migrated to the current
+    // version; only STG-10 output remains attached to an individual batch.
     match /wipBalances/{batchId} {
       allow read: if isAuthenticated();
       allow create, update: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);

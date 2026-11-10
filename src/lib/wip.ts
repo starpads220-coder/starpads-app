@@ -1,6 +1,7 @@
 import type { MaterialType, ProductionEntry, StageId } from "@/types";
 
-export const WIP_VERSION = 2 as const;
+export const WIP_VERSION = 3 as const;
+export const GLOBAL_WIP_BALANCE_ID = "GLOBAL" as const;
 
 export const WIP_KEYS = [
   "fleeceCut", "flannelCut", "pulCut", "innerStitched", "fullyStitched",
@@ -10,7 +11,7 @@ export const WIP_KEYS = [
 
 export type WipKey = typeof WIP_KEYS[number];
 export type WipQuantities = Record<WipKey, number>;
-export interface WipBalance extends WipQuantities { batchRef: string; wipVersion: 2 }
+export interface WipBalance extends WipQuantities { batchRef: string; wipVersion: 3 }
 
 export const WIP_LABELS: Record<WipKey, string> = {
   fleeceCut: "Cut Fleece / Microfiber",
@@ -37,6 +38,7 @@ export interface WipEntry {
   productionActivity?: ProductionEntry["productionActivity"] | null;
   materialType?: MaterialType | null;
   materialTypes?: MaterialType[] | null;
+  combinedStageComponent?: "CUTTING" | "MAKING" | null;
 }
 
 export function wipDelta(entry: WipEntry): WipQuantities {
@@ -56,8 +58,13 @@ export function wipDelta(entry: WipEntry): WipQuantities {
     case "STG-02": move("fleeceCut", -quantity); move("flannelCut", -quantity); move("innerStitched", quantity); break;
     case "STG-03": move("innerStitched", -quantity); move("pulCut", -quantity); move("fullyStitched", quantity); break;
     case "STG-04": move("fullyStitched", -quantity); move("overlocked", quantity); break;
-    case "STG-05": move("pouchCut", quantity); break;
-    case "STG-06": move("pouchCut", -quantity); move("pouchMade", quantity); break;
+    case "STG-05":
+      // Migrated historical STG-05/STG-06 records retain their two-step WIP
+      // meaning. New canonical STG-05 entries complete the combined task.
+      if (entry.combinedStageComponent === "CUTTING") move("pouchCut", quantity);
+      else if (entry.combinedStageComponent === "MAKING") { move("pouchCut", -quantity); move("pouchMade", quantity); }
+      else move("pouchMade", quantity);
+      break;
     case "STG-07": move("overlocked", -quantity); move("checked", quantity); break;
     case "STG-08": move("checked", -quantity); move("holed", quantity); break;
     case "STG-09":
@@ -84,7 +91,7 @@ export function applyWipEntry(current: WipBalance, entry: WipEntry, direction: 1
 export function calculateWip(entries: ProductionEntry[], batchRef?: string, asAtDate?: string): WipQuantities {
   const totals = emptyWipQuantities();
   for (const entry of entries) {
-    if (entry.wipVersion !== WIP_VERSION || (batchRef && entry.batchRef !== batchRef) || (asAtDate && entry.date > asAtDate)) continue;
+    if (entry.wipVersion !== WIP_VERSION || (batchRef && entry.stageId === "STG-10" && entry.batchRef !== batchRef) || (asAtDate && entry.date > asAtDate)) continue;
     const delta = wipDelta(entry);
     for (const key of WIP_KEYS) totals[key] += delta[key];
   }

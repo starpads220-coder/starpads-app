@@ -16,7 +16,7 @@ import {
   getDocFromServer,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { WIP_VERSION, applyWipEntry, emptyWipBalance, type WipBalance } from "@/lib/wip";
+import { WIP_VERSION, GLOBAL_WIP_BALANCE_ID, applyWipEntry, emptyWipBalance, type WipBalance } from "@/lib/wip";
 import { useAuth } from "@/lib/auth-context";
 import {
   ProductionEntry,
@@ -452,16 +452,16 @@ export default function PaymentsPage() {
       const entry = entries.find(item => item.id === entryId);
       if (!entry) throw new Error("The production entry could not be found.");
       if (entry.movedToStockAt) throw new Error("This packaging entry has already been moved to stock and cannot be deleted until its stock movement is reversed.");
-      if (entry.wipVersion === WIP_VERSION && entry.batchRef) {
+      if (entry.wipVersion === WIP_VERSION) {
         const entryRef = doc(db, "productionEntries", entryId);
-        const balanceRef = doc(db, "wipBalances", entry.batchRef);
-        const batchRef = doc(db, "batches", entry.batchRef);
+        const balanceRef = doc(db, "wipBalances", GLOBAL_WIP_BALANCE_ID);
+        const batchRef = entry.batchRef ? doc(db, "batches", entry.batchRef) : null;
         await runTransaction(db, async transaction => {
           const balanceSnap = await transaction.get(balanceRef);
-          const batchSnap = entry.stageId === "STG-10" ? await transaction.get(batchRef) : null;
-          const balance = balanceSnap.exists() ? balanceSnap.data() as WipBalance : emptyWipBalance(entry.batchRef);
+          const batchSnap = entry.stageId === "STG-10" && batchRef ? await transaction.get(batchRef) : null;
+          const balance = balanceSnap.exists() ? balanceSnap.data() as WipBalance : emptyWipBalance(GLOBAL_WIP_BALANCE_ID);
           transaction.set(balanceRef, { ...applyWipEntry(balance, entry, -1), updatedAt: Timestamp.now() });
-          if (batchSnap?.exists()) transaction.update(batchRef, { packsProduced: Math.max(0, (Number(batchSnap.data().packsProduced) || 0) - entry.actualPieces) });
+          if (batchSnap?.exists() && batchRef) transaction.update(batchRef, { packsProduced: Math.max(0, (Number(batchSnap.data().packsProduced) || 0) - entry.actualPieces) });
           transaction.delete(entryRef);
         });
       } else {

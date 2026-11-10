@@ -610,6 +610,8 @@ export async function GET(request: NextRequest) {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${screen}-report-${startDate}.pdf"`,
+        "Cache-Control": "private, no-store, max-age=0",
+        "X-Content-Type-Options": "nosniff",
       },
     });
   } catch (error) {

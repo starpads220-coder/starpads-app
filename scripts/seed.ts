@@ -25,15 +25,15 @@ const app = initializeApp({
 const db = getFirestore(app);
 
 const STAGES = [
-  { stageId: "STG-01", name: "Cutting", defaultTarget: 700, unit: "pieces", defaultWageRate: 10000, materialTargets: { FLEECE: 700, FLANNEL: 350, PUL: 350 } },
-  { stageId: "STG-02", name: "Sewing Inner [Middle]", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
-  { stageId: "STG-03", name: "Sewing Outer [TopLayer]", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
-  { stageId: "STG-04", name: "Overlocking", defaultTarget: 350, unit: "pieces", defaultWageRate: 10000 },
-  { stageId: "STG-05", name: "Pouch Making", defaultTarget: 250, unit: "pieces", defaultWageRate: 8000 },
-  { stageId: "STG-06", name: "Checking", defaultTarget: 200, unit: "pieces", defaultWageRate: 10000 },
-  { stageId: "STG-07", name: "Holling", defaultTarget: 400, unit: "pieces", defaultWageRate: 8000 },
-  { stageId: "STG-08", name: "Pinning and Folding", defaultTarget: 360, unit: "pieces", defaultWageRate: 10000 },
-  { stageId: "STG-09", name: "Packaging", defaultTarget: 120, unit: "packs", defaultWageRate: 12000 },
+  { stageId: "STG-01", name: "Cutting & Measuring", defaultTarget: 800, unit: "pieces", defaultWageRate: 10000, materialTargets: { FLEECE: 800, FLANNEL: 1000, PUL: 1000 } },
+  { stageId: "STG-02", name: "Sewing inner (middle)", defaultTarget: 500, unit: "pieces", defaultWageRate: 10000 },
+  { stageId: "STG-03", name: "Sewing outer (top layer)", defaultTarget: 450, unit: "pieces", defaultWageRate: 10000 },
+  { stageId: "STG-04", name: "Overlocking", defaultTarget: 500, unit: "pieces", defaultWageRate: 10000 },
+  { stageId: "STG-05", name: "Pouch making and cutting", defaultTarget: 500, unit: "pieces", defaultWageRate: 10000 },
+  { stageId: "STG-07", name: "Checking", defaultTarget: 500, unit: "pieces", defaultWageRate: 8000 },
+  { stageId: "STG-08", name: "Holling", defaultTarget: 500, unit: "pieces", defaultWageRate: 8000 },
+  { stageId: "STG-09", name: "Pinning and Folding", defaultTarget: 500, unit: "pieces", defaultWageRate: 8000 },
+  { stageId: "STG-10", name: "Packaging", defaultTarget: 120, unit: "packs", defaultWageRate: 10000 },
 ];
 
 async function seed() {
