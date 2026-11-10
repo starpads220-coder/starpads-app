@@ -13,6 +13,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useRealtimeCollection } from "@/hooks/use-firestore-query";
 import { showToast } from "@/components/ui/Toast";
 import type { Expense, Payment, PayeRemittance } from "@/types";
+import { affectsPayrollAccounts } from "@/lib/payroll-accounting";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const currentMonth = () => new Date().toISOString().slice(0, 7);
@@ -31,7 +32,7 @@ export function PayeRemittanceCard() {
 
   const totalWithheld = useMemo(
     () => payments.data
-      .filter(payment => payment.status === "paid" && payment.payrollVersion === 2)
+      .filter(payment => affectsPayrollAccounts(payment) && payment.status === "paid" && payment.payrollVersion === 2)
       .reduce((sum, payment) => sum + (Number(payment.payeeTax) || 0), 0) + expenses.data.filter(expense => expense.payrollExpenseVersion === 2).reduce((sum, expense) => sum + (Number(expense.payeeTax) || 0), 0),
     [payments.data, expenses.data],
   );
@@ -42,7 +43,7 @@ export function PayeRemittanceCard() {
   const outstanding = Math.max(0, totalWithheld - totalRemitted);
   const selectedPeriodWithheld = useMemo(
     () => payments.data
-      .filter(payment => payment.status === "paid" && payment.payrollVersion === 2 && payment.paidDate?.startsWith(form.returnPeriod))
+      .filter(payment => affectsPayrollAccounts(payment) && payment.status === "paid" && payment.payrollVersion === 2 && payment.paidDate?.startsWith(form.returnPeriod))
       .reduce((sum, payment) => sum + (Number(payment.payeeTax) || 0), 0) + expenses.data.filter(expense => expense.payrollExpenseVersion === 2 && expense.date?.startsWith(form.returnPeriod)).reduce((sum, expense) => sum + (Number(expense.payeeTax) || 0), 0),
     [payments.data, expenses.data, form.returnPeriod],
   );
@@ -83,7 +84,7 @@ export function PayeRemittanceCard() {
       ]);
       const serverWithheld = paymentSnapshot.docs.reduce((sum, payment) => {
         const data = payment.data();
-        return data.status === "paid" && data.payrollVersion === 2 && String(data.paidDate ?? "").startsWith(form.returnPeriod)
+        return affectsPayrollAccounts(data) && data.status === "paid" && data.payrollVersion === 2 && String(data.paidDate ?? "").startsWith(form.returnPeriod)
           ? sum + (Number(data.payeeTax) || 0)
           : sum;
       }, 0);

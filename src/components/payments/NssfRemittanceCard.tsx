@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useRealtimeCollection } from "@/hooks/use-firestore-query";
 import { showToast } from "@/components/ui/Toast";
 import type { Expense, NssfRemittance, Payment } from "@/types";
+import { affectsPayrollAccounts } from "@/lib/payroll-accounting";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const currentMonth = () => new Date().toISOString().slice(0, 7);
@@ -24,10 +25,10 @@ export function NssfRemittanceCard() {
   const [form, setForm] = useState(emptyForm);
   const canRemit = ["ADMIN", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
 
-  const totalWithheld = useMemo(() => payments.data.filter(payment => payment.status === "paid" && payment.payrollVersion === 2).reduce((sum, payment) => sum + (Number(payment.nssfEmployeeDeduction) || 0) + (Number(payment.nssfBusinessContribution) || 0), 0) + expenses.data.filter(expense => expense.payrollExpenseVersion === 2).reduce((sum, expense) => sum + (Number(expense.nssfEmployeeDeduction) || 0) + (Number(expense.nssfBusinessContribution) || 0), 0), [payments.data, expenses.data]);
+  const totalWithheld = useMemo(() => payments.data.filter(payment => affectsPayrollAccounts(payment) && payment.status === "paid" && payment.payrollVersion === 2).reduce((sum, payment) => sum + (Number(payment.nssfEmployeeDeduction) || 0) + (Number(payment.nssfBusinessContribution) || 0), 0) + expenses.data.filter(expense => expense.payrollExpenseVersion === 2).reduce((sum, expense) => sum + (Number(expense.nssfEmployeeDeduction) || 0) + (Number(expense.nssfBusinessContribution) || 0), 0), [payments.data, expenses.data]);
   const totalRemitted = useMemo(() => remittances.data.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0), [remittances.data]);
   const outstanding = Math.max(0, totalWithheld - totalRemitted);
-  const periodWithheld = useMemo(() => payments.data.filter(payment => payment.status === "paid" && payment.payrollVersion === 2 && payment.paidDate?.startsWith(form.returnPeriod)).reduce((sum, payment) => sum + (Number(payment.nssfEmployeeDeduction) || 0) + (Number(payment.nssfBusinessContribution) || 0), 0) + expenses.data.filter(expense => expense.payrollExpenseVersion === 2 && expense.date?.startsWith(form.returnPeriod)).reduce((sum, expense) => sum + (Number(expense.nssfEmployeeDeduction) || 0) + (Number(expense.nssfBusinessContribution) || 0), 0), [payments.data, expenses.data, form.returnPeriod]);
+  const periodWithheld = useMemo(() => payments.data.filter(payment => affectsPayrollAccounts(payment) && payment.status === "paid" && payment.payrollVersion === 2 && payment.paidDate?.startsWith(form.returnPeriod)).reduce((sum, payment) => sum + (Number(payment.nssfEmployeeDeduction) || 0) + (Number(payment.nssfBusinessContribution) || 0), 0) + expenses.data.filter(expense => expense.payrollExpenseVersion === 2 && expense.date?.startsWith(form.returnPeriod)).reduce((sum, expense) => sum + (Number(expense.nssfEmployeeDeduction) || 0) + (Number(expense.nssfBusinessContribution) || 0), 0), [payments.data, expenses.data, form.returnPeriod]);
   const periodRemittedOther = useMemo(() => remittances.data.filter(entry => entry.returnPeriod === form.returnPeriod && entry.id !== editingId).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0), [remittances.data, form.returnPeriod, editingId]);
   const periodOutstanding = Math.max(0, periodWithheld - periodRemittedOther);
   const sorted = useMemo(() => [...remittances.data].sort((a, b) => b.paymentDate.localeCompare(a.paymentDate)), [remittances.data]);
@@ -53,7 +54,7 @@ export function NssfRemittanceCard() {
       const [paymentSnapshot, expenseSnapshot, remittanceSnapshot] = await Promise.all([getDocsFromServer(collection(db, "payments")), getDocsFromServer(collection(db, "expenses")), getDocsFromServer(collection(db, "nssfRemittances"))]);
       const serverWithheld = paymentSnapshot.docs.reduce((sum, item) => {
         const data = item.data();
-        return data.status === "paid" && data.payrollVersion === 2 && String(data.paidDate ?? "").startsWith(form.returnPeriod) ? sum + (Number(data.nssfEmployeeDeduction) || 0) + (Number(data.nssfBusinessContribution) || 0) : sum;
+        return affectsPayrollAccounts(data) && data.status === "paid" && data.payrollVersion === 2 && String(data.paidDate ?? "").startsWith(form.returnPeriod) ? sum + (Number(data.nssfEmployeeDeduction) || 0) + (Number(data.nssfBusinessContribution) || 0) : sum;
       }, 0);
       const serverSalaryWithheld = expenseSnapshot.docs.reduce((sum, item) => { const data = item.data(); return data.payrollExpenseVersion === 2 && String(data.date ?? "").startsWith(form.returnPeriod) ? sum + (Number(data.nssfEmployeeDeduction) || 0) + (Number(data.nssfBusinessContribution) || 0) : sum; }, 0);
       const totalServerWithheld = serverWithheld + serverSalaryWithheld;

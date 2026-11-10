@@ -1,3 +1,5 @@
+import { affectsPayrollAccounts, type PayrollAccountingTreatment } from "@/lib/payroll-accounting";
+
 export const ACCOUNT_GROUPS = ["Current Assets", "Non-Current Assets", "Current Liabilities", "Non-Current Liabilities", "Equity", "Income", "Other Income", "Cost of Sales", "Expenses"] as const;
 export type AccountGroup = typeof ACCOUNT_GROUPS[number];
 export interface Account { code: string; name: string; group: AccountGroup }
@@ -115,7 +117,7 @@ export interface ProductionCostEntry {
 }
 export interface TaxEntry { id: string; date: string; description: string; amount: number }
 export interface PayrollProductionEntry { id: string; date: string; earningsUgx: number; paymentStatus?: string; paymentId?: string }
-export interface PayrollPaymentEntry { id: string; paidDate: string; status?: string; payrollVersion?: number; payrollAccountingVersion?: number; grossAmount?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number; paymentSourceCode?: string }
+export interface PayrollPaymentEntry extends PayrollAccountingTreatment { id: string; paidDate: string; status?: string; payrollVersion?: number; payrollAccountingVersion?: number; grossAmount?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number; paymentSourceCode?: string }
 export interface PayeRemittanceEntry { id: string; paymentDate: string; amount: number; paymentSourceCode: string }
 export interface NssfRemittanceEntry { id: string; paymentDate: string; amount: number; paymentSourceCode: string }
 export function isRawMaterialCarriageExpense(entry: LedgerSource): boolean {
@@ -195,14 +197,14 @@ export function buildAccounts(sales: LedgerSource[], expenses: LedgerSource[], j
   });
   // Unpaid wages are earned liabilities. New-format paid entries retain their
   // original accrual; payment then settles it. Legacy paid entries remain as-is.
-  const newPaymentIds = new Set(payrollPayments.filter(payment => payment.payrollVersion === 2 && payment.status === "paid").map(payment => payment.id));
+  const newPaymentIds = new Set(payrollPayments.filter(payment => payment.payrollVersion === 2 && payment.status === "paid" && affectsPayrollAccounts(payment)).map(payment => payment.id));
   payrollEntries.forEach(entry => {
     if (entry.paymentStatus !== "paid" || !newPaymentIds.has(entry.paymentId ?? "")) return;
     const gross = Number(entry.earningsUgx);
     if (gross > 0) post(entry.date, "5090", "2120", gross);
   });
   payrollPayments.forEach(payment => {
-    if (payment.payrollVersion !== 2 || payment.status !== "paid" || !["1000", "1030"].includes(payment.paymentSourceCode ?? "")) return;
+    if (!affectsPayrollAccounts(payment) || payment.payrollVersion !== 2 || payment.status !== "paid" || !["1000", "1030"].includes(payment.paymentSourceCode ?? "")) return;
     const net = Number(payment.netPayAmount) || 0;
     const paye = Number(payment.payeeTax) || 0;
     const nssf = Number(payment.nssfEmployeeDeduction) || 0;

@@ -4,12 +4,14 @@ import { useMemo, useState } from "react";
 import { ChartCard } from "@/components/ui/ChartCard";
 import { palette } from "@/components/charts";
 import type { Employee, Payment } from "@/types";
+import { affectsPayrollAccounts } from "@/lib/payroll-accounting";
 
 export function PayeeCard({ payments, employees }: { payments: Payment[]; employees: Employee[] }) {
   const [expanded, setExpanded] = useState(false);
   const rows = useMemo(() => {
     const byEmployee = new Map<string, { id: string; name: string; gross: number; paye: number; net: number }>();
     for (const payment of payments) {
+      if (!affectsPayrollAccounts(payment)) continue;
       const previous = byEmployee.get(payment.employeeId) ?? {
         id: payment.employeeId,
         name: employees.find(employee => employee.id === payment.employeeId)?.name ?? payment.employeeId,

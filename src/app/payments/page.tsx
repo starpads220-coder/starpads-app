@@ -36,8 +36,9 @@ import { palette } from "@/components/charts";
 import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import {
-  computeNssfEmployee,
-  computeNssfBusiness,
+  computeNssfAtRate,
+  DEFAULT_NSSF_EMPLOYEE_RATE_PERCENT,
+  DEFAULT_NSSF_EMPLOYER_RATE_PERCENT,
   calculateProgressivePaye,
   DEFAULT_PAYE_BANDS,
   type PayeBand,
@@ -50,10 +51,27 @@ import { PayeeCard } from "@/components/payments/PayeeCard";
 import { StatutoryRemittancesCard } from "@/components/payments/StatutoryRemittancesCard";
 import { isEmployeeActive } from "@/lib/employees";
 import { downloadBlob, downloadResponse } from "@/lib/file-download";
+import { affectsPayrollAccounts } from "@/lib/payroll-accounting";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
 type ActiveTab = "employees" | "dates" | "due";
 const EMPLOYEE_PAGE_SIZE = 10;
+
+function configuredPercent(value: unknown, fallback: number) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 && parsed <= 100 ? parsed : fallback;
+}
+
+function payrollSettingsSignature(bands: PayeBand[], nssfEmployeeRatePercent: number, nssfEmployerRatePercent: number) {
+  // Firestore object key order is not an accounting change. Compare a stable,
+  // numeric representation so equivalent schedules do not repeatedly trigger
+  // the "settings changed" safeguard.
+  const normalisedBands = bands.map(band => ({
+    upperLimit: band.upperLimit === null ? null : Number(band.upperLimit),
+    ratePercent: Number(band.ratePercent),
+  }));
+  return JSON.stringify({ bands: normalisedBands, nssfEmployeeRatePercent: Number(nssfEmployeeRatePercent), nssfEmployerRatePercent: Number(nssfEmployerRatePercent) });
+}
 
 function getDateBounds(window: TimeWindow, customStart?: string, customEnd?: string) {
   const now = new Date();
@@ -100,7 +118,7 @@ async function getCumulativePayeeForEmployee(
   ]);
   const confirmed = existingPaymentsSnap.docs.filter(d => {
     const data = d.data();
-    return data.status === "paid" && data.payeApplicable !== false && data.paidDate >= monthStart && data.paidDate <= monthEnd;
+    return affectsPayrollAccounts(data) && data.status === "paid" && data.payeApplicable !== false && data.paidDate >= monthStart && data.paidDate <= monthEnd;
   });
   const alreadyPaidPayee = confirmed.reduce(
     (sum, d) => sum + (Number(d.data().payeeTax) || 0),
@@ -173,7 +191,7 @@ export default function PaymentsPage() {
   const [payEmployeeId, setPayEmployeeId] = useState<string | null>(null);
   const [payProcessing, setPayProcessing] = useState(false);
   const [modalPayePreview, setModalPayePreview] = useState<{ key: string; tax: number; breakdown: PayeBandResult[]; previousWithheld: number; monthlyGross: number } | null>(null);
-  const [popupPayeSettings, setPopupPayeSettings] = useState<{ bands: PayeBand[]; signature: string; versionLabel: string } | null>(null);
+  const [popupPayeSettings, setPopupPayeSettings] = useState<{ bands: PayeBand[]; signature: string; versionLabel: string; payeApplicable: boolean; nssfEmployeeRatePercent: number; nssfEmployerRatePercent: number } | null>(null);
   const [payeDetailsOpen, setPayeDetailsOpen] = useState(false);
   const [payeSettingsLoading, setPayeSettingsLoading] = useState(false);
   const [payeSettingsError, setPayeSettingsError] = useState<string | null>(null);
@@ -214,7 +232,7 @@ export default function PaymentsPage() {
     entries.filter((e) => e.date >= start && e.date <= end),
     [entries, start, end]
   );
-  const periodConfirmedPayments = useMemo(() => confirmedPayments.data.filter(payment => payment.status === "paid" && payment.paidDate >= start && payment.paidDate <= end), [confirmedPayments.data, start, end]);
+  const periodConfirmedPayments = useMemo(() => confirmedPayments.data.filter(payment => affectsPayrollAccounts(payment) && payment.status === "paid" && payment.paidDate >= start && payment.paidDate <= end), [confirmedPayments.data, start, end]);
   const confirmedTotalsByEmployee = useMemo(() => {
     const totals = new Map<string, { gross: number; paye: number; net: number }>();
     for (const payment of periodConfirmedPayments) {
@@ -275,6 +293,13 @@ export default function PaymentsPage() {
     });
     return Array.from(map.values()).sort((a, b) => b.dueAmount - a.dueAmount);
   }, [productionEmployees, filteredEntries]);
+  const historicalPaymentIds = useMemo(() => new Set(confirmedPayments.data.filter(payment => !affectsPayrollAccounts(payment)).map(payment => payment.id)), [confirmedPayments.data]);
+  const nssfEmployeePayments = useMemo(() => employeePayments.map(employee => ({
+    ...employee,
+    paidAmount: Math.max(0, employee.paidAmount - employee.allEntries
+      .filter(entry => entry.paymentStatus === "paid" && entry.paymentId && historicalPaymentIds.has(entry.paymentId))
+      .reduce((sum, entry) => sum + entry.earningsUgx, 0)),
+  })), [employeePayments, historicalPaymentIds]);
 
   const allDueEntries = useMemo(
     () => entries.filter(entry => !entry.paymentStatus || entry.paymentStatus === "due"),
@@ -455,7 +480,15 @@ export default function PaymentsPage() {
   const payEmployee = activeTab === "due"
     ? allDueEmployeePayments.find((e) => e.employeeId === payEmployeeId)
     : employeePayments.find((e) => e.employeeId === payEmployeeId);
-  const payeApplicable = employees.find(e => e.id === payEmployeeId)?.payeApplicable !== false;
+  const cachedPayeApplicable = employees.find(e => e.id === payEmployeeId)?.payeApplicable !== false;
+  // Once the popup has loaded, use the server-verified employee setting rather
+  // than the cached employee list. This keeps the preview and confirmation on
+  // the same eligibility snapshot.
+  const payeApplicable = popupPayeSettings?.payeApplicable ?? cachedPayeApplicable;
+  const nssfEmployeeRatePercent = popupPayeSettings?.nssfEmployeeRatePercent ?? DEFAULT_NSSF_EMPLOYEE_RATE_PERCENT;
+  const nssfEmployerRatePercent = popupPayeSettings?.nssfEmployerRatePercent ?? DEFAULT_NSSF_EMPLOYER_RATE_PERCENT;
+  const modalNssfEmployee = computeNssfAtRate(payEmployee?.dueAmount ?? 0, nssfEmployeeRatePercent);
+  const modalNssfEmployer = computeNssfAtRate(payEmployee?.dueAmount ?? 0, nssfEmployerRatePercent);
   const previewEmployeeId = payEmployee?.employeeId;
   const previewGross = payEmployee?.dueAmount;
   const payeBands = popupPayeSettings?.bands ?? [];
@@ -488,13 +521,19 @@ export default function PaymentsPage() {
   useEffect(() => {
     if (!payEmployeeId) return;
     let cancelled = false;
-    getDocFromServer(doc(db, "payeSettings", PAYE_SETTINGS_REF)).then(snapshot => {
+    Promise.all([
+      getDocFromServer(doc(db, "payeSettings", PAYE_SETTINGS_REF)),
+      getDocFromServer(doc(db, "employees", payEmployeeId)),
+    ]).then(([snapshot, employeeSnapshot]) => {
+      if (!employeeSnapshot.exists()) throw new Error("Employee record no longer exists.");
       const bands = snapshot.exists() ? snapshot.data().bands as PayeBand[] | undefined : DEFAULT_PAYE_BANDS;
       if (!bands?.length) throw new Error("PAYE Settings contain no bands. Correct the settings before confirming payments.");
       calculateProgressivePaye(0, bands);
+      const nssfEmployeeRatePercent = configuredPercent(snapshot.data()?.nssfEmployeeRatePercent, DEFAULT_NSSF_EMPLOYEE_RATE_PERCENT);
+      const nssfEmployerRatePercent = configuredPercent(snapshot.data()?.nssfEmployerRatePercent, DEFAULT_NSSF_EMPLOYER_RATE_PERCENT);
       const updatedAt = snapshot.data()?.updatedAt;
       const versionLabel = snapshot.exists() && updatedAt?.toDate instanceof Function ? updatedAt.toDate().toLocaleString() : "Initial PAYE structure";
-      if (!cancelled) setPopupPayeSettings({ bands, signature: JSON.stringify(bands), versionLabel });
+      if (!cancelled) setPopupPayeSettings({ bands, signature: payrollSettingsSignature(bands, nssfEmployeeRatePercent, nssfEmployerRatePercent), versionLabel, payeApplicable: employeeSnapshot.data().payeApplicable !== false, nssfEmployeeRatePercent, nssfEmployerRatePercent });
     }).catch(error => {
       if (!cancelled) setPayeSettingsError(error instanceof Error ? error.message : "PAYE Settings could not be loaded from the server.");
     }).finally(() => { if (!cancelled) setPayeSettingsLoading(false); });
@@ -537,16 +576,21 @@ export default function PaymentsPage() {
       const currentBands = currentSettings.exists() ? currentSettings.data().bands as PayeBand[] | undefined : DEFAULT_PAYE_BANDS;
       if (!currentBands?.length) throw new Error("PAYE Settings contain no bands. Payment confirmation is blocked.");
       calculateProgressivePaye(0, currentBands);
-      if (currentApplicable !== payeApplicable || !popupPayeSettings || JSON.stringify(currentBands) !== popupPayeSettings.signature) {
+      const currentNssfEmployeeRatePercent = configuredPercent(currentSettings.data()?.nssfEmployeeRatePercent, DEFAULT_NSSF_EMPLOYEE_RATE_PERCENT);
+      const currentNssfEmployerRatePercent = configuredPercent(currentSettings.data()?.nssfEmployerRatePercent, DEFAULT_NSSF_EMPLOYER_RATE_PERCENT);
+      const currentSettingsSignature = payrollSettingsSignature(currentBands, currentNssfEmployeeRatePercent, currentNssfEmployerRatePercent);
+      if (!popupPayeSettings || currentApplicable !== popupPayeSettings.payeApplicable || currentSettingsSignature !== popupPayeSettings.signature) {
         const updatedAt = currentSettings.data()?.updatedAt;
         const versionLabel = currentSettings.exists() && updatedAt?.toDate instanceof Function ? updatedAt.toDate().toLocaleString() : "Initial PAYE structure";
-        setPopupPayeSettings({ bands: currentBands, signature: JSON.stringify(currentBands), versionLabel });
-        throw new Error("PAYE settings or employee eligibility changed. The figures are being refreshed; review them before confirming again.");
+        setModalPayePreview(null);
+        setPopupPayeSettings({ bands: currentBands, signature: currentSettingsSignature, versionLabel, payeApplicable: currentApplicable, nssfEmployeeRatePercent: currentNssfEmployeeRatePercent, nssfEmployerRatePercent: currentNssfEmployerRatePercent });
+        showToast("PAYE settings or employee eligibility changed. The figures have been refreshed; review them and confirm again.", "info");
+        return;
       }
 
       const grossAmount = payEmployee.dueAmount;
-      const nssfEmployeeDeduction = computeNssfEmployee(grossAmount);
-      const nssfBusinessContribution = computeNssfBusiness(grossAmount);
+      const nssfEmployeeDeduction = computeNssfAtRate(grossAmount, currentNssfEmployeeRatePercent);
+      const nssfBusinessContribution = computeNssfAtRate(grossAmount, currentNssfEmployerRatePercent);
       const payeResult = await getCumulativePayeeForEmployee(
         payEmployee.employeeId,
         grossAmount,
@@ -569,6 +613,8 @@ export default function PaymentsPage() {
         totalAmount: grossAmount,
         nssfEmployeeDeduction,
         nssfBusinessContribution,
+        nssfEmployeeRatePercent: currentNssfEmployeeRatePercent,
+        nssfEmployerRatePercent: currentNssfEmployerRatePercent,
         payeeTax,
         payeBandBreakdown: payeResult.breakdown,
         payePreviouslyWithheld: payeResult.previousWithheld,
@@ -865,7 +911,7 @@ export default function PaymentsPage() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <NssfCard employeePayments={employeePayments} />
+        <NssfCard employeePayments={nssfEmployeePayments} />
         <PayeeCard payments={periodConfirmedPayments} employees={employees} />
       </div>
 
@@ -1361,7 +1407,7 @@ export default function PaymentsPage() {
                 </div>
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-gray-600">NSSF (Employee) — deducted from pay</span>
-                  <span className="font-semibold text-red-600 tabular-nums">- {computeNssfEmployee(payEmployee.dueAmount).toLocaleString()}</span>
+                  <span className="font-semibold text-red-600 tabular-nums">- {modalNssfEmployee.toLocaleString()} <span className="text-xs font-normal text-gray-500">({nssfEmployeeRatePercent}%)</span></span>
                 </div>
                 {payeApplicable ? <div className="flex justify-between items-center text-sm"><span className="text-gray-600">PAYE</span><span className="font-semibold text-red-600 tabular-nums">- {modalPayeeTax === null ? "Calculating…" : modalPayeeTax.toLocaleString()}</span></div> : <div className="flex justify-between items-center text-sm"><span className="text-gray-600">PAYE</span><span className="font-medium text-gray-500">Not applicable</span></div>}
                 {payeApplicable && modalPayeeTax !== null && modalPayeeTax > 0 && <div className="rounded-md border border-gray-200 bg-white">
@@ -1370,13 +1416,13 @@ export default function PaymentsPage() {
                 </div>}
                 <div className="border-t border-gray-200 pt-2 flex justify-between items-center text-sm">
                   <span className="font-semibold text-gray-800">Net Pay to Employee</span>
-                  <span className="text-lg font-bold text-green-600 tabular-nums">{modalPayeeTax === null ? "Calculating…" : (payEmployee.dueAmount - computeNssfEmployee(payEmployee.dueAmount) - modalPayeeTax).toLocaleString()}</span>
+                  <span className="text-lg font-bold text-green-600 tabular-nums">{modalPayeeTax === null ? "Calculating…" : (payEmployee.dueAmount - modalNssfEmployee - modalPayeeTax).toLocaleString()}</span>
                 </div>
                 <div className="border-t border-dashed border-gray-200 pt-2 flex justify-between items-center text-sm">
                   <span className="text-gray-500 italic">NSSF (Employer) — added and paid by employer</span>
-                  <span className="font-semibold text-blue-600 tabular-nums">{computeNssfBusiness(payEmployee.dueAmount).toLocaleString()}</span>
+                  <span className="font-semibold text-blue-600 tabular-nums">{modalNssfEmployer.toLocaleString()} <span className="text-xs font-normal text-gray-500">({nssfEmployerRatePercent}%)</span></span>
                 </div>
-                <div className="flex justify-between items-center text-sm"><span className="font-semibold text-gray-700">Total cost to the business</span><span className="font-semibold text-gray-900 tabular-nums">{(payEmployee.dueAmount + computeNssfBusiness(payEmployee.dueAmount)).toLocaleString()}</span></div>
+                <div className="flex justify-between items-center text-sm"><span className="font-semibold text-gray-700">Total cost to the business</span><span className="font-semibold text-gray-900 tabular-nums">{(payEmployee.dueAmount + modalNssfEmployer).toLocaleString()}</span></div>
               </div>
               <label className="block text-sm font-medium text-gray-700 mb-4">Pay from
                 <select required value={paymentSourceCode} onChange={event => setPaymentSourceCode(event.target.value as "" | "1000" | "1030")} className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2">

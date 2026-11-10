@@ -1,9 +1,10 @@
 import { ACCOUNTS, SETTLEMENT_CODES, isRawMaterialCarriageExpense, productionCostItem, resolveAccounting, type Journal, type LedgerSource, type NssfRemittanceEntry, type PayeRemittanceEntry, type ProductionCostEntry, type TaxEntry, type PayrollProductionEntry, type buildAccounts } from "@/lib/accounts";
 import type { InventoryTransaction } from "@/lib/inventory-accounting";
+import { affectsPayrollAccounts, type PayrollAccountingTreatment } from "@/lib/payroll-accounting";
 
 type AccountsReport = ReturnType<typeof buildAccounts>;
 const OPERATING_EXPENSE_NAMES = ["Office and Administration", "Legal and Professional Fees", "Salaries and Wages", "Fuel and Transport", "Data and Communication Costs", "Utilities", "Machine Repair and Maintenance", "Sundries", "Other Costs", "Small Tools and Equipment", "Depreciation"];
-export interface ConfirmedLaborPayment { id: string; paidDate: string; status?: string; grossAmount?: number; totalAmount?: number; amountUgx?: number; payrollVersion?: number; payrollAccountingVersion?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number }
+export interface ConfirmedLaborPayment extends PayrollAccountingTreatment { id: string; paidDate: string; status?: string; grossAmount?: number; totalAmount?: number; amountUgx?: number; payrollVersion?: number; payrollAccountingVersion?: number; netPayAmount?: number; payeeTax?: number; nssfEmployeeDeduction?: number; nssfBusinessContribution?: number }
 export interface CashFlowLine { name: string; amount: number }
 export interface PayrollStatementBreakdown { netPay: number; paye: number; employeeNssf: number; employerNssf: number; notItemised: number }
 
@@ -153,7 +154,7 @@ export function buildFinancialStatements(
   const carriageInwards = periodExpenses.filter(isRawMaterialCarriageExpense).reduce((sum, entry) => sum + expenseAmount(entry), 0) + productionCostTotal("carriage_inwards");
   // Income Statement labor is period activity by confirmation date. Production
   // entries remain in the Balance Sheet accrual ledger and are not re-posted.
-  const confirmedPeriodPayments = payments.filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end);
+  const confirmedPeriodPayments = payments.filter(entry => affectsPayrollAccounts(entry) && entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end);
   const directLaborBreakdown = confirmedPeriodPayments.reduce<PayrollStatementBreakdown>((sum, entry) => {
     const gross = Number(entry.grossAmount ?? entry.totalAmount ?? entry.amountUgx) || 0;
     const paye = Number(entry.payeeTax) || 0;
@@ -234,7 +235,7 @@ export function buildFinancialStatements(
     .filter(entry => entry.date >= start && entry.date <= end && ((entry.type === "raw_material_purchase" && ["1000", "1030"].includes(entry.settlementCode ?? "")) || entry.type === "inventory_supplier_payment"))
     .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   cashPaidForCarriageInwards += productionCostTotal("carriage_inwards");
-  const cashPaidForDirectLabor = payments.filter(entry => entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.netPayAmount) || 0), 0);
+  const cashPaidForDirectLabor = payments.filter(entry => affectsPayrollAccounts(entry) && entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.netPayAmount) || 0), 0);
   const cashPaidForOtherProductionCosts = recordedOtherCosts;
   const cashPaidForOperatingExpenses = [...operatingCashExpenses.values()].reduce((sum, line) => sum + line.amount, 0);
   const cashPaidForPayeRemittances = payeRemittances.filter(entry => entry.paymentDate >= start && entry.paymentDate <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);

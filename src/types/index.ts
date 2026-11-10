@@ -299,6 +299,10 @@ export interface Payment {
   createdBy?: string;
   createdByRole?: string;
   createdAt?: import("firebase/firestore").Timestamp;
+  accountingTreatment?: "standard" | "historical_already_settled";
+  accountingTreatmentReason?: string;
+  accountingTreatmentSetAt?: import("firebase/firestore").Timestamp;
+  accountingTreatmentSetBy?: string;
 }
 
 export interface ProductionTargetVersion {

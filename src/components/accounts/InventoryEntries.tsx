@@ -9,6 +9,26 @@ const input = "w-full rounded-md border border-gray-300 px-3 py-2 text-sm";
 const money = (amount: number) => `UGX ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 const fresh = () => ({ date: new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi" }).format(new Date()), type: "raw_material_purchase" as InventoryTransactionType, description: "", reference: "", notes: "", material: "PUL" as InventoryMaterial, rolls: "", metres: "", unitCost: "", quantity: "", totalValue: "", finishedGood: "", batchRef: "", settlementCode: "1000" as "1000" | "1030" | "2110" | "3060", linkedSaleId: "" });
 
+type Direction = "increase" | "decrease";
+type AccountImpact = { primary: string; first: { name: string; direction: Direction }; second: { name: string; direction: Direction }; income: string; cashFlow: string };
+function accountImpact(type: InventoryTransactionType, settlementCode: string): AccountImpact {
+  const paymentAccount = settlementCode === "1030" ? "Cash" : settlementCode === "2110" ? "Accounts Payable" : "Bank";
+  const impacts: Record<InventoryTransactionType, AccountImpact> = {
+    raw_material_purchase: { primary: "Inventory – Raw Materials", first: { name: "Inventory – Raw Materials", direction: "increase" }, second: { name: paymentAccount, direction: settlementCode === "2110" ? "increase" : "decrease" }, income: "No effect", cashFlow: settlementCode === "2110" ? "No cash movement until the supplier is paid" : "Operating cash outflow" },
+    raw_material_opening: { primary: "Inventory – Raw Materials", first: { name: "Inventory – Raw Materials", direction: "increase" }, second: { name: "Owner’s Equity", direction: "increase" }, income: "No effect", cashFlow: "No cash movement" },
+    raw_material_loss: { primary: "Inventory – Raw Materials", first: { name: "Inventory – Raw Materials", direction: "decrease" }, second: { name: "Inventory Adjustment Expense", direction: "increase" }, income: "Expense increases; profit decreases", cashFlow: "No cash movement" },
+    raw_to_wip: { primary: "Inventory – Raw Materials and Inventory – Work in Progress", first: { name: "Inventory – Raw Materials", direction: "decrease" }, second: { name: "Inventory – Work in Progress", direction: "increase" }, income: "No effect", cashFlow: "No cash movement" },
+    wip_opening: { primary: "Inventory – Work in Progress", first: { name: "Inventory – Work in Progress", direction: "increase" }, second: { name: "Owner’s Equity", direction: "increase" }, income: "No effect", cashFlow: "No cash movement" },
+    wip_to_finished: { primary: "Inventory – Work in Progress and Inventory – Finished Goods", first: { name: "Inventory – Work in Progress", direction: "decrease" }, second: { name: "Inventory – Finished Goods", direction: "increase" }, income: "No effect", cashFlow: "No cash movement" },
+    wip_wastage: { primary: "Inventory – Work in Progress", first: { name: "Inventory – Work in Progress", direction: "decrease" }, second: { name: "Inventory Adjustment Expense", direction: "increase" }, income: "Expense increases; profit decreases", cashFlow: "No cash movement" },
+    finished_goods_opening: { primary: "Inventory – Finished Goods", first: { name: "Inventory – Finished Goods", direction: "increase" }, second: { name: "Owner’s Equity", direction: "increase" }, income: "No effect", cashFlow: "No cash movement" },
+    finished_goods_sale: { primary: "Inventory – Finished Goods", first: { name: "Inventory – Finished Goods", direction: "decrease" }, second: { name: "Inventory Cost Recognised", direction: "increase" }, income: "Cost of goods sold increases; profit decreases by the inventory cost", cashFlow: "No cash movement from this cost entry; customer payment is recorded on Sales" },
+    finished_goods_loss: { primary: "Inventory – Finished Goods", first: { name: "Inventory – Finished Goods", direction: "decrease" }, second: { name: "Inventory Adjustment Expense", direction: "increase" }, income: "Expense increases; profit decreases", cashFlow: "No cash movement" },
+    inventory_supplier_payment: { primary: "No inventory account changes", first: { name: "Accounts Payable", direction: "decrease" }, second: { name: paymentAccount, direction: "decrease" }, income: "No effect", cashFlow: "Operating cash outflow" },
+  };
+  return impacts[type];
+}
+
 export function InventoryEntries({ entries, sales, canPost, userId }: { entries: InventoryTransaction[]; sales: LedgerSource[]; canPost: boolean; userId?: string }) {
   const [form, setForm] = useState(fresh);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -21,6 +41,7 @@ export function InventoryEntries({ entries, sales, canPost, userId }: { entries:
   const selectedFinished = position.finishedByProduct[form.finishedGood.trim()] ?? { quantity: 0, value: 0 };
   const linkedSaleIds = new Set(entries.filter(entry => entry.type === "finished_goods_sale" && entry.id !== editingId).map(entry => entry.linkedSaleId).filter(Boolean));
   const availableSales = sales.filter(sale => !linkedSaleIds.has(sale.id)).sort((a, b) => b.date.localeCompare(a.date));
+  const impact = accountImpact(form.type, form.settlementCode);
   const setType = (type: InventoryTransactionType) => {
     const next = { ...fresh(), date: form.date, type };
     if (type === "raw_to_wip" && selectedRaw.metres > 0) next.unitCost = String(selectedRaw.value / selectedRaw.metres);
@@ -77,6 +98,14 @@ export function InventoryEntries({ entries, sales, canPost, userId }: { entries:
       <div className="grid gap-4 md:grid-cols-3">
         <label className="text-sm">Date<input required type="date" className={input} value={form.date} onChange={e => setForm({ ...form, date: e.target.value })} /></label>
         <label className="text-sm md:col-span-2">Transaction Type<select className={input} value={form.type} onChange={e => setType(e.target.value as InventoryTransactionType)}>{INVENTORY_TRANSACTION_TYPES.map(type => <option key={type} value={type}>{inventoryTypeLabel(type)}</option>)}</select></label>
+        <div className="md:col-span-3 rounded-xl border border-blue-200 bg-blue-50 p-4" aria-live="polite">
+          <div className="flex flex-wrap items-start justify-between gap-2"><div><p className="text-xs font-semibold uppercase tracking-wide text-blue-700">Accounts affected</p><p className="mt-1 font-semibold text-gray-900">{impact.primary}</p></div><span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-blue-800 shadow-sm">{money(amount)}</span></div>
+          <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+            {[impact.first, impact.second].map((account, index) => <div key={`${account.name}-${index}`} className="rounded-lg bg-white p-3"><span className="block text-xs font-medium uppercase text-gray-500">Account {index + 1}</span><strong className={`mt-1 block ${account.direction === "increase" ? "text-green-700" : "text-red-700"}`}>{account.name} {account.direction === "increase" ? "↑ Increases" : "↓ Decreases"}</strong></div>)}
+            <div><span className="font-medium text-gray-700">Income Statement:</span> <span className="text-gray-600">{impact.income}</span></div>
+            <div><span className="font-medium text-gray-700">Cash Flow:</span> <span className="text-gray-600">{impact.cashFlow}</span></div>
+          </div>
+        </div>
         {needsMaterial && <label className="text-sm">Material<select className={input} value={form.material} onChange={e => { const material = e.target.value as InventoryMaterial; const available = position.rawByMaterial[material]; setForm({ ...form, material, ...(form.type === "raw_to_wip" && available.metres > 0 ? { unitCost: String(available.value / available.metres) } : {}) }); }}>{INVENTORY_MATERIALS.map(material => <option key={material}>{material}</option>)}</select>{form.type === "raw_to_wip" && <span className="mt-1 block text-xs text-gray-500">Available: {selectedRaw.metres.toLocaleString()} m · {money(selectedRaw.value)}</span>}</label>}
         {needsMaterial && <label className="text-sm">Number of Rolls<input type="number" min="0" step="1" className={input} value={form.rolls} onChange={e => setForm({ ...form, rolls: e.target.value })} /></label>}
         {needsMaterial && <label className="text-sm">Total Metres<input required type="number" min="0.0001" step="0.0001" className={input} value={form.metres} onChange={e => setForm({ ...form, metres: e.target.value })} /></label>}
