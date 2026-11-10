@@ -28,6 +28,8 @@ import { downloadResponse } from "@/lib/file-download";
 import { usePayeSettings } from "@/hooks/use-paye-settings";
 import { calculateProgressivePaye, computeNssfAtRate } from "@/lib/deductions";
 import { CreditSettlements } from "@/components/CreditSettlements";
+import { AccountingImpactPreview } from "@/components/accounts/AccountingImpactPreview";
+import { accountingImpactIsBalanced, expenseAccountingImpact } from "@/lib/accounting-impact";
 
 type AnalyticsPeriod = "day" | "week" | "month" | "12months" | "custom";
 
@@ -277,6 +279,8 @@ export default function ExpensesPage() {
       if (isUnpaidExpense && form.initialPaymentAmount > calculatedAmount) throw new Error("The initial payment cannot exceed the expense total.");
       const validatedAccounting = validateAccounting(accounting, "expense");
       const initialPayment = isUnpaidExpense ? Math.max(0, form.initialPaymentAmount) : calculatedAmount;
+      const expenseImpact = expenseAccountingImpact(validatedAccounting, calculatedAmount, initialPayment, form.initialSettlementCode, isSalaryExpense ? { net: salaryNetPay, paye: salaryPayeResult.tax, employeeNssf: salaryEmployeeNssf, employerNssf: salaryEmployerNssf } : undefined);
+      if (!accountingImpactIsBalanced(expenseImpact)) throw new Error("The expense accounting entry is incomplete or does not balance. Review the selected accounts and amounts.");
       const payrollFields = isSalaryExpense ? {
         payrollExpenseVersion: 2 as const,
         employeeId: selectedSalaryEmployee!.id,
@@ -475,6 +479,7 @@ export default function ExpensesPage() {
       <form onSubmit={handleSubmit} className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 space-y-4">
         <h2 className="text-lg font-semibold">Expense Entry</h2>
         <AccountingFields value={accounting} onChange={setAccounting} kind="expense" />
+        <AccountingImpactPreview impact={expenseAccountingImpact(accounting, calculatedAmount, form.initialPaymentAmount, form.initialSettlementCode, isSalaryExpense ? { net: salaryNetPay, paye: salaryPayeResult.tax, employeeNssf: salaryEmployeeNssf, employerNssf: salaryEmployerNssf } : undefined)} />
         {depreciationLikeRecords.length > 0 && <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900"><p className="font-semibold">Existing depreciation-like records require review</p><p className="mt-1">These entries were not changed automatically: {depreciationLikeRecords.map(expense => `${expense.date} — ${expense.description || expense.id}`).join("; ")}.</p></div>}
         {formError && (
           <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-4 rounded-xl">

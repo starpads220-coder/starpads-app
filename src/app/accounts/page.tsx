@@ -21,6 +21,8 @@ import { accountPeriodError, addCalendarDays, comparisonAccountPeriods, formatAc
 import type { AccountsPdfSection } from "@/components/reports/AccountsStatementPDF";
 import { showToast } from "@/components/ui/Toast";
 import { downloadBlob } from "@/lib/file-download";
+import { AccountingImpactPreview } from "@/components/accounts/AccountingImpactPreview";
+import { accountingImpactIsBalanced, balanceSheetJournalImpact } from "@/lib/accounting-impact";
 
 type AccountView = "income" | "balance" | "cashflow" | "entries";
 
@@ -119,9 +121,7 @@ export default function AccountsPage() {
   const automaticJournalOffsetCode = journal.category === "Equity" ? "1000" : "3060";
   const journalOffsetCode = editingJournalOffsetCode ?? automaticJournalOffsetCode;
   const journalAmount = Number(journal.amount);
-  const journalEffect = selectedJournalLine && journalOffsetCode && selectedJournalLine.accountCode !== journalOffsetCode
-    ? `${journal.action === "add" ? "Increases" : "Reduces"} ${selectedJournalLine.name}${Number.isFinite(journalAmount) && journalAmount > 0 ? ` by ${money(journalAmount)}` : ""}; offset to ${accountName(journalOffsetCode)}.`
-    : "Select a category and item to preview the balanced entry.";
+  const journalImpact = balanceSheetJournalImpact(selectedJournalLine?.accountCode ?? "", journalOffsetCode, journal.category, journal.action, journalAmount);
   const journalBalanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, accountingJournals.filter(entry => entry.id !== editingJournalId), "", journal.date || todayInEat(), productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data), [sales.data, expenses.data, accountingJournals, editingJournalId, journal.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data]);
   const selectedJournalBalance = selectedJournalLine?.accountCode ? journalBalanceReport.rows.find(row => row.code === selectedJournalLine.accountCode)?.balance ?? 0 : 0;
   const resetJournalForm = () => {
@@ -216,6 +216,7 @@ export default function AccountsPage() {
       const offsetCode = journalOffsetCode;
       if (!canPost || !/^\d{4}-\d{2}-\d{2}$/.test(journal.date) || !["add", "deduct"].includes(journal.action) || !journal.category || !itemCode || !Number.isFinite(amount) || amount <= 0 || !journal.description.trim()) throw new Error("Enter a valid date, Action, Category, Item, description and an amount greater than zero. Do not use a negative amount; choose Deduct Funds instead.");
       if (!ACCOUNTS.some(account => account.code === itemCode) || !ACCOUNTS.some(account => account.code === offsetCode) || itemCode === offsetCode) throw new Error("The selected item cannot be posted with its balancing account. Choose another item.");
+      if (!accountingImpactIsBalanced(balanceSheetJournalImpact(itemCode, offsetCode, journal.category, journal.action, amount))) throw new Error("The journal entry is incomplete or does not balance. Review both accounts and the amount.");
       if (journal.action === "deduct" && amount > selectedJournalBalance + 0.005) throw new Error(`Deduction blocked: ${selectedJournalLine?.name ?? "the selected item"} has ${money(selectedJournalBalance)} available as at ${journal.date}.`);
       const normalIncreaseIsDebit = journal.category === "Assets";
       const itemIsDebit = journal.action === "add" ? normalIncreaseIsDebit : !normalIncreaseIsDebit;
@@ -408,7 +409,7 @@ export default function AccountsPage() {
         <label>Item<select required disabled={!journal.category} className={`${input} disabled:bg-gray-100 disabled:text-gray-500`} value={journal.itemCode} onChange={e => setJournal(previous => ({ ...previous, itemCode: e.target.value }))}><option value="">{journal.category ? "Select item..." : "Select a category first"}</option>{journalItemGroups.map(section => <optgroup key={section.label} label={section.label}>{section.lines.map(line => <option key={line.code} value={line.accountCode ?? ""}>{line.name}</option>)}</optgroup>)}</select></label>
         <label className="sm:col-span-2">Description<input required className={input} value={journal.description} onChange={e => setJournal({ ...journal, description: e.target.value })} /></label>
       </div>
-      <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">{journalEffect}</p>
+      <AccountingImpactPreview impact={journalImpact} />
       {journal.action === "deduct" && selectedJournalLine && Number.isFinite(journalAmount) && journalAmount > selectedJournalBalance + 0.005 && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">This deduction exceeds the current {selectedJournalLine.name} balance of {money(selectedJournalBalance)} as at {journal.date}. Saving is blocked.</p>}
       {selectedJournalLine?.accountCode === "3100" && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">Dividends currently follows the existing Equity sign treatment: Add Funds increases the Dividends equity balance; Deduct Funds reduces it. Review this treatment before using it as a contra-equity withdrawal.</p>}
       <button disabled={saving} className="rounded-lg bg-gray-900 px-4 py-2 text-white disabled:opacity-50">{saving ? "Saving..." : editingJournalId ? "Update entry" : "Record journal"}</button><p role="status">{message}</p>

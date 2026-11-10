@@ -46,6 +46,8 @@ import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import { isEmployeeActive } from "@/lib/employees";
 import { downloadResponse } from "@/lib/file-download";
 import { CreditSettlements } from "@/components/CreditSettlements";
+import { AccountingImpactPreview } from "@/components/accounts/AccountingImpactPreview";
+import { accountingImpactIsBalanced, saleAccountingImpact } from "@/lib/accounting-impact";
 
 const SalesCharts = dynamic(() => import("@/components/sales/SalesCharts"), {
   ssr: false,
@@ -576,6 +578,7 @@ export default function SalesPage() {
       if (isCreditSale && !form.dueDate) throw new Error("Enter the customer payment due date.");
       if (isCreditSale && form.initialPaymentAmount > totalAmount) throw new Error("The initial payment cannot exceed the sale total.");
       const initialPayment = isCreditSale ? Math.max(0, form.initialPaymentAmount) : totalAmount;
+      if (!accountingImpactIsBalanced(saleAccountingImpact(validatedAccounting, totalAmount, initialPayment, form.initialSettlementCode))) throw new Error("The sale accounting entry is incomplete or does not balance. Review the selected accounts and amounts.");
       const saleData = { ...(isCustomSale ? formWithoutOtherSubcategories : formWithoutSalesperson), ...(form.saleType === "GRANTS_DONATIONS" && !isCustomSale ? { invoiceNumber: "" } : {}), ...(form.saleType === "PAD_TRAINING" && !isCustomSale ? { customerType: "RETAIL" as CustomerType } : {}), ...(["GRANTS_DONATIONS", "PAD_TRAINING"].includes(form.saleType) && !isCustomSale ? {} : { salespersonId }), ...(isCustomSale ? { saleType: "SALE_OF_PADS" as SaleType } : {}), batchRef, quantitySold, unitPrice, totalAmount, paymentMethod: paymentMethodFromSettlement(validatedAccounting.settlementCode), paymentStatus: isCreditSale ? (initialPayment > 0 ? "partial" as const : "unpaid" as const) : "paid" as const, amountReceived: initialPayment, initialSettlementCode: isCreditSale ? form.initialSettlementCode : validatedAccounting.settlementCode, dueDate: isCreditSale ? form.dueDate : "", accounting: validatedAccounting };
       let createdSaleId = "";
       if (editingId) {
@@ -1499,6 +1502,7 @@ export default function SalesPage() {
             const saleType = isCustomSale ? "SALE_OF_PADS" : SALE_TYPE_BY_ACCOUNT[next.accountCode];
             if (saleType) setForm((current) => ({ ...current, saleType, ...(saleType === "GRANTS_DONATIONS" ? { salespersonId: "", invoiceNumber: "" } : {}), ...(saleType === "PAD_TRAINING" ? { salespersonId: "", customerType: "RETAIL" } : {}), ...(isCustomSale && !accounting.accountCode.startsWith("custom:") ? { materialType: "" as const, materialQuantity: 0, trainingDays: 0, grantAmount: 0 } : {}), ...(!isCustomSale && current.materialType === "" ? { materialType: "PUL" as const } : {}) }));
           }} kind="sale" />
+          <AccountingImpactPreview impact={saleAccountingImpact(accounting, totalAmount, form.initialPaymentAmount, form.initialSettlementCode)} />
           {formError && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm p-4 rounded-xl">
               {formError}
