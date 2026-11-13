@@ -11,6 +11,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  deleteDoc,
   Timestamp,
   limit,
   runTransaction,
@@ -51,6 +52,7 @@ import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import { downloadResponse } from "@/lib/file-download";
 import { activeEmployeeOptions, isEmployeeActive } from "@/lib/employees";
+import { showToast } from "@/components/ui/Toast";
 import { WIP_VERSION, GLOBAL_WIP_BALANCE_ID, applyWipEntry, emptyWipBalance, type WipBalance } from "@/lib/wip";
 import { FINISHED_PADS_STAGE_ID, STAGE_UNITS } from "@/lib/production-stages";
 
@@ -83,6 +85,7 @@ const stagesWithMaterial: StageId[] = ["STG-01"];
 export default function ProductionPage() {
   const { userRole } = useAuth();
   const [saving, setSaving] = useState(false);
+  const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
   const [wipError, setWipError] = useState("");
   const [editingEntryId, setEditingEntryId] = useState<string | null>(null);
   const [timeWindow, setTimeWindow] = useState<TimeWindow>("today");
@@ -311,6 +314,43 @@ export default function ProductionPage() {
   const getBatchNumber = (batchRef: string) => {
     const batch = batches.find((b) => b.id === batchRef);
     return batch ? batch.batchNumber : batchRef;
+  };
+
+  const handleDeleteEntry = async (entry: ProductionEntry) => {
+    if (userRole?.role !== "ADMIN" || deletingEntryId) return;
+    if (entry.paymentStatus === "paid" || entry.paymentId) {
+      showToast("This entry is linked to a confirmed payment and cannot be deleted.", "error");
+      return;
+    }
+    if (entry.movedToStockAt) {
+      showToast("Reverse the stock movement before deleting this packaged entry.", "error");
+      return;
+    }
+    if (!window.confirm(`Delete ${getEmployeeName(entry.employeeId)}'s ${STAGE_LABELS[entry.stageId]} entry for ${entry.date}? This reverses its WIP movement.`)) return;
+    setDeletingEntryId(entry.id);
+    try {
+      if (entry.wipVersion === WIP_VERSION) {
+        const entryRef = doc(db, "productionEntries", entry.id);
+        const balanceRef = doc(db, "wipBalances", GLOBAL_WIP_BALANCE_ID);
+        await runTransaction(db, async transaction => {
+          const [entrySnapshot, balanceSnapshot] = await Promise.all([transaction.get(entryRef), transaction.get(balanceRef)]);
+          if (!entrySnapshot.exists()) throw new Error("This entry has already been deleted.");
+          const current = { id: entry.id, ...entrySnapshot.data() } as ProductionEntry;
+          if (current.paymentStatus === "paid" || current.paymentId || current.movedToStockAt) throw new Error("This entry is already paid or moved to stock.");
+          const balance = balanceSnapshot.exists() ? balanceSnapshot.data() as WipBalance : emptyWipBalance(GLOBAL_WIP_BALANCE_ID);
+          transaction.set(balanceRef, { ...applyWipEntry(balance, current, -1), updatedAt: Timestamp.now() });
+          transaction.delete(entryRef);
+        });
+        if (entry.stageId === FINISHED_PADS_STAGE_ID && entry.batchRef) await recalculateBatchPacks(entry.batchRef);
+      } else {
+        await deleteDoc(doc(db, "productionEntries", entry.id));
+      }
+      showToast("Production entry deleted and WIP updated.", "success");
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not delete the entry.", "error");
+    } finally {
+      setDeletingEntryId(null);
+    }
   };
 
   const handleSubmit = async (e: FormEvent) => {
@@ -1163,6 +1203,7 @@ const totalPackagedPads = useMemo(
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Perf.</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Earnings</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
+                  {userRole?.role === "ADMIN" && <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -1186,6 +1227,7 @@ const totalPackagedPads = useMemo(
                       UGX {entry.earningsUgx.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-sm font-mono text-gray-500">{getBatchNumber(entry.batchRef)}</td>
+                    {userRole?.role === "ADMIN" && <td className="px-4 py-3 text-right"><button type="button" disabled={Boolean(deletingEntryId)} onClick={() => handleDeleteEntry(entry)} className="text-sm font-medium text-red-700 hover:underline disabled:opacity-50">{deletingEntryId === entry.id ? "Deleting..." : "Delete"}</button></td>}
                   </tr>
                 ))}
               </tbody>

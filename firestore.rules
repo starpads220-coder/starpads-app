@@ -33,9 +33,9 @@ service cloud.firestore {
 
     function isCanonicalProductionEntry(data) {
       return data.stageId in ['STG-01', 'STG-02', 'STG-03', 'STG-04', 'STG-05', 'STG-07', 'STG-08', 'STG-09', 'STG-10']
-        && (data.stageId == 'STG-10'
-          ? data.batchRef is string && data.batchRef.size() > 0
-          : !('batchRef' in data) || data.batchRef == '');
+        && data.batchRef is string
+        && ((data.stageId == 'STG-10' && data.batchRef.size() > 0)
+          || (data.stageId != 'STG-10' && data.batchRef == ''));
     }
 
     function canonicalStageName(stageId) {
@@ -131,22 +131,22 @@ service cloud.firestore {
     // ============================================================
     match /productionEntries/{entryId} {
       allow read: if isAuthenticated();
-      allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']) && isCanonicalProductionEntry(request.resource.data);
+      allow create: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR', 'FINANCIAL_MANAGER']) && isCanonicalProductionEntry(request.resource.data);
       allow update: if (isAdmin()
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stageId', 'batchRef']) || isCanonicalProductionEntry(request.resource.data)))
-        || (hasRole('PRODUCTION_SUPERVISOR')
+        || (hasAnyRole(['PRODUCTION_SUPERVISOR', 'FINANCIAL_MANAGER'])
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentStatus', 'paymentId'])
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stageId', 'batchRef']) || isCanonicalProductionEntry(request.resource.data)))
         || (hasAnyRole(['FINANCE', 'FINANCIAL_MANAGER'])
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'paymentId']));
-      allow delete: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+      allow delete: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR', 'FINANCIAL_MANAGER']);
     }
 
     // Atomic global WIP balance. Historical records are migrated to the current
     // version; only STG-10 output remains attached to an individual batch.
     match /wipBalances/{batchId} {
       allow read: if isAuthenticated();
-      allow create, update: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR']);
+      allow create, update: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR', 'FINANCIAL_MANAGER']);
       allow delete: if isAdmin();
     }
 
