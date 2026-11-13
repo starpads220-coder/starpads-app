@@ -1203,7 +1203,7 @@ const totalPackagedPads = useMemo(
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Perf.</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Earnings</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
-                  {userRole?.role === "ADMIN" && <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>}
+                  {userRole?.role === "ADMIN" && <th className="sticky right-0 z-10 border-l border-gray-200 bg-gray-50 px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase shadow-[-4px_0_8px_-6px_rgba(0,0,0,0.3)]">Action</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -1227,7 +1227,7 @@ const totalPackagedPads = useMemo(
                       UGX {entry.earningsUgx.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-sm font-mono text-gray-500">{getBatchNumber(entry.batchRef)}</td>
-                    {userRole?.role === "ADMIN" && <td className="px-4 py-3 text-right"><button type="button" disabled={Boolean(deletingEntryId)} onClick={() => handleDeleteEntry(entry)} className="text-sm font-medium text-red-700 hover:underline disabled:opacity-50">{deletingEntryId === entry.id ? "Deleting..." : "Delete"}</button></td>}
+                    {userRole?.role === "ADMIN" && <td className={`sticky right-0 z-10 border-l border-gray-200 px-4 py-3 text-right shadow-[-4px_0_8px_-6px_rgba(0,0,0,0.3)] ${i % 2 === 0 ? "bg-white" : "bg-gray-50"}`}><button type="button" disabled={Boolean(deletingEntryId)} onClick={() => handleDeleteEntry(entry)} className="inline-flex min-w-20 justify-center rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50">{deletingEntryId === entry.id ? "Deleting..." : "Delete"}</button></td>}
                   </tr>
                 ))}
               </tbody>
