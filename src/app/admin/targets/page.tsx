@@ -18,6 +18,12 @@ import type { ProductionEntry, ProductionTargetVersion } from "@/types";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
 import { isEmployeeActive } from "@/lib/employees";
 import { useAuth } from "@/lib/auth-context";
+import {
+  DEFAULT_ACTIVITY_TARGETS as REVISED_ACTIVITY_TARGETS,
+  DEFAULT_CUTTING_METER_TARGETS as REVISED_METER_TARGETS,
+  DEFAULT_CUTTING_PIECE_TARGETS as REVISED_MATERIAL_TARGETS,
+  DEFAULT_PRODUCTION_TARGETS as REVISED_TARGETS,
+} from "@/lib/production-targets";
 
 interface StageTarget {
   id?: string;
@@ -51,21 +57,6 @@ interface StageRow {
 
 const CUTTING_MATERIALS: MaterialType[] = ["FLEECE", "FLANNEL", "PUL"];
 
-const REVISED_TARGETS: Record<StageId, { defaultTarget: number; defaultWageRate: number; unit: string }> = {
-  "STG-01": { defaultTarget: 800, defaultWageRate: 10000, unit: "pieces" },
-  "STG-02": { defaultTarget: 500, defaultWageRate: 10000, unit: "pieces" },
-  "STG-03": { defaultTarget: 450, defaultWageRate: 10000, unit: "pieces" },
-  "STG-04": { defaultTarget: 500, defaultWageRate: 10000, unit: "pieces" },
-  "STG-05": { defaultTarget: 500, defaultWageRate: 10000, unit: "pieces" },
-  "STG-07": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
-  "STG-08": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
-  "STG-09": { defaultTarget: 500, defaultWageRate: 8000, unit: "pieces" },
-  "STG-10": { defaultTarget: 120, defaultWageRate: 10000, unit: "packs" },
-};
-
-const REVISED_MATERIAL_TARGETS: Record<"FLEECE" | "FLANNEL" | "PUL", number> = { FLEECE: 800, FLANNEL: 1000, PUL: 1000 };
-const REVISED_METER_TARGETS: Record<"FLEECE" | "FLANNEL" | "PUL", number> = { FLEECE: 26, FLANNEL: 50, PUL: 50 };
-const REVISED_ACTIVITY_TARGETS: Record<ProductionActivity, number> = { PINNING: 500, FOLDING: 700 };
 const ACTIVITY_LABELS: Record<ProductionActivity, string> = { PINNING: "Pinning", FOLDING: "Folding" };
 interface WorkerTarget {
   id: string;

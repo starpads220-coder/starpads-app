@@ -25,7 +25,6 @@ import {
   MaterialCategory,
   Employee,
   ProductionStage,
-  ProductionTargetVersion,
   TargetConfig,
   Batch,
   STAGE_LABELS,
@@ -55,6 +54,7 @@ import { activeEmployeeOptions, isEmployeeActive } from "@/lib/employees";
 import { showToast } from "@/components/ui/Toast";
 import { WIP_VERSION, GLOBAL_WIP_BALANCE_ID, applyWipEntry, emptyWipBalance, type WipBalance } from "@/lib/wip";
 import { FINISHED_PADS_STAGE_ID, STAGE_UNITS } from "@/lib/production-stages";
+import { resolveProductionTarget } from "@/lib/production-targets";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
 
@@ -125,7 +125,6 @@ export default function ProductionPage() {
   }, [employees, form.employeeId, editingEntryId]);
 
   const { data: stages = [], loading: stagesLoading } = useRealtimeCollection<ProductionStage>("productionStages");
-  const { data: targetVersions = [] } = useRealtimeCollection<ProductionTargetVersion>("productionTargetVersions");
 
   const { data: targetConfigs = [] } = useCollectionQuery<TargetConfig>("targetConfigs", [], {
     staleTime: 10 * 60 * 1000,
@@ -212,41 +211,17 @@ export default function ProductionPage() {
   }, [targetConfigs, form.employeeId, form.stageId, form.date]);
 
   const cuttingMaterial = form.materialTypes[0];
-  const targetVariant = form.stageId === "STG-01" && form.inputMode === "measure"
-    ? "materialMeters"
-    : form.stageId === "STG-01" && cuttingMaterial
-      ? "materialPieces"
-      : form.stageId === "STG-09" && form.productionActivity
-        ? "activity"
-        : form.stageId === "STG-05"
-          ? "stage"
-          : "stage";
-  const targetKey = `${form.stageId}:${targetVariant}:${cuttingMaterial ?? form.productionActivity ?? "default"}`;
-  const applicableTargetVersion = useMemo(() => targetVersions
-    .filter((version) => version.targetKey === targetKey && version.effectiveDate <= form.date)
-    .sort((a, b) => {
-      const dateOrder = b.effectiveDate.localeCompare(a.effectiveDate);
-      if (dateOrder) return dateOrder;
-      return (b.effectiveAt?.seconds ?? 0) - (a.effectiveAt?.seconds ?? 0);
-    })[0] ?? null, [targetVersions, targetKey, form.date]);
-  const measuredCuttingTarget = cuttingMaterial && selectedStage?.materialMeterTargets?.[cuttingMaterial]
-    ? selectedStage.materialMeterTargets[cuttingMaterial]! * (CUTTING_RATIOS[cuttingMaterial] || 0)
-    : 0;
+  const resolvedTarget = useMemo(() => resolveProductionTarget(selectedStage, {
+    stageId: form.stageId,
+    inputMode: form.inputMode,
+    material: cuttingMaterial,
+    activity: form.productionActivity,
+  }), [selectedStage, form.stageId, form.inputMode, cuttingMaterial, form.productionActivity]);
   const liveDailyTarget = activeOverride
     ? activeOverride.dailyTarget
-    : applicableTargetVersion
-      ? applicableTargetVersion.quantity * (targetVariant === "materialMeters" && cuttingMaterial ? (CUTTING_RATIOS[cuttingMaterial] || 0) : 1)
-    : form.stageId === "STG-09" && form.productionActivity && selectedStage?.activityTargets?.[form.productionActivity]
-      ? selectedStage.activityTargets[form.productionActivity]!
-    : form.stageId === "STG-01" && form.inputMode === "measure" && measuredCuttingTarget
-      ? measuredCuttingTarget
-      : form.stageId === "STG-01" && cuttingMaterial && selectedStage?.materialTargets?.[cuttingMaterial]
-      ? selectedStage.materialTargets[cuttingMaterial]!
-      : selectedStage
-        ? selectedStage.defaultTarget
-        : 0;
+    : resolvedTarget.calculationQuantity;
 
-  const liveDailyWageRate = applicableTargetVersion?.amount ?? (selectedStage ? selectedStage.defaultWageRate : 0);
+  const liveDailyWageRate = resolvedTarget.amount;
   const dailyTarget = editingEntry ? editingEntry.targetPieces : liveDailyTarget;
   const dailyWageRate = editingEntry?.targetSnapshot?.amount ?? liveDailyWageRate;
 
@@ -273,26 +248,21 @@ export default function ProductionPage() {
 
   const currentTargetSnapshot = useMemo(() => {
     if (editingEntry?.targetSnapshot) return editingEntry.targetSnapshot;
-    const sourceQuantity = applicableTargetVersion?.quantity ?? liveDailyTarget;
-    const unit = applicableTargetVersion?.unit ?? stageUnit[form.stageId];
-    const name = applicableTargetVersion?.targetName
-      ?? (form.stageId === "STG-09" && form.productionActivity
-        ? `${STAGE_LABELS[form.stageId]} - ${form.productionActivity === "PINNING" ? "Pinning" : "Folding"}`
-        : cuttingMaterial
-          ? `${STAGE_LABELS[form.stageId]} - ${cuttingMaterial === "MICROFIBER" ? "Microfiber" : cuttingMaterial.charAt(0) + cuttingMaterial.slice(1).toLowerCase()}`
-          : STAGE_LABELS[form.stageId]);
-    const amount = applicableTargetVersion?.amount ?? liveDailyWageRate;
+    const sourceQuantity = activeOverride?.dailyTarget ?? resolvedTarget.quantity;
+    const unit = activeOverride ? stageUnit[form.stageId] : resolvedTarget.unit;
+    const name = resolvedTarget.name;
+    const amount = liveDailyWageRate;
     return {
       name,
       quantity: sourceQuantity,
       amount,
       rate: sourceQuantity > 0 ? amount / sourceQuantity : 0,
       unit,
-      versionId: activeOverride?.id ? `worker:${activeOverride.id}|stage:${applicableTargetVersion?.id ?? "current"}` : applicableTargetVersion?.id ?? "stage-current",
-      effectiveDate: activeOverride?.effectiveDate ?? applicableTargetVersion?.effectiveDate ?? form.date,
+      versionId: activeOverride?.id ? `worker:${activeOverride.id}|stage:live` : "stage-live",
+      effectiveDate: activeOverride?.effectiveDate ?? form.date,
       calculationQuantity: liveDailyTarget,
     };
-  }, [editingEntry, applicableTargetVersion, liveDailyTarget, liveDailyWageRate, form.stageId, form.productionActivity, form.date, cuttingMaterial, activeOverride]);
+  }, [editingEntry, resolvedTarget, liveDailyTarget, liveDailyWageRate, form.stageId, form.date, activeOverride]);
 
   const toggleMaterial = (mat: MaterialType) => {
     setForm(prev => ({

@@ -258,6 +258,7 @@ export interface ProductionStage {
   activityTargets?: Partial<Record<"PINNING" | "FOLDING", number>>;
   defaultTarget: number;
   defaultWageRate: number;
+  unit?: string;
 }
 export interface Payment {
   id: string;
