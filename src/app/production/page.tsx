@@ -54,7 +54,7 @@ import { activeEmployeeOptions, isEmployeeActive } from "@/lib/employees";
 import { showToast } from "@/components/ui/Toast";
 import { WIP_VERSION, GLOBAL_WIP_BALANCE_ID, applyWipEntry, emptyWipBalance, type WipBalance } from "@/lib/wip";
 import { FINISHED_PADS_STAGE_ID, STAGE_UNITS } from "@/lib/production-stages";
-import { resolveProductionTarget } from "@/lib/production-targets";
+import { PRODUCTION_ENTRY_STAGE_OPTIONS, productionEntryStageValue, resolveProductionTarget } from "@/lib/production-targets";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
 
@@ -429,7 +429,7 @@ export default function ProductionPage() {
       setForm((prev) => ({
         ...prev,
         materialCategory: "" as MaterialCategory | "",
-        productionActivity: "" as "" | "PINNING" | "FOLDING",
+        productionActivity: prev.stageId === "STG-09" ? prev.productionActivity : "" as "" | "PINNING" | "FOLDING",
         materialTypes: [],
         metersInput: 0,
         actualPieces: 0,
@@ -906,17 +906,19 @@ const totalPackagedPads = useMemo(
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">Stage</label>
             <select
-              value={form.stageId}
+              value={productionEntryStageValue(form.stageId, form.productionActivity)}
               onChange={(e) => {
-                const stageId = e.target.value as StageId;
+                const option = PRODUCTION_ENTRY_STAGE_OPTIONS.find((item) => item.value === e.target.value);
+                if (!option) return;
+                const { stageId, activity: productionActivity } = option;
                 setBatchValidationError("");
-                setForm({ ...form, stageId, batchRef: stageId === FINISHED_PADS_STAGE_ID ? form.batchRef : "", productionActivity: "", materialCategory: "", materialTypes: [], metersInput: 0, inputMode: "manual" });
+                setForm({ ...form, stageId, batchRef: stageId === FINISHED_PADS_STAGE_ID ? form.batchRef : "", productionActivity, materialCategory: "", materialTypes: [], metersInput: 0, inputMode: "manual" });
               }}
               className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
             >
-              {(Object.entries(STAGE_LABELS) as [StageId, string][]).map(([id, label]) => (
-                <option key={id} value={id}>
-                  {id} — {label}
+              {PRODUCTION_ENTRY_STAGE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
                 </option>
               ))}
             </select>
@@ -955,15 +957,6 @@ const totalPackagedPads = useMemo(
                 </div>
               )}
             </>
-          ) : form.stageId === "STG-09" ? (
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Activity</label>
-              <select value={form.productionActivity} onChange={(e) => setForm({ ...form, productionActivity: e.target.value as "" | "PINNING" | "FOLDING" })} required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
-                <option value="">Select activity...</option>
-                <option value="PINNING">Pinning</option>
-                <option value="FOLDING">Folding</option>
-              </select>
-            </div>
           ) : stagesWithMaterial.includes(form.stageId) ? (
             <>
               <div>
@@ -1181,7 +1174,9 @@ const totalPackagedPads = useMemo(
                   <tr key={entry.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
                     <td className="px-4 py-3 text-sm text-gray-700">{getEmployeeName(entry.employeeId)}</td>
                     <td className="px-4 py-3 text-sm text-gray-700">
-                      {STAGE_LABELS[entry.stageId as StageId] ?? entry.stageId}
+                      {entry.stageId === "STG-09" && entry.productionActivity
+                        ? `${entry.stageId} — ${entry.productionActivity === "PINNING" ? "Pinning" : "Folding"}`
+                        : `${entry.stageId} — ${STAGE_LABELS[entry.stageId as StageId] ?? entry.stageId}`}
                     </td>
                     <td className="px-4 py-3 text-sm font-medium text-gray-900">
                       {entry.actualPieces}

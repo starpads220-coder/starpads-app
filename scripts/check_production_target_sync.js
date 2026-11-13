@@ -12,6 +12,8 @@ const stages = read("src/lib/production-stages.ts");
 
 assert.match(productionPage, /resolveProductionTarget\(selectedStage/,
   "Production Entry must resolve targets through the shared live-target resolver");
+assert.match(productionPage, /PRODUCTION_ENTRY_STAGE_OPTIONS\.map/,
+  "Production Entry must use the shared Targets-aligned stage options");
 assert.doesNotMatch(productionPage, /productionTargetVersions/,
   "Production Entry must not use target history as a second source of truth");
 assert.doesNotMatch(productionPage, /selectedStage\?\.(defaultTarget|materialTargets|materialMeterTargets|activityTargets)/,
@@ -22,6 +24,10 @@ assert.match(resolver, /stage\?\.materialMeterTargets\?\.\[material\]/,
   "STG-01 meter targets must come from the live stage document");
 assert.match(resolver, /calculationQuantity: quantity \* ratio/,
   "STG-01 meter targets must use the shared meter-to-piece calculation");
+assert.match(resolver, /value: "STG-09:PINNING"[\s\S]*?label: "STG-09 — Pinning"/,
+  "Pinning must be a separate Production Entry stage option");
+assert.match(resolver, /value: "STG-09:FOLDING"[\s\S]*?label: "STG-09 — Folding"/,
+  "Folding must be a separate Production Entry stage option");
 assert.match(resolver, /"STG-01": \{ defaultTarget: 1000, defaultWageRate: 10000/,
   "STG-01 must remain at target 1,000 and UGX 10,000");
 assert.match(resolver, /DEFAULT_CUTTING_PIECE_TARGETS[\s\S]*?FLEECE: 1000/,

@@ -1,9 +1,30 @@
 import type { MaterialType, ProductionStage, StageId } from "@/types";
 import { CUTTING_RATIOS } from "@/types";
-import { STAGE_LABELS, STAGE_UNITS } from "@/lib/production-stages";
+import { STAGE_LABELS, STAGE_ORDER, STAGE_UNITS } from "@/lib/production-stages";
 
 export type ProductionActivity = "PINNING" | "FOLDING";
 export type TargetVariant = "stage" | "materialPieces" | "materialMeters" | "activity";
+
+export interface ProductionEntryStageOption {
+  value: string;
+  stageId: StageId;
+  activity: ProductionActivity | "";
+  label: string;
+}
+
+/** Matches the stage rows shown on Targets while retaining canonical storage IDs. */
+export const PRODUCTION_ENTRY_STAGE_OPTIONS = STAGE_ORDER.flatMap<ProductionEntryStageOption>((stageId) =>
+  stageId === "STG-09"
+    ? [
+        { value: "STG-09:PINNING", stageId, activity: "PINNING", label: "STG-09 — Pinning" },
+        { value: "STG-09:FOLDING", stageId, activity: "FOLDING", label: "STG-09 — Folding" },
+      ]
+    : [{ value: stageId, stageId, activity: "" as const, label: `${stageId} — ${STAGE_LABELS[stageId]}` }]
+);
+
+export function productionEntryStageValue(stageId: StageId, activity?: ProductionActivity | ""): string {
+  return stageId === "STG-09" && activity ? `${stageId}:${activity}` : stageId;
+}
 
 export const DEFAULT_PRODUCTION_TARGETS: Record<StageId, { defaultTarget: number; defaultWageRate: number; unit: string }> = {
   "STG-01": { defaultTarget: 1000, defaultWageRate: 10000, unit: "pieces" },
