@@ -125,8 +125,8 @@ export async function GET(request: NextRequest) {
         const batches = batchesSnap.docs.map((d) => ({ id: d.id, ...d.data() } as Batch));
         const allEntries = prodSnap.docs.map((d) => ({ id: d.id, ...d.data() } as ProductionEntry));
 
-        const PACK_SIZES: Record<string, number> = { HALF_DOZEN: 6, DOZEN: 12, CARTON: 120 };
-        const stock: Record<string, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0 };
+        const PACK_SIZES: Record<string, number> = { HALF_DOZEN: 6, DOZEN: 12, CARTON: 120, ONE_PACK: 3 };
+        const stock: Record<string, number> = { HALF_DOZEN: 0, DOZEN: 0, CARTON: 0, ONE_PACK: 0 };
         stockIns.forEach((si) => { stock[si.packSize] += si.quantity; });
         stockOuts.forEach((so) => { stock[so.packSize] -= so.quantity; });
 
@@ -297,7 +297,7 @@ export async function GET(request: NextRequest) {
 
         const uniqueWorkers = new Set(prodEntries.map((e) => e.employeeId)).size;
 
-        const PACK_SIZES: Record<string, number> = { HALF_DOZEN: 6, DOZEN: 12, CARTON: 60 };
+        const PACK_SIZES: Record<string, number> = { HALF_DOZEN: 6, DOZEN: 12, CARTON: 60, ONE_PACK: 3 };
         const stockPadsTotal = allStockIns.reduce((s, si) => s + (si.quantity || 0) * (PACK_SIZES[si.packSize] || 0), 0);
 
         pdfElement = React.createElement(AnalyticsPDF, {

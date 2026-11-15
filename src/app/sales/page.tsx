@@ -1651,10 +1651,9 @@ export default function SalesPage() {
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Total Packs</label>
               <input
-                type="number"
-                value={padsInput > 0 ? form.quantitySold : ""}
+                type="text"
+                value={padsInput > 0 ? form.quantitySold.toLocaleString(undefined, { maximumFractionDigits: 4 }) : ""}
                 readOnly
-                step="any"
                 className="w-full rounded-md border border-gray-300 bg-gray-50 px-3 py-2 text-sm text-gray-500"
               />
               {padsInput > 0 && (() => {

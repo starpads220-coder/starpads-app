@@ -162,12 +162,6 @@ export default function StoragePage() {
     if (tabParam === "stock-out") setActiveTab("stock-out");
 
     const isMoveToStock = !!entryIdParam;
-    const packSizeMap: Record<string, number> = {
-      HALF_DOZEN: 6,
-      DOZEN: 12,
-      CARTON: 120,
-      ONE_PACK: 1,
-    };
     const resolvedPackSize = (packSizeParam as PackSize) || "HALF_DOZEN";
 
     if (isMoveToStock || dateParam || quantityParam || batchRefParam || packSizeParam) {
@@ -193,7 +187,7 @@ export default function StoragePage() {
         customerRef: customerRefParam || prev.customerRef,
         destination: destinationParam || prev.destination,
         packSize: (packSizeParam as PackSize) || prev.packSize,
-        quantity: quantityParam ? Math.round(parseFloat(quantityParam)) : prev.quantity,
+        quantity: quantityParam ? parseFloat(quantityParam) : prev.quantity,
         batchRef: batchRefParam || prev.batchRef,
         dispatchedBy: dispatchedByParam || prev.dispatchedBy,
       }));
@@ -204,7 +198,7 @@ export default function StoragePage() {
         customerRef: customerRefParam || prev.customerRef,
         destination: destinationParam || prev.destination,
         packSize: (packSizeParam as PackSize) || prev.packSize,
-        quantity: quantityParam ? Math.round(parseFloat(quantityParam)) : prev.quantity,
+        quantity: quantityParam ? parseFloat(quantityParam) : prev.quantity,
         batchRef: batchRefParam || prev.batchRef,
         dispatchedBy: dispatchedByParam || prev.dispatchedBy,
       }));
@@ -927,7 +921,7 @@ export default function StoragePage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Pack Size</label>
               <select value={stockInForm.packSize} onChange={(e) => setStockInForm({ ...stockInForm, packSize: e.target.value as PackSize })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
-                <option value="ONE_PACK">Single Pack (1 Pad)</option>
+                <option value="ONE_PACK">Single Pack (3 Pads)</option>
                 <option value="HALF_DOZEN">Half Dozen (6 Pads)</option>
                 <option value="DOZEN">Dozen (12 Pads)</option>
                 <option value="CARTON">Carton (120 Pads)</option>
@@ -935,8 +929,8 @@ export default function StoragePage() {
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Packs</label>
-              <input type="number" value={stockInForm.quantity || ""} onChange={(e) => setStockInForm({ ...stockInForm, quantity: parseInt(e.target.value) || 0 })}
-                required min={1} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+              <input type="number" value={stockInForm.quantity || ""} onChange={(e) => setStockInForm({ ...stockInForm, quantity: parseFloat(e.target.value) || 0 })}
+                required min={0.0001} step="any" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Received By</label>
@@ -1101,15 +1095,16 @@ export default function StoragePage() {
               <label className="block text-sm font-medium text-gray-700 mb-1">Pack Size</label>
               <select value={stockOutForm.packSize} onChange={(e) => setStockOutForm({ ...stockOutForm, packSize: e.target.value as PackSize })}
                 className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm">
-                <option value="HALF_DOZEN">Half Dozen (6 Packs)</option>
-                <option value="DOZEN">Dozen (12 Packs)</option>
-                <option value="CARTON">Carton (120 packs)</option>
+                <option value="ONE_PACK">Single Pack (3 Pads)</option>
+                <option value="HALF_DOZEN">Half Dozen (6 Pads)</option>
+                <option value="DOZEN">Dozen (12 Pads)</option>
+                <option value="CARTON">Carton (120 Pads)</option>
               </select>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Packs</label>
-              <input type="number" value={stockOutForm.quantity || ""} onChange={(e) => setStockOutForm({ ...stockOutForm, quantity: parseInt(e.target.value) || 0 })}
-                required min={1} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+              <input type="number" value={stockOutForm.quantity || ""} onChange={(e) => setStockOutForm({ ...stockOutForm, quantity: parseFloat(e.target.value) || 0 })}
+                required min={0.0001} step="any" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Dispatched By</label>

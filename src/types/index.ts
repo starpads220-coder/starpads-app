@@ -62,7 +62,7 @@ export const PACK_SIZES: Record<PackSize, number> = {
   HALF_DOZEN: 6,
   DOZEN: 12,
   CARTON: 120,
-  ONE_PACK: 1,
+  ONE_PACK: 3,
 };
 
 export type CustomerCategory = "B2B" | "B2C";

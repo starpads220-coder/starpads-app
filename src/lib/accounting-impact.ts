@@ -91,6 +91,30 @@ export function expenseAccountingImpact(accounting: AccountingSelection, totalVa
   };
 }
 
+export function productionCostAccountingImpact(accountCode: string, settlementCode: string, amountValue: number): AccountingImpact | null {
+  const amount = positive(amountValue);
+  if (!accountCode || !["1000", "1030"].includes(settlementCode) || amount <= 0) return null;
+  const costName = accountName(accountCode, "Cost of Production");
+  const settlementName = accountName(settlementCode, "Cash or Bank");
+  return {
+    lines: [line(accountCode, amount, 0, costName), line(settlementCode, 0, amount, settlementName)],
+    incomeStatement: `${costName} increases by UGX ${amount.toLocaleString()}; gross profit and net income decrease by the same amount.`,
+    balanceSheet: `${settlementName} decreases by UGX ${amount.toLocaleString()}. Equity ultimately decreases through the lower profit.`,
+    cashFlow: `Operating cash outflow increases by UGX ${amount.toLocaleString()}.`,
+  };
+}
+
+export function taxDeductionAccountingImpact(amountValue: number): AccountingImpact | null {
+  const amount = positive(amountValue);
+  if (amount <= 0) return null;
+  return {
+    lines: [line("6195", amount, 0, "Income Tax Expense"), line("2250", 0, amount, "Income Tax Payable")],
+    incomeStatement: `Tax Deductions increase by UGX ${amount.toLocaleString()}; net income decreases by the same amount.`,
+    balanceSheet: `Income Tax Payable increases by UGX ${amount.toLocaleString()}. Equity ultimately decreases through the lower net income.`,
+    cashFlow: "No immediate cash movement. Cash flow changes when the tax liability is paid.",
+  };
+}
+
 export function balanceSheetJournalImpact(itemCode: string, offsetCode: string, category: "Assets" | "Liabilities" | "Equity" | "", action: "add" | "deduct", amountValue: number): AccountingImpact | null {
   const amount = positive(amountValue);
   if (!itemCode || !offsetCode || itemCode === offsetCode || !category || amount <= 0) return null;
