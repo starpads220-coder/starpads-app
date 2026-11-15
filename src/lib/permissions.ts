@@ -1,4 +1,4 @@
-import { EmployeeRole } from "@/types";
+import type { EmployeeRole } from "@/types";
 
 export const ROLE_ROUTES: Record<EmployeeRole, string[]> = {
   ADMIN: [
@@ -10,6 +10,7 @@ export const ROLE_ROUTES: Record<EmployeeRole, string[]> = {
     "/banking",
     "/payments",
     "/analytics",
+    "/profit",
     "/admin/employees",
     "/admin/targets",
     "/admin/users",
@@ -48,6 +49,7 @@ export const ROLE_ROUTES: Record<EmployeeRole, string[]> = {
 
 export function isRouteAllowed(role: EmployeeRole | null | undefined, pathname: string): boolean {
   if (!role) return false;
+  if (pathname === "/profit" || pathname.startsWith("/profit/")) return role === "ADMIN";
   if (pathname === "/accounts") return ["ADMIN", "FINANCIAL_MANAGER", "FINANCE", "SALES_MANAGER", "SALES_STAFF"].includes(role);
   if (pathname === "/profile" || pathname.startsWith("/profile/")) return true;
   if (pathname === "/no-access") return true;

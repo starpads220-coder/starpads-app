@@ -16,6 +16,7 @@ const ALL_NAV_ITEMS = [
   { href: "/banking", label: "Banking" },
   { href: "/payments", label: "Payments" },
   { href: "/analytics", label: "Analytics" },
+  { href: "/profit", label: "Profit" },
   { href: "/admin/employees", label: "Employees" },
   { href: "/admin/targets", label: "Targets" },
   { href: "/admin/users", label: "Users" },

@@ -27,6 +27,13 @@ service cloud.firestore {
       return hasRole('ADMIN');
     }
 
+    // Profit First is currently derived client-side and stores no documents.
+    // Reserve the namespace so future cached/materialized Profit data cannot leak.
+    match /profitFirst/{document=**} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
     function getSupervisorDepartment() {
       return 'PRODUCTION';
     }
