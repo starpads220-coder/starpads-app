@@ -46,7 +46,7 @@ export function NavBar() {
             Star Durable Pads
           </Link>
           <div className={`min-w-0 flex-1 ${isSupervisor ? "flex justify-center" : "ml-3"}`}>
-            <div className="hidden xl:block">
+            <div className="hidden w-full xl:block">
               <GooeyNav items={navItems} />
             </div>
           </div>

@@ -27,22 +27,26 @@
     1
   );
   position: relative;
+  width: 100%;
 }
 
 .gooey-nav-container nav {
   display: flex;
   position: relative;
+  width: 100%;
   transform: translate3d(0, 0, 0.01px);
   z-index: 2;
 }
 
 .gooey-nav-container nav ul {
   display: flex;
-  gap: 0.25em;
+  gap: 0.15em;
+  justify-content: space-between;
   list-style: none;
   padding: 0 0.2em;
   margin: 0;
   position: relative;
+  width: 100%;
   z-index: 3;
   color: white;
   text-shadow: 0 1px 1px hsl(205deg 30% 10% / 0.2);
@@ -58,14 +62,18 @@
     box-shadow 0.3s ease;
   box-shadow: 0 0 0.5px 1.5px transparent;
   color: white;
+  flex: 1 1 0;
+  min-width: 0;
 }
 
 .gooey-nav-container nav ul li a {
-  display: inline-block;
+  display: block;
   padding: 0.5em 0.55em;
   font-size: 0.75rem;
   font-weight: 500;
   text-decoration: none;
+  text-align: center;
+  white-space: nowrap;
   color: inherit;
 }
 
