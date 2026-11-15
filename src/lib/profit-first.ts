@@ -10,6 +10,7 @@ export const PROFIT_FIRST_ALLOCATION = {
 } as const;
 
 export type ProfitAccountKey = keyof typeof PROFIT_FIRST_ALLOCATION;
+export type ProfitLedgerAccountKey = "income" | ProfitAccountKey;
 
 export const PROFIT_ACCOUNT_LABELS: Record<ProfitAccountKey, string> = {
   profit: "Profit",
@@ -17,6 +18,7 @@ export const PROFIT_ACCOUNT_LABELS: Record<ProfitAccountKey, string> = {
   tax: "Tax",
   operatingExpenses: "Operating Expenses",
 };
+export const PROFIT_LEDGER_LABELS: Record<ProfitLedgerAccountKey, string> = { income: "Income", ...PROFIT_ACCOUNT_LABELS };
 
 const allocationTotal = Object.values(PROFIT_FIRST_ALLOCATION).reduce((sum, value) => sum + value, 0);
 if (allocationTotal !== 100) throw new Error(`Profit First allocation must equal 100%; received ${allocationTotal}%.`);
@@ -38,12 +40,13 @@ export interface ProfitTaxEntry { id: string; date: string; amount?: number; des
 
 export interface ProfitLedgerEntry {
   key: string;
-  account: ProfitAccountKey;
+  account: ProfitLedgerAccountKey;
   date: string;
   source: string;
   sourceId: string;
   reference: string;
   description: string;
+  sourceAmount: number;
   inflow: number;
   outflow: number;
   href: string;
@@ -99,11 +102,23 @@ export function deriveProfitFirst(sources: ProfitFirstSources, start = PROFIT_FI
   const filteredSales = sources.sales.filter(entry => saleIsActive(entry) && inPeriod(entry.date, start, end) && amount(entry.totalAmount) > 0);
 
   for (const sale of filteredSales) {
-    const allocations = allocateSale(amount(sale.totalAmount));
+    const saleAmount = Math.round(amount(sale.totalAmount));
+    const allocations = allocateSale(saleAmount);
+    const saleReference = sale.invoiceNumber || sale.id;
+    const saleDescription = sale.customerName ? `Sale to ${sale.customerName}` : "Sales revenue";
+    add(ledger, {
+      key: `sale:${sale.id}:income-captured`, account: "income", date: sale.date, source: "Sales Entries", sourceId: sale.id,
+      reference: saleReference, description: `${saleDescription} captured`, sourceAmount: saleAmount, inflow: saleAmount, outflow: 0, href: "/sales",
+    });
+    add(ledger, {
+      key: `sale:${sale.id}:income-allocated`, account: "income", date: sale.date, source: "Profit First allocation", sourceId: sale.id,
+      reference: saleReference, description: "Distributed to Profit, Owner's Compensation, Tax and OpEx", sourceAmount: saleAmount,
+      inflow: 0, outflow: saleAmount, href: "/sales",
+    });
     for (const account of Object.keys(allocations) as ProfitAccountKey[]) add(ledger, {
       key: `sale:${sale.id}:${account}`, account, date: sale.date, source: "Sales Entries", sourceId: sale.id,
-      reference: sale.invoiceNumber || sale.id, description: sale.customerName ? `Sale to ${sale.customerName}` : "Sales revenue allocation",
-      inflow: allocations[account], outflow: 0, href: "/sales",
+      reference: saleReference, description: `${saleDescription} · ${PROFIT_FIRST_ALLOCATION[account]}% ${PROFIT_ACCOUNT_LABELS[account]} allocation`,
+      sourceAmount: saleAmount, inflow: allocations[account], outflow: 0, href: "/sales",
     });
   }
 
@@ -114,38 +129,38 @@ export function deriveProfitFirst(sources: ProfitFirstSources, start = PROFIT_FI
       key: `expense:${expense.id}`, account: salary ? "ownerCompensation" : "operatingExpenses", date: expense.date,
       source: salary ? "Expenses · Salaries and Wages" : "Expenses", sourceId: expense.id, reference: expense.receiptRef || expense.id,
       description: expense.description || expense.accounting?.accountName || expense.subcategory || expense.category || "Expense",
-      inflow: 0, outflow: deduction, href: "/expenses",
+      sourceAmount: deduction, inflow: 0, outflow: deduction, href: "/expenses",
     });
   }
 
   for (const payment of sources.payments.filter(entry => entry.status === "paid" && payrollAffectsAccounts(entry) && inPeriod(entry.paidDate, start, end))) add(ledger, {
     key: `payment:${payment.id}`, account: "ownerCompensation", date: payment.paidDate!, source: "Payments · Production payroll",
     sourceId: payment.id, reference: payment.receiptNumber || payment.id, description: "Confirmed production payment (net pay)",
-    inflow: 0, outflow: payrollNet(payment), href: "/payments",
+    sourceAmount: payrollNet(payment), inflow: 0, outflow: payrollNet(payment), href: "/payments",
   });
 
   for (const journal of sources.journals.filter(entry => inPeriod(entry.date, start, end))) {
     if (journal.debitCode === "3100" && cashCodes.has(journal.creditCode || "")) add(ledger, {
       key: `journal:${journal.id}:dividend`, account: "profit", date: journal.date, source: "Record Journal · Dividends",
       sourceId: journal.id, reference: journal.id, description: journal.description || "Dividend paid", inflow: 0,
-      outflow: amount(journal.amount), href: "/accounts",
+      sourceAmount: amount(journal.amount), outflow: amount(journal.amount), href: "/accounts",
     });
     if (journal.debitCode === "2250" && cashCodes.has(journal.creditCode || "")) add(ledger, {
       key: `journal:${journal.id}:income-tax`, account: "tax", date: journal.date, source: "Record Journal · Income tax payment",
       sourceId: journal.id, reference: journal.id, description: journal.description || "Income tax paid", inflow: 0,
-      outflow: amount(journal.amount), href: "/accounts",
+      sourceAmount: amount(journal.amount), outflow: amount(journal.amount), href: "/accounts",
     });
   }
 
   for (const remittance of sources.payeRemittances.filter(entry => inPeriod(entry.paymentDate, start, end))) add(ledger, {
     key: `paye:${remittance.id}`, account: "tax", date: remittance.paymentDate!, source: "Payments · PAYE remittance",
     sourceId: remittance.id, reference: remittance.uraReference || remittance.returnPeriod || remittance.id,
-    description: remittance.notes || "PAYE paid to URA", inflow: 0, outflow: amount(remittance.amount), href: "/payments",
+    description: remittance.notes || "PAYE paid to URA", sourceAmount: amount(remittance.amount), inflow: 0, outflow: amount(remittance.amount), href: "/payments",
   });
   for (const remittance of sources.nssfRemittances.filter(entry => inPeriod(entry.paymentDate, start, end))) add(ledger, {
     key: `nssf:${remittance.id}`, account: "tax", date: remittance.paymentDate!, source: "Payments · NSSF remittance",
     sourceId: remittance.id, reference: remittance.reference || remittance.returnPeriod || remittance.id,
-    description: remittance.notes || "NSSF paid", inflow: 0, outflow: amount(remittance.amount), href: "/payments",
+    description: remittance.notes || "NSSF paid", sourceAmount: amount(remittance.amount), inflow: 0, outflow: amount(remittance.amount), href: "/payments",
   });
 
   ledger.sort((a, b) => a.date.localeCompare(b.date) || Number(b.inflow > 0) - Number(a.inflow > 0) || a.key.localeCompare(b.key));

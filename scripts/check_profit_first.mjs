@@ -35,7 +35,10 @@ assert.equal(result.accounts.profit.deducted, 50);
 assert.equal(result.accounts.ownerCompensation.deducted, 1_200, "only net structured payroll is deducted");
 assert.equal(result.accounts.tax.deducted, 130, "only paid/remitted tax is deducted");
 assert.equal(result.accounts.operatingExpenses.deducted, 200);
-assert.equal(result.ledger.filter(entry => entry.sourceId === "sale-1").length, 4, "one allocation per account and no retry duplicates");
+assert.equal(result.ledger.filter(entry => entry.sourceId === "sale-1" && entry.account !== "income").length, 4, "one allocation per destination account");
+assert.equal(result.ledger.filter(entry => entry.sourceId === "sale-1" && entry.account === "income").length, 2, "Income records sale capture and allocation out");
+assert.equal(result.ledger.find(entry => entry.sourceId === "sale-1" && entry.account === "profit")?.sourceAmount, 1_000_000, "Profit ledger retains the full source sale value");
+assert.equal(result.ledger.find(entry => entry.sourceId === "sale-1" && entry.account === "profit")?.inflow, 220_000, "Profit ledger shows the exact 22% allocation");
 assert.equal(deriveProfitFirst(sources, "2026-01-01", "2026-01-31").ledger.length, result.ledger.length, "retries must be idempotent");
 
 const edited = deriveProfitFirst({ ...sources, sales: [{ ...sources.sales[0], totalAmount: 2_000_000 }], journals: [{ ...sources.journals[0], amount: 75 }] }, "2026-01-01", "2026-01-31");
