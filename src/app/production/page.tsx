@@ -84,6 +84,8 @@ const stagesWithMaterial: StageId[] = ["STG-01"];
 
 export default function ProductionPage() {
   const { userRole } = useAuth();
+  const canEditProductionEntries = ["ADMIN", "PRODUCTION_SUPERVISOR", "FINANCIAL_MANAGER"].includes(userRole?.role ?? "");
+  const canDeleteProductionEntries = userRole?.role === "ADMIN";
   const [saving, setSaving] = useState(false);
   const [deletingEntryId, setDeletingEntryId] = useState<string | null>(null);
   const [wipError, setWipError] = useState("");
@@ -287,7 +289,7 @@ export default function ProductionPage() {
   };
 
   const handleDeleteEntry = async (entry: ProductionEntry) => {
-    if (userRole?.role !== "ADMIN" || deletingEntryId) return;
+    if (!canDeleteProductionEntries || deletingEntryId) return;
     if (entry.paymentStatus === "paid" || entry.paymentId) {
       showToast("This entry is linked to a confirmed payment and cannot be deleted.", "error");
       return;
@@ -385,6 +387,9 @@ export default function ProductionPage() {
       if (editingEntryId) {
         const oldEntry = entries.find((e) => e.id === editingEntryId);
         if (!oldEntry) throw new Error("The production entry could not be found.");
+        if (!canEditProductionEntries) throw new Error("Your role cannot edit production entries.");
+        if (oldEntry.paymentStatus === "paid" || oldEntry.paymentId) throw new Error("This entry is linked to a confirmed payment and cannot be edited.");
+        if (oldEntry.movedToStockAt) throw new Error("Reverse the stock movement before editing this packaged entry.");
         if (oldEntry.wipVersion === WIP_VERSION) {
           const entryRef = doc(db, "productionEntries", editingEntryId);
           const oldBalanceRef = doc(db, "wipBalances", GLOBAL_WIP_BALANCE_ID);
@@ -1166,7 +1171,7 @@ const totalPackagedPads = useMemo(
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Perf.</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Earnings</th>
                   <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
-                  {userRole?.role === "ADMIN" && <th className="sticky right-0 z-10 border-l border-gray-200 bg-gray-50 px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase shadow-[-4px_0_8px_-6px_rgba(0,0,0,0.3)]">Action</th>}
+                  {canEditProductionEntries && <th className="sticky right-0 z-10 border-l border-gray-200 bg-gray-50 px-4 py-3 text-right text-xs font-medium text-gray-700 uppercase shadow-[-4px_0_8px_-6px_rgba(0,0,0,0.3)]">Actions</th>}
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-200">
@@ -1192,7 +1197,7 @@ const totalPackagedPads = useMemo(
                       UGX {entry.earningsUgx.toLocaleString()}
                     </td>
                     <td className="px-4 py-3 text-sm font-mono text-gray-500">{getBatchNumber(entry.batchRef)}</td>
-                    {userRole?.role === "ADMIN" && <td className={`sticky right-0 z-10 border-l border-gray-200 px-4 py-3 text-right shadow-[-4px_0_8px_-6px_rgba(0,0,0,0.3)] ${i % 2 === 0 ? "bg-white" : "bg-gray-50"}`}><button type="button" disabled={Boolean(deletingEntryId)} onClick={() => handleDeleteEntry(entry)} className="inline-flex min-w-20 justify-center rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50">{deletingEntryId === entry.id ? "Deleting..." : "Delete"}</button></td>}
+                    {canEditProductionEntries && <td className={`sticky right-0 z-10 border-l border-gray-200 px-4 py-3 text-right shadow-[-4px_0_8px_-6px_rgba(0,0,0,0.3)] ${i % 2 === 0 ? "bg-white" : "bg-gray-50"}`}><div className="flex justify-end gap-2"><button type="button" disabled={Boolean(entry.paymentStatus === "paid" || entry.paymentId || entry.movedToStockAt)} title={entry.paymentStatus === "paid" || entry.paymentId ? "Confirmed payment entries cannot be edited" : entry.movedToStockAt ? "Reverse the stock movement before editing" : "Edit production entry"} onClick={() => window.location.assign(`/production?editEntryId=${encodeURIComponent(entry.id)}`)} className="inline-flex min-w-16 justify-center rounded-md border border-blue-300 bg-blue-50 px-3 py-1.5 text-sm font-semibold text-blue-700 hover:bg-blue-100 disabled:cursor-not-allowed disabled:opacity-50">Edit</button>{canDeleteProductionEntries && <button type="button" disabled={Boolean(deletingEntryId)} onClick={() => handleDeleteEntry(entry)} className="inline-flex min-w-20 justify-center rounded-md border border-red-300 bg-red-50 px-3 py-1.5 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50">{deletingEntryId === entry.id ? "Deleting..." : "Delete"}</button>}</div></td>}
                   </tr>
                 ))}
               </tbody>

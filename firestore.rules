@@ -148,7 +148,7 @@ service cloud.firestore {
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stageId', 'batchRef']) || isCanonicalProductionEntry(request.resource.data)))
         || (hasAnyRole(['FINANCE', 'FINANCIAL_MANAGER'])
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'paymentId']));
-      allow delete: if hasAnyRole(['ADMIN', 'PRODUCTION_SUPERVISOR', 'FINANCIAL_MANAGER']);
+      allow delete: if isAdmin();
     }
 
     // Atomic global WIP balance. Historical records are migrated to the current
