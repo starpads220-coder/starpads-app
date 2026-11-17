@@ -75,14 +75,16 @@ service cloud.firestore {
     // ============================================================
     // employees - Staff directory
     // All authenticated users can read
-    // Create/Edit: ADMIN or PRODUCTION_SUPERVISOR (own department only).
+    // Create: ADMIN, FINANCIAL_MANAGER, or PRODUCTION_SUPERVISOR (own department only).
+    // General edits: ADMIN or PRODUCTION_SUPERVISOR (own department only).
     // Users who can access the Employees page may make status-only updates
     // within the employee scope visible to their role.
     // Delete: ADMIN only
     // ============================================================
     match /employees/{employeeId} {
       allow read: if isAuthenticated();
-      allow create: if isAdmin() || (hasRole('PRODUCTION_SUPERVISOR') && request.resource.data.department == getSupervisorDepartment());
+      allow create: if hasAnyRole(['ADMIN', 'FINANCIAL_MANAGER'])
+        || (hasRole('PRODUCTION_SUPERVISOR') && request.resource.data.department == getSupervisorDepartment());
       allow update: if isAdmin()
         || (hasRole('PRODUCTION_SUPERVISOR') && resource.data.department == getSupervisorDepartment() && request.resource.data.department == resource.data.department)
         || (hasRole('FINANCIAL_MANAGER') && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['payeApplicable']))

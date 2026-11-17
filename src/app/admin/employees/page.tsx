@@ -63,8 +63,8 @@ export default function AdminEmployeesPage() {
   const isAdmin = userRole?.role === "ADMIN";
   const isFinancialManager = userRole?.role === "FINANCIAL_MANAGER";
   const isSalesManager = userRole?.role === "SALES_MANAGER";
-  // Create & edit: admin, supervisor, financial manager.
-  const canManageEmployees = isAdmin || isSupervisor || isFinancialManager;
+  const canCreateEmployees = isAdmin || isSupervisor || isFinancialManager;
+  const canEditEmployees = isAdmin || isSupervisor;
   const canToggleActive = isAdmin || isSupervisor || isFinancialManager || isSalesManager;
 
   const visibleEmployees = useMemo(() => {
@@ -176,7 +176,7 @@ export default function AdminEmployeesPage() {
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <h1 className="text-2xl font-bold text-gray-900">Employee Register</h1>
-          {canManageEmployees && (
+          {canCreateEmployees && (
             <button
               onClick={() => {
                 resetForm();
@@ -280,7 +280,7 @@ export default function AdminEmployeesPage() {
                     </td>
                     <td className="px-4 py-3 text-sm text-gray-700">{emp.payeApplicable === false ? "Not applicable" : "Applicable"}{isFinancialManager && <button type="button" onClick={() => handleTogglePaye(emp)} className="ml-2 text-xs text-blue-700 hover:underline">Change</button>}</td>
                     <td className="px-4 py-3 text-right">
-                      {canManageEmployees && (
+                      {canEditEmployees && (
                         <button onClick={() => handleEdit(emp)} className="text-sm text-stock-blue hover:underline mr-3">Edit</button>
                       )}
                       {canToggleActive && (
