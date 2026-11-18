@@ -118,7 +118,13 @@ export default function AccountsPage() {
   const journalSections = journal.category ? JOURNAL_STRUCTURE[journal.category] : [];
   const journalItemGroups = journalSections.map(section => ({ ...section, lines: journalLines(report, section.label).filter(line => line.accountCode && !["1240", "1250", "1260"].includes(line.accountCode)) }));
   const selectedJournalLine = journalItemGroups.flatMap(section => section.lines).find(line => line.accountCode === journal.itemCode);
-  const automaticJournalOffsetCode = journal.category === "Equity" ? "1000" : "3060";
+  // Machinery purchases are funded from the operating bank account. Adding
+  // machinery therefore debits PPE (1630) and credits Bank (1000). A machinery
+  // deduction reverses those sides. Other Balance Sheet entries retain their
+  // existing automatic offset treatment.
+  const automaticJournalOffsetCode = journal.itemCode === "1630"
+    ? "1000"
+    : journal.category === "Equity" ? "1000" : "3060";
   const journalOffsetCode = editingJournalOffsetCode ?? automaticJournalOffsetCode;
   const journalAmount = Number(journal.amount);
   const journalImpact = balanceSheetJournalImpact(selectedJournalLine?.accountCode ?? "", journalOffsetCode, journal.category, journal.action, journalAmount);
@@ -418,6 +424,7 @@ export default function AccountsPage() {
         <label className="sm:col-span-2">Description<input required className={input} value={journal.description} onChange={e => setJournal({ ...journal, description: e.target.value })} /></label>
       </div>
       <AccountingImpactPreview impact={journalImpact} />
+      {selectedJournalLine?.accountCode === "1630" && <p className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900">Machinery and Equipment uses <strong>Cash in Bank – Operating Bank</strong> as its automatic offset. Adding machinery debits Machinery and Equipment and credits Bank; deducting machinery reverses those accounts. A purchase is reported as an investing cash outflow.</p>}
       {journal.action === "deduct" && selectedJournalLine && Number.isFinite(journalAmount) && journalAmount > selectedJournalBalance + 0.005 && <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">This deduction exceeds the current {selectedJournalLine.name} balance of {money(selectedJournalBalance)} as at {journal.date}. Saving is blocked.</p>}
       {selectedJournalLine?.accountCode === "3100" && <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">Dividends currently follows the existing Equity sign treatment: Add Funds increases the Dividends equity balance; Deduct Funds reduces it. Review this treatment before using it as a contra-equity withdrawal.</p>}
       <button disabled={saving} className="rounded-lg bg-gray-900 px-4 py-2 text-white disabled:opacity-50">{saving ? "Saving..." : editingJournalId ? "Update entry" : "Record journal"}</button><p role="status">{message}</p>
