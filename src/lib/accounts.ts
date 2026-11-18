@@ -31,7 +31,7 @@ export const SETTLEMENT_CODES = ["1000", "1010", "1020", "1030"];
 export const RECEIVABLE_CODE = "1100";
 export const PAYABLE_CODE = "2110";
 export const COST_OF_PRODUCTION_LINES = [
-  { id: "purchases_raw_materials", label: "Purchases of Raw Materials", accountCode: "5080", statementField: "purchasesOfRawMaterials", entrySelectable: true },
+  { id: "purchases_raw_materials", label: "Raw Material Expenses", accountCode: "5080", statementField: "purchasesOfRawMaterials", entrySelectable: true },
   { id: "carriage_inwards", label: "Carriage Inwards", accountCode: "6030", statementField: "carriageInwards", entrySelectable: true },
   { id: "direct_labor", label: "Direct Labor", accountCode: "5090", statementField: "directLabor", entrySelectable: false },
   { id: "other_costs", label: "Other Costs", accountCode: "5100", statementField: "otherProductionCosts", entrySelectable: true },
@@ -106,6 +106,8 @@ export interface ProductionCostEntry {
   date: string;
   description: string;
   amount: number;
+  unitCost?: number;
+  quantity?: number;
   settlementCode: "1000" | "1030";
   item?: ProductionCostItem;
   /** Legacy field names retained so previously saved entries remain reportable. */

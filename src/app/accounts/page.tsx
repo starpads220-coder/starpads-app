@@ -37,7 +37,7 @@ export default function AccountsPage() {
   const [journal, setJournal] = useState({ date: todayInEat(), action: "add" as "add" | "deduct", category: "" as JournalCategory | "", itemCode: "", amount: "", description: "" });
   const [editingJournalOffsetCode, setEditingJournalOffsetCode] = useState<string | null>(null);
   const [cashActivityOpen, setCashActivityOpen] = useState(false);
-  const [productionCost, setProductionCost] = useState({ date: todayInEat(), item: "" as "" | ProductionCostItem, description: "", amount: "", settlementCode: "" as "" | "1000" | "1030", reference: "", notes: "" });
+  const [productionCost, setProductionCost] = useState({ date: todayInEat(), item: "" as "" | ProductionCostItem, description: "", unitCost: "", quantity: "", amount: "", settlementCode: "" as "" | "1000" | "1030", reference: "", notes: "" });
   const [editingProductionCostId, setEditingProductionCostId] = useState<string | null>(null);
   const [taxEntry, setTaxEntry] = useState({ date: todayInEat(), description: "", amount: "" });
   const [editingTaxId, setEditingTaxId] = useState<string | null>(null);
@@ -129,7 +129,10 @@ export default function AccountsPage() {
   const journalAmount = Number(journal.amount);
   const journalImpact = balanceSheetJournalImpact(selectedJournalLine?.accountCode ?? "", journalOffsetCode, journal.category, journal.action, journalAmount);
   const selectedProductionCostLine = PRODUCTION_COST_ENTRY_LINES.find(line => line.id === productionCost.item);
-  const productionCostImpact = productionCostAccountingImpact(selectedProductionCostLine?.accountCode ?? "", productionCost.settlementCode, Number(productionCost.amount));
+  const isRawMaterialCost = productionCost.item === "purchases_raw_materials";
+  const calculatedRawMaterialAmount = Number(productionCost.unitCost) * Number(productionCost.quantity);
+  const productionCostAmount = isRawMaterialCost ? calculatedRawMaterialAmount : Number(productionCost.amount);
+  const productionCostImpact = productionCostAccountingImpact(selectedProductionCostLine?.accountCode ?? "", productionCost.settlementCode, productionCostAmount);
   const taxDeductionImpact = taxDeductionAccountingImpact(Number(taxEntry.amount));
   const journalBalanceReport = useMemo(() => buildAccounts(sales.data, expenses.data, accountingJournals.filter(entry => entry.id !== editingJournalId), "", journal.date || todayInEat(), productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data), [sales.data, expenses.data, accountingJournals, editingJournalId, journal.date, productionCosts.data, taxEntries.data, payrollEntries.data, payments.data, payeRemittances.data, nssfRemittances.data]);
   const selectedJournalBalance = selectedJournalLine?.accountCode ? journalBalanceReport.rows.find(row => row.code === selectedJournalLine.accountCode)?.balance ?? 0 : 0;
@@ -167,7 +170,7 @@ export default function AccountsPage() {
   const pdfSections = useMemo<AccountsPdfSection[]>(() => {
     if (view === "income") return [
       { title: "Revenue", rows: [{ label: "Sales of Pads", amount: statements.salesOfPads }, { label: "Other Income", amount: statements.otherIncome }, { label: "  Sales of Materials", amount: statements.salesOfMaterials }, { label: "  Trainings", amount: statements.trainings }, ...statements.customIncome.map(entry => ({ label: `  ${entry.name}`, amount: entry.amount })), { label: "  Grants and Donations", amount: statements.grantsAndDonations }, { label: "Total revenue", amount: statements.revenue, emphasis: "total" }] },
-      { title: "Cost of Production", rows: [{ label: "Legacy Raw-Material Expenses", amount: statements.purchasesOfRawMaterials }, { label: "Inventory Cost Recognised", amount: statements.inventoryCostRecognised }, { label: "Carriage Inwards", amount: statements.carriageInwards }, { label: "Direct Labor", amount: statements.directLabor }, { label: "Other Costs", amount: statements.otherProductionCosts }, { label: "Total Cost of Production", amount: statements.costOfProduction, emphasis: "total" }, { label: "Gross profit", amount: statements.grossProfit, emphasis: "total" }] },
+      { title: "Cost of Production", rows: [{ label: "Raw Material Expenses", amount: statements.purchasesOfRawMaterials }, { label: "Inventory Cost Recognised", amount: statements.inventoryCostRecognised }, { label: "Carriage Inwards", amount: statements.carriageInwards }, { label: "Direct Labor", amount: statements.directLabor }, { label: "Other Costs", amount: statements.otherProductionCosts }, { label: "Total Cost of Production", amount: statements.costOfProduction, emphasis: "total" }, { label: "Gross profit", amount: statements.grossProfit, emphasis: "total" }] },
       { title: "Operating Expenses", rows: [{ label: "Operating Expenses", amount: statements.operatingExpenses }, ...statements.operatingExpenseLines.map(entry => ({ label: `  ${entry.name}`, amount: entry.amount })), { label: "Income Before Taxes", amount: statements.incomeBeforeTaxes, emphasis: "total" }, { label: "Tax Deductions", amount: statements.taxDeductions }, { label: "Net income", amount: statements.netIncome, emphasis: "grand" }] },
     ];
     if (view === "cashflow") return [
@@ -285,23 +288,25 @@ export default function AccountsPage() {
   async function saveProductionCost(e: FormEvent) {
     e.preventDefault(); setSaving(true); setMessage("");
     try {
-      const amount = Number(productionCost.amount);
+      const amount = productionCostAmount;
       const description = productionCost.description.trim();
-      if (!canPost || !/^\d{4}-\d{2}-\d{2}$/.test(productionCost.date) || !PRODUCTION_COST_ENTRY_LINES.some(line => line.id === productionCost.item) || productionCost.item === "purchases_raw_materials" || !description || !Number.isFinite(amount) || amount <= 0 || !["1000", "1030"].includes(productionCost.settlementCode)) throw new Error("Enter a date, available Cost of Production item, cost name, positive amount, and Cash or Bank payment method. Record raw-material purchases in the Inventory Entry form.");
+      if (!canPost || !/^\d{4}-\d{2}-\d{2}$/.test(productionCost.date) || !PRODUCTION_COST_ENTRY_LINES.some(line => line.id === productionCost.item) || !description || !Number.isFinite(amount) || amount <= 0 || !["1000", "1030"].includes(productionCost.settlementCode)) throw new Error("Enter a date, Cost of Production item, cost name, positive amount, and Cash or Bank payment method.");
+      if (isRawMaterialCost && (!Number.isFinite(Number(productionCost.unitCost)) || Number(productionCost.unitCost) <= 0 || !Number.isFinite(Number(productionCost.quantity)) || Number(productionCost.quantity) <= 0)) throw new Error("Enter a positive raw-material unit cost and quantity.");
       if (/\bdirect\s*labou?r\b/i.test(description)) throw new Error("Direct Labor comes from production earnings, including accrued unpaid wages, and cannot be entered here.");
       const impact = productionCostAccountingImpact(PRODUCTION_COST_ENTRY_LINES.find(line => line.id === productionCost.item)?.accountCode ?? "", productionCost.settlementCode, amount);
       if (!accountingImpactIsBalanced(impact)) throw new Error("The production cost entry is incomplete or does not balance. Review the cost item, payment method and amount.");
-      const entry = { date: productionCost.date, item: productionCost.item as ProductionCostItem, description, amount, settlementCode: productionCost.settlementCode, reference: productionCost.reference.trim(), notes: productionCost.notes.trim() };
+      const entry = { date: productionCost.date, item: productionCost.item as ProductionCostItem, description, amount, ...(isRawMaterialCost ? { unitCost: Number(productionCost.unitCost), quantity: Number(productionCost.quantity) } : {}), settlementCode: productionCost.settlementCode, reference: productionCost.reference.trim(), notes: productionCost.notes.trim() };
       if (editingProductionCostId) await updateDoc(doc(db, "productionCosts", editingProductionCostId), entry);
       else await addDoc(collection(db, "productionCosts"), { ...entry, createdAt: Timestamp.now(), createdBy: userRole?.uid });
-      setProductionCost({ date: todayInEat(), item: "", description: "", amount: "", settlementCode: "", reference: "", notes: "" });
+      setProductionCost({ date: todayInEat(), item: "", description: "", unitCost: "", quantity: "", amount: "", settlementCode: "", reference: "", notes: "" });
       setEditingProductionCostId(null);
       setMessage(editingProductionCostId ? "Production cost updated successfully." : "Production cost recorded successfully.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to save production cost."); }
     finally { setSaving(false); }
   }
   function editProductionCost(entry: ProductionCostEntry) {
-    setProductionCost({ date: entry.date, item: productionCostItem(entry), description: entry.description, amount: String(entry.amount), settlementCode: entry.settlementCode, reference: entry.reference ?? "", notes: entry.notes ?? "" });
+    const item = productionCostItem(entry);
+    setProductionCost({ date: entry.date, item, description: entry.description, unitCost: item === "purchases_raw_materials" ? String(entry.unitCost ?? entry.amount) : "", quantity: item === "purchases_raw_materials" ? String(entry.quantity ?? 1) : "", amount: String(entry.amount), settlementCode: entry.settlementCode, reference: entry.reference ?? "", notes: entry.notes ?? "" });
     setEditingProductionCostId(entry.id);
     setEntriesStatement("income"); setView("entries"); setMessage("");
   }
@@ -310,7 +315,7 @@ export default function AccountsPage() {
     setMessage("");
     try {
       await deleteDoc(doc(db, "productionCosts", entry.id));
-      if (editingProductionCostId === entry.id) { setEditingProductionCostId(null); setProductionCost({ date: todayInEat(), item: "", description: "", amount: "", settlementCode: "", reference: "", notes: "" }); }
+      if (editingProductionCostId === entry.id) { setEditingProductionCostId(null); setProductionCost({ date: todayInEat(), item: "", description: "", unitCost: "", quantity: "", amount: "", settlementCode: "", reference: "", notes: "" }); }
       setMessage("Production cost deleted successfully.");
     } catch (error) { setMessage(error instanceof Error ? error.message : "Unable to delete production cost."); }
   }
@@ -379,12 +384,16 @@ export default function AccountsPage() {
     {view === "entries" && <div className="accounts-no-print flex items-center gap-3"><label htmlFor="entries-statement" className="text-sm font-medium">Statement</label><select id="entries-statement" className={input} style={{ maxWidth: 280 }} value={entriesStatement} onChange={e => { setEntriesStatement(e.target.value as "balance" | "income"); setMessage(""); }}><option value="balance">Balance Sheet</option><option value="income">Income Statement</option></select></div>}
     {view === "entries" && entriesStatement === "income" && <>
       {canPost && <form onSubmit={saveProductionCost} className="accounts-no-print rounded-xl border bg-white p-5 space-y-4">
-        <div className="flex items-center justify-between"><h2 className="font-semibold">{editingProductionCostId ? "Edit Cost of Production" : "Add Cost of Production"}</h2>{editingProductionCostId && <button type="button" className="text-sm text-gray-600 hover:underline" onClick={() => { setEditingProductionCostId(null); setProductionCost({ date: todayInEat(), item: "", description: "", amount: "", settlementCode: "", reference: "", notes: "" }); setMessage(""); }}>Cancel edit</button>}</div>
-        <p className="text-sm text-gray-500">Select the Income Statement line for this cost. Direct Labor comes only from confirmed Payments. Raw-material purchases must be recorded through Balance Sheet → Inventory so they are not expensed twice.</p>
+        <div className="flex items-center justify-between"><h2 className="font-semibold">{editingProductionCostId ? "Edit Cost of Production" : "Add Cost of Production"}</h2>{editingProductionCostId && <button type="button" className="text-sm text-gray-600 hover:underline" onClick={() => { setEditingProductionCostId(null); setProductionCost({ date: todayInEat(), item: "", description: "", unitCost: "", quantity: "", amount: "", settlementCode: "", reference: "", notes: "" }); setMessage(""); }}>Cancel edit</button>}</div>
+        <p className="text-sm text-gray-500">Select the Income Statement line for this cost. Direct Labor comes only from confirmed Payments. Use Raw Material Expenses only when the cost should be recognised directly on the Income Statement; stock purchases that remain in inventory belong under Balance Sheet → Inventory.</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <label>Date<input required type="date" className={input} value={productionCost.date} onChange={e => setProductionCost({ ...productionCost, date: e.target.value })} /></label>
-          <label>Amount (UGX)<input required type="number" min="0.01" step="0.01" className={input} value={productionCost.amount} onChange={e => setProductionCost({ ...productionCost, amount: e.target.value })} /></label>
-          <label>Cost of Production Item<select required className={input} value={productionCost.item} onChange={e => setProductionCost({ ...productionCost, item: e.target.value as "" | ProductionCostItem })}><option value="">Select item...</option>{PRODUCTION_COST_ENTRY_LINES.filter(line => line.id !== "purchases_raw_materials").map(line => <option key={line.id} value={line.id}>{line.label}</option>)}</select></label>
+          <label>Cost of Production Item<select required className={input} value={productionCost.item} onChange={e => { const item = e.target.value as "" | ProductionCostItem; setProductionCost(previous => ({ ...previous, item, unitCost: item === "purchases_raw_materials" ? previous.unitCost : "", quantity: item === "purchases_raw_materials" ? previous.quantity : "" })); }}><option value="">Select item...</option>{PRODUCTION_COST_ENTRY_LINES.map(line => <option key={line.id} value={line.id}>{line.label}</option>)}</select></label>
+          {isRawMaterialCost && <>
+            <label>Unit Cost (UGX)<input required type="number" min="0.01" step="0.01" className={input} value={productionCost.unitCost} onChange={e => setProductionCost({ ...productionCost, unitCost: e.target.value })} /></label>
+            <label>Quantity<input required type="number" min="0.01" step="0.01" className={input} value={productionCost.quantity} onChange={e => setProductionCost({ ...productionCost, quantity: e.target.value })} /></label>
+          </>}
+          <label>Amount (UGX)<input required type="number" min="0.01" step="0.01" readOnly={isRawMaterialCost} className={`${input} ${isRawMaterialCost ? "bg-gray-50" : ""}`} value={isRawMaterialCost ? (Number.isFinite(calculatedRawMaterialAmount) && calculatedRawMaterialAmount > 0 ? String(calculatedRawMaterialAmount) : "") : productionCost.amount} onChange={e => setProductionCost({ ...productionCost, amount: e.target.value })} />{isRawMaterialCost && <span className="mt-1 block text-xs text-gray-500">Calculated automatically: Unit Cost × Quantity</span>}</label>
           <span className="hidden sm:block" aria-hidden="true" />
           <label className="sm:col-span-2">Cost Name / Description<input required maxLength={200} className={input} value={productionCost.description} onChange={e => setProductionCost({ ...productionCost, description: e.target.value })} /></label>
           <label>Payment Method<select required className={input} value={productionCost.settlementCode} onChange={e => setProductionCost({ ...productionCost, settlementCode: e.target.value as "" | "1000" | "1030" })}><option value="">Select payment method...</option><option value="1030">Cash</option><option value="1000">Bank</option></select></label>
