@@ -92,6 +92,16 @@ const COLORS = [
   "#8b5cf6", "#ec4899", "#14b8a6", "#6b7280",
 ];
 const APPROVED_EXPENSE_PAYERS = ["Itamba Kezia", "Kigere Rose", "Ngobi Joshua Muwanguzi"] as const;
+const SALARY_POSITIONS = [
+  { id: "business-administrator", label: "Business Administrator" },
+  { id: "production-manager", label: "Production Manager" },
+  { id: "production-supervisor", label: "Production Supervisor" },
+  { id: "finance", label: "Finance" },
+  { id: "assistant-finance", label: "Assistant Finance" },
+  { id: "supporting-staff", label: "Supporting Staff" },
+  { id: "marketer", label: "Marketer" },
+  { id: "procurement-officer", label: "Procurement Officer" },
+] as const;
 
 const activeTabClass = "border-b-2 border-gray-900 px-4 py-2 text-sm font-semibold text-gray-900";
 const inactiveTabClass = "px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900";
@@ -160,15 +170,17 @@ export default function ExpensesPage() {
     "employees", [orderBy("name")], { staleTime: 10 * 60 * 1000 }
   );
   const isSalaryExpense = accounting.accountCode === "6010";
-  const selectedSalaryEmployee = employees.find(employee => employee.id === form.employeeId);
+  const selectedSalaryPosition = SALARY_POSITIONS.find(position => position.id === form.employeeId);
   const salaryGross = form.labourTotalPayments;
   const salaryEmployeeNssf = isSalaryExpense ? computeNssfAtRate(salaryGross, nssfEmployeeRatePercent) : 0;
   const salaryEmployerNssf = isSalaryExpense ? computeNssfAtRate(salaryGross, nssfEmployerRatePercent) : 0;
-  const salaryPayeResult = isSalaryExpense && selectedSalaryEmployee && selectedSalaryEmployee.payeApplicable !== false ? calculateProgressivePaye(salaryGross, payeBands) : { tax: 0, breakdown: [] };
+  const salaryPayeResult = isSalaryExpense && selectedSalaryPosition && salaryGross > 0
+    ? calculateProgressivePaye(salaryGross, payeBands)
+    : { tax: 0, breakdown: [] };
+  const salaryPayeEligible = salaryPayeResult.tax > 0;
   const salaryNetPay = salaryGross - salaryEmployeeNssf - salaryPayeResult.tax;
   const salaryTotalCost = salaryGross + salaryEmployerNssf;
   const calculatedAmount = isSalaryExpense ? salaryTotalCost : form.unitCost * form.itemCount;
-  const otherEmployees = useMemo(() => employees.filter(employee => isEmployeeActive(employee) && employee.department !== "PRODUCTION"), [employees]);
   const expensePayers = useMemo(() => APPROVED_EXPENSE_PAYERS.flatMap(name => {
     const employee = employees.find(item => item.name.trim().toLowerCase() === name.toLowerCase());
     return employee && isEmployeeActive(employee) ? [{ id: employee.id, name: String(name) }] : [];
@@ -288,7 +300,7 @@ export default function ExpensesPage() {
       if (!Number.isFinite(calculatedAmount) || calculatedAmount <= 0) throw new Error("Enter an expense amount greater than zero.");
       if (isSalaryExpense && payrollSettingsLoading) throw new Error("Payroll settings are still loading.");
       if (isSalaryExpense && payrollSettingsError) throw new Error(payrollSettingsError);
-      if (isSalaryExpense && !selectedSalaryEmployee) throw new Error("Select an active non-production employee.");
+      if (isSalaryExpense && !selectedSalaryPosition) throw new Error("Select a staff position.");
       if (isSalaryExpense && isUnpaidExpense) throw new Error("Use the employee payment workflow for unpaid salaries.");
       if (!isDepreciation && !isUnpaidExpense && !expensePayers.some(person => person.id === form.paidBy)) throw new Error("Select an approved employee under Paid By.");
       if (!isDepreciation && !isUnpaidExpense && !form.receiptRef.trim()) throw new Error("Enter a Payment Voucher No.");
@@ -301,8 +313,9 @@ export default function ExpensesPage() {
       if (!accountingImpactIsBalanced(expenseImpact)) throw new Error("The expense accounting entry is incomplete or does not balance. Review the selected accounts and amounts.");
       const payrollFields = isSalaryExpense ? {
         payrollExpenseVersion: 2 as const,
-        employeeId: selectedSalaryEmployee!.id,
-        employeeName: selectedSalaryEmployee!.name,
+        employeeId: selectedSalaryPosition!.id,
+        employeeName: selectedSalaryPosition!.label,
+        employeePosition: selectedSalaryPosition!.label,
         grossAmount: salaryGross,
         payeeTax: salaryPayeResult.tax,
         nssfEmployeeDeduction: salaryEmployeeNssf,
@@ -311,7 +324,8 @@ export default function ExpensesPage() {
         totalBusinessCost: salaryTotalCost,
         nssfEmployeeRatePercent,
         nssfEmployerRatePercent,
-        payeApplicable: selectedSalaryEmployee!.payeApplicable !== false,
+        payeApplicable: true,
+        payeEligible: salaryPayeEligible,
         payeBandsApplied: payeBands,
       } : {};
       await addDoc(collection(db, "expenses"), {
@@ -533,14 +547,22 @@ export default function ExpensesPage() {
           {isSalaryExpense ? (<>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">Employee</label>
-              <select value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"><option value="">Select active non-production employee...</option>{otherEmployees.map(employee => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select>
+              <select value={form.employeeId} onChange={(e) => setForm({ ...form, employeeId: e.target.value })} required className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"><option value="">Select employee position...</option>{SALARY_POSITIONS.map(position => <option key={position.id} value={position.id}>{position.label}</option>)}</select>
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Gross Pay (UGX)</label>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Monthly Gross Pay (UGX)</label>
               <input type="number" value={form.labourTotalPayments || ""} onChange={(e) => setForm({ ...form, labourTotalPayments: parseInt(e.target.value) || 0 })}
                 required min={0} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
             </div>
-            <div className="sm:col-span-2 lg:col-span-3 rounded-lg border bg-gray-50 p-4 text-sm space-y-1"><p>PAYE: UGX {salaryPayeResult.tax.toLocaleString()}</p><p>Employee NSSF ({nssfEmployeeRatePercent}%): UGX {salaryEmployeeNssf.toLocaleString()}</p><p>Net Pay: UGX {salaryNetPay.toLocaleString()}</p><p>Employer NSSF ({nssfEmployerRatePercent}%): UGX {salaryEmployerNssf.toLocaleString()}</p><p className="font-semibold">Total Cost: UGX {salaryTotalCost.toLocaleString()}</p></div>
+            <div className="sm:col-span-2 lg:col-span-3 rounded-lg border bg-gray-50 p-4 text-sm space-y-1">
+              <p>PAYE status: <span className={salaryPayeEligible ? "font-medium text-amber-700" : "font-medium text-gray-600"}>{salaryGross > 0 ? (salaryPayeEligible ? "Eligible" : "Below configured taxable threshold") : "Enter monthly gross pay"}</span></p>
+              <p>PAYE: UGX {salaryPayeResult.tax.toLocaleString()}</p>
+              <p>Employee NSSF ({nssfEmployeeRatePercent}%): UGX {salaryEmployeeNssf.toLocaleString()}</p>
+              <p>Net Pay: UGX {salaryNetPay.toLocaleString()}</p>
+              <p>Employer NSSF ({nssfEmployerRatePercent}%): UGX {salaryEmployerNssf.toLocaleString()}</p>
+              <p className="font-semibold">Total Cost: UGX {salaryTotalCost.toLocaleString()}</p>
+              <p className="pt-1 text-xs text-gray-500">PAYE uses the progressive monthly bands configured under Payments → PAYE Settings. PAYE and NSSF are recorded as liabilities until remitted.</p>
+            </div>
           </>) : <>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Unit Cost (UGX)</label><input type="number" value={form.unitCost || ""} onChange={(e) => setForm({ ...form, unitCost: parseInt(e.target.value) || 0 })} required min={0} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" /></div>
             <div><label className="block text-sm font-medium text-gray-700 mb-1">Number of Items (Frequency)</label><input type="number" value={form.itemCount || ""} onChange={(e) => setForm({ ...form, itemCount: parseInt(e.target.value) || 0 })} required min={1} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" /></div>

@@ -221,6 +221,7 @@ export interface Expense {
   payrollExpenseVersion?: 2;
   employeeId?: string;
   employeeName?: string;
+  employeePosition?: string;
   grossAmount?: number;
   payeeTax?: number;
   nssfEmployeeDeduction?: number;
@@ -230,6 +231,7 @@ export interface Expense {
   nssfEmployeeRatePercent?: number;
   nssfEmployerRatePercent?: number;
   payeApplicable?: boolean;
+  payeEligible?: boolean;
   payeBandsApplied?: import("@/lib/deductions").PayeBand[];
 }
 
