@@ -342,7 +342,8 @@ service cloud.firestore {
     // expenses - Business expense records
     // All authenticated users can read
     // Create: FINANCE or ADMIN
-    // Update/Delete: ADMIN only
+    // Update: ADMIN, FINANCE, FINANCIAL_MANAGER, or PRODUCTION_SUPERVISOR
+    // Delete: ADMIN only
     // ============================================================
     function validBankingJournal(data, journalId) {
       return !data.keys().hasAny(['bankingKind'])
@@ -478,7 +479,8 @@ service cloud.firestore {
     match /expenses/{expenseId} {
       allow read: if isAuthenticated();
       allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
-      allow update, delete: if isAdmin();
+      allow update: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'PRODUCTION_SUPERVISOR']);
+      allow delete: if isAdmin();
     }
   }
 }

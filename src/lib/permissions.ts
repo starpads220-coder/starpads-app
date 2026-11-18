@@ -16,6 +16,7 @@ export const ROLE_ROUTES: Record<EmployeeRole, string[]> = {
     "/admin/users",
   ],
   PRODUCTION_SUPERVISOR: [
+    "/expenses",
     "/production",
     "/storage",
     "/payments",
@@ -25,7 +26,7 @@ export const ROLE_ROUTES: Record<EmployeeRole, string[]> = {
   WORKER: [],
   STORE_MANAGER: ["/storage"],
   SALES_STAFF: ["/sales", "/production"],
-  FINANCE: ["/payments", "/analytics", "/banking"],
+  FINANCE: ["/payments", "/analytics", "/banking", "/expenses"],
   FINANCIAL_MANAGER: [
     "/production",
     "/storage",

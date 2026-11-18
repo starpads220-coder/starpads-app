@@ -13,6 +13,8 @@ import {
 import { useQueryClient } from "@tanstack/react-query";
 import { db } from "@/lib/firebase";
 import { Expense, ExpenseCategory, Employee } from "@/types";
+import { ExpensesList } from "./ExpensesList";
+import { useAuth } from "@/lib/auth-context";
 import { RouteGuard } from "@/components/auth/RouteGuard";
 import { ChartCard } from "@/components/ui/ChartCard";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
@@ -91,8 +93,18 @@ const COLORS = [
 ];
 const APPROVED_EXPENSE_PAYERS = ["Itamba Kezia", "Kigere Rose", "Ngobi Joshua Muwanguzi"] as const;
 
+const activeTabClass = "border-b-2 border-gray-900 px-4 py-2 text-sm font-semibold text-gray-900";
+const inactiveTabClass = "px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-900";
+
 export default function ExpensesPage() {
   const queryClient = useQueryClient();
+  const { userRole } = useAuth();
+  const role = userRole?.role ?? "";
+  const canRecord = ["ADMIN", "FINANCE", "FINANCIAL_MANAGER"].includes(role);
+  const canEdit = canRecord || role === "PRODUCTION_SUPERVISOR";
+  const canDelete = role === "ADMIN";
+  const [tab, setTab] = useState<"overview" | "list">("overview");
+  const activeTab = canRecord ? tab : "list";
   const [saving, setSaving] = useState(false);
   const [accounting, setAccounting] = useState<AccountingSelection>(() => ({ ...emptyAccounting(), accountGroup: "Expenses" }));
   const [formError, setFormError] = useState("");
@@ -118,8 +130,13 @@ export default function ExpensesPage() {
     initialSettlementCode: "1000",
   });
 
-  const { data: expenses = [], isLoading: loading } = useCollectionQuery<Expense>(
-    "expenses", [orderBy("date", "desc")], { staleTime: 30 * 1000 }
+  const { data: expenseRecords, isLoading: loading, isError: expensesError } = useCollectionQuery<Expense>(
+    "expenses", [], { staleTime: 30 * 1000 }
+  );
+
+  const expenses = useMemo(
+    () => [...(expenseRecords ?? [])].sort((a, b) => (b.date ?? "").localeCompare(a.date ?? "")),
+    [expenseRecords]
   );
 
   const periodBounds = useMemo(
@@ -263,6 +280,7 @@ export default function ExpensesPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canRecord) return;
     setSaving(true);
     setFormError("");
     setFormSuccess(false);
@@ -343,8 +361,18 @@ export default function ExpensesPage() {
   return (
     <RouteGuard>
     <div className="space-y-6">
+      <div className="space-y-3">{canRecord && <AccountsSwitcher />}<h1 className="text-2xl font-bold text-gray-900">Expenses</h1></div>
+      <nav aria-label="Expenses views" className="flex gap-2 border-b border-gray-200">
+        {canRecord && <button type="button" aria-pressed={activeTab === "overview"} onClick={() => setTab("overview")} className={activeTab === "overview" ? activeTabClass : inactiveTabClass}>Overview</button>}
+        <button type="button" aria-pressed={activeTab === "list"} onClick={() => setTab("list")} className={activeTab === "list" ? activeTabClass : inactiveTabClass}>
+          Expenses List ({expenses.length})
+        </button>
+      </nav>
+      {activeTab === "list" ? (
+        <ExpensesList expenses={expenses} loading={loading} loadError={expensesError} canEdit={canEdit} canDelete={canDelete}
+          categoryLabels={CATEGORY_LABELS} />
+      ) : <>
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-        <div className="space-y-3"><AccountsSwitcher /><h1 className="text-2xl font-bold text-gray-900">Expenses</h1></div>
           <div className="flex flex-wrap items-center gap-2">
           <div className="flex gap-1 bg-gray-100 rounded-lg p-1">
             {(["day", "week", "month", "12months", "custom"] as const).map((p) => (
@@ -546,6 +574,7 @@ export default function ExpensesPage() {
       </form>
 
       <CreditSettlements kind="payable" entries={expenses} />
+      </>}
 
 
     </div>
