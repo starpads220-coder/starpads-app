@@ -319,7 +319,7 @@ service cloud.firestore {
       allow create: if hasAnyRole(['ADMIN', 'SALES_STAFF', 'FINANCIAL_MANAGER', 'SALES_MANAGER']);
       allow update: if isAdmin() || (
         hasAnyRole(['STORE_MANAGER', 'PRODUCTION_SUPERVISOR'])
-        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockOutIds', 'stockStatus'])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stockOutIds', 'stockStatus', 'inventoryCostEntryId'])
       );
       allow delete: if isAdmin();
     }
@@ -416,8 +416,8 @@ service cloud.firestore {
       allow delete: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
     }
     match /productionCosts/{costId} {
-      allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF']);
-      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+      allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'STORE_MANAGER', 'PRODUCTION_SUPERVISOR', 'SALES_MANAGER', 'SALES_STAFF']);
+      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'STORE_MANAGER', 'PRODUCTION_SUPERVISOR'])
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.amount is number && request.resource.data.amount > 0
         && request.resource.data.date is string
@@ -451,7 +451,7 @@ service cloud.firestore {
       allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF']);
       allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
         && request.resource.data.createdBy == request.auth.uid
-        && request.resource.data.type in ['raw_material_purchase', 'raw_material_opening', 'raw_material_loss', 'raw_to_wip', 'wip_opening', 'wip_to_finished', 'wip_wastage', 'finished_goods_opening', 'finished_goods_sale', 'finished_goods_loss', 'inventory_supplier_payment']
+        && request.resource.data.type in ['raw_material_purchase', 'raw_material_opening', 'raw_material_loss', 'raw_to_wip', 'raw_from_wip', 'wip_conversion_cost', 'wip_opening', 'wip_to_finished', 'wip_wastage', 'finished_goods_opening', 'finished_goods_sale', 'finished_goods_loss', 'inventory_supplier_payment']
         && request.resource.data.date is string
         && request.resource.data.description is string && request.resource.data.description.size() > 0
         && request.resource.data.amount is number && request.resource.data.amount > 0
@@ -459,12 +459,12 @@ service cloud.firestore {
         && request.resource.data.get('quantity', 0) is number && request.resource.data.get('quantity', 0) >= 0
         && request.resource.data.get('rolls', 0) is number && request.resource.data.get('rolls', 0) >= 0
         && request.resource.data.get('unitCost', 0) is number && request.resource.data.get('unitCost', 0) >= 0
-        && (!request.resource.data.keys().hasAny(['material']) || request.resource.data.material in ['PUL', 'FLANNEL', 'FLEECE'])
+        && (!request.resource.data.keys().hasAny(['material']) || (request.resource.data.material is string && request.resource.data.material.size() > 0 && request.resource.data.material.size() <= 80))
         && (!request.resource.data.keys().hasAny(['settlementCode']) || request.resource.data.settlementCode in ['1000', '1030', '2110', '3060']);
       allow update: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
         && request.resource.data.createdBy == resource.data.createdBy
         && request.resource.data.createdAt == resource.data.createdAt
-        && request.resource.data.type in ['raw_material_purchase', 'raw_material_opening', 'raw_material_loss', 'raw_to_wip', 'wip_opening', 'wip_to_finished', 'wip_wastage', 'finished_goods_opening', 'finished_goods_sale', 'finished_goods_loss', 'inventory_supplier_payment']
+        && request.resource.data.type in ['raw_material_purchase', 'raw_material_opening', 'raw_material_loss', 'raw_to_wip', 'raw_from_wip', 'wip_conversion_cost', 'wip_opening', 'wip_to_finished', 'wip_wastage', 'finished_goods_opening', 'finished_goods_sale', 'finished_goods_loss', 'inventory_supplier_payment']
         && request.resource.data.date is string
         && request.resource.data.description is string && request.resource.data.description.size() > 0
         && request.resource.data.amount is number && request.resource.data.amount > 0
@@ -472,7 +472,7 @@ service cloud.firestore {
         && request.resource.data.get('quantity', 0) is number && request.resource.data.get('quantity', 0) >= 0
         && request.resource.data.get('rolls', 0) is number && request.resource.data.get('rolls', 0) >= 0
         && request.resource.data.get('unitCost', 0) is number && request.resource.data.get('unitCost', 0) >= 0
-        && (!request.resource.data.keys().hasAny(['material']) || request.resource.data.material in ['PUL', 'FLANNEL', 'FLEECE'])
+        && (!request.resource.data.keys().hasAny(['material']) || (request.resource.data.material is string && request.resource.data.material.size() > 0 && request.resource.data.material.size() <= 80))
         && (!request.resource.data.keys().hasAny(['settlementCode']) || request.resource.data.settlementCode in ['1000', '1030', '2110', '3060']);
       allow delete: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
     }

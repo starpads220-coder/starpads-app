@@ -181,6 +181,7 @@ export interface SaleTransaction {
   grantAmount?: number;
   stockOutIds?: string[];
   stockStatus?: "pending" | "recorded";
+  inventoryCostEntryId?: string;
   paymentStatus?: "paid" | "partial" | "unpaid";
   dueDate?: string;
   amountReceived?: number;

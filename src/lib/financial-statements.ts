@@ -234,9 +234,12 @@ export function buildFinancialStatements(
   cashPaidForRawMaterials += inventoryTransactions
     .filter(entry => entry.date >= start && entry.date <= end && ((entry.type === "raw_material_purchase" && ["1000", "1030"].includes(entry.settlementCode ?? "")) || entry.type === "inventory_supplier_payment"))
     .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const cashPaidForCapitalisedConversionCosts = inventoryTransactions
+    .filter(entry => entry.date >= start && entry.date <= end && entry.type === "wip_conversion_cost" && ["1000", "1030"].includes(entry.settlementCode ?? ""))
+    .reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   cashPaidForCarriageInwards += productionCostTotal("carriage_inwards");
   const cashPaidForDirectLabor = payments.filter(entry => affectsPayrollAccounts(entry) && entry.status === "paid" && entry.paidDate >= start && entry.paidDate <= end).reduce((sum, entry) => sum + (Number(entry.netPayAmount) || 0), 0);
-  const cashPaidForOtherProductionCosts = recordedOtherCosts;
+  const cashPaidForOtherProductionCosts = recordedOtherCosts + cashPaidForCapitalisedConversionCosts;
   const cashPaidForOperatingExpenses = [...operatingCashExpenses.values()].reduce((sum, line) => sum + line.amount, 0);
   const cashPaidForPayeRemittances = payeRemittances.filter(entry => entry.paymentDate >= start && entry.paymentDate <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
   const cashPaidForNssfRemittances = nssfRemittances.filter(entry => entry.paymentDate >= start && entry.paymentDate <= end).reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);

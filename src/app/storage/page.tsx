@@ -30,6 +30,9 @@ import { ReportCard } from "@/components/reports/ReportCard";
 import type { PeriodSelection } from "@/components/reports/PeriodSelector";
 import { activeEmployeeOptions } from "@/lib/employees";
 import { downloadResponse } from "@/lib/file-download";
+import { useRealtimeCollection } from "@/hooks/use-firestore-query";
+import { inventoryPositions, type InventoryTransaction } from "@/lib/inventory-accounting";
+import { useAuth } from "@/lib/auth-context";
 import { WIP_KEYS, WIP_LABELS, WIP_VERSION, calculateWip } from "@/lib/wip";
 
 const PADS_PER_PACK = 3;
@@ -70,6 +73,9 @@ function getStoragePeriodBounds(period: StoragePeriod, customStart?: string, cus
 }
 
 export default function StoragePage() {
+  const { userRole } = useAuth();
+  const financialInventory = useRealtimeCollection<InventoryTransaction>("inventoryTransactions");
+  const financialPosition = useMemo(() => inventoryPositions(financialInventory.data), [financialInventory.data]);
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState<"dashboard" | "stock-in" | "stock-out" | "wip" | "analytics">("dashboard");
   const [saving, setSaving] = useState(false);
@@ -494,10 +500,36 @@ export default function StoragePage() {
         }
         const stockOutRef = doc(collection(db, "stockOuts"));
         const atomicWrite = writeBatch(db);
+        const finishedProducts = Object.entries(financialPosition.finishedByProduct).filter(([, row]) => row.quantity > 0 && row.value > 0);
+        if (finishedProducts.length === 0) throw new Error("No financially valued finished pads are available. Record Completed Pads on Manufacturing Inventory first.");
+        if (finishedProducts.length > 1) throw new Error("More than one finished-pad product is available. Select and dispatch the product from Manufacturing Inventory before completing this sale.");
+        const [finishedGood, finishedBalance] = finishedProducts[0];
+        const padQuantity = stockOutForm.quantity * PACK_SIZES[stockOutForm.packSize];
+        if (padQuantity > finishedBalance.quantity) throw new Error(`Only ${finishedBalance.quantity.toLocaleString()} financially valued pads are available.`);
+        const unitCost = finishedBalance.value / finishedBalance.quantity;
+        const costAmount = padQuantity * unitCost;
+        const cogsRef = doc(collection(db, "inventoryTransactions"));
         atomicWrite.set(stockOutRef, { ...stockOutForm, batchRef, saleId: pendingSaleId, saleQuantity: stockOutForm.quantity, salePackSize: stockOutForm.packSize, createdAt: Timestamp.now() });
+        atomicWrite.set(cogsRef, {
+          date: stockOutForm.date,
+          type: "finished_goods_sale",
+          description: `Cost of pads sold - ${stockOutForm.customerRef || pendingSaleId}`,
+          reference: pendingSaleId,
+          notes: "Created automatically when the linked sale was dispatched.",
+          quantity: padQuantity,
+          finishedGood,
+          batchRef,
+          unitCost,
+          amount: costAmount,
+          linkedSaleId: pendingSaleId,
+          workflowVersion: 2,
+          createdAt: Timestamp.now(),
+          createdBy: userRole?.uid ?? "",
+        });
         atomicWrite.update(doc(db, "saleTransactions", pendingSaleId), {
           stockOutIds: [stockOutRef.id],
           stockStatus: "recorded",
+          inventoryCostEntryId: cogsRef.id,
         });
         await atomicWrite.commit();
         setPendingSaleId(null);

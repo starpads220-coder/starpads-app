@@ -11,6 +11,7 @@ import { GooeyNav } from "@/components/ui/GooeyNav";
 const ALL_NAV_ITEMS = [
   { href: "/production", label: "Production" },
   { href: "/storage", label: "Storage" },
+  { href: "/inventory", label: "Inventory" },
   { href: "/sales", label: "Sales" },
   { href: "/expenses", label: "Expenses" },
   { href: "/banking", label: "Banking" },
