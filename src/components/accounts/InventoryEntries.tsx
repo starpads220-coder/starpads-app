@@ -38,7 +38,7 @@ export function InventoryEntries({ entries, sales, canPost, userId }: { entries:
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const position = useMemo(() => inventoryPositions(entries), [entries]);
-  const amount = (["raw_material_purchase", "raw_material_opening", "raw_material_loss", "raw_to_wip"].includes(form.type) ? Number(form.metres) * Number(form.unitCost) : ["wip_to_finished", "finished_goods_opening", "finished_goods_sale", "finished_goods_loss"].includes(form.type) ? Number(form.quantity) * Number(form.unitCost) : Number(form.totalValue)) || 0;
+  const amount = (["raw_material_purchase", "raw_material_opening", "raw_material_loss", "raw_to_wip", "raw_from_wip"].includes(form.type) ? Number(form.metres) * Number(form.unitCost) : ["wip_to_finished", "finished_goods_opening", "finished_goods_sale", "finished_goods_loss"].includes(form.type) ? Number(form.quantity) * Number(form.unitCost) : Number(form.totalValue)) || 0;
   const selectedRaw = position.rawByMaterial[form.material];
   const selectedFinished = position.finishedByProduct[form.finishedGood.trim()] ?? { quantity: 0, value: 0 };
   const linkedSaleIds = new Set(entries.filter(entry => entry.type === "finished_goods_sale" && entry.id !== editingId).map(entry => entry.linkedSaleId).filter(Boolean));
@@ -59,7 +59,7 @@ export function InventoryEntries({ entries, sales, canPost, userId }: { entries:
       const candidate = validateInventoryTransaction({
         date: form.date, type: form.type, description: form.description, reference: form.reference, notes: form.notes,
         material: form.material, rolls: Number(form.rolls) || 0, metres: Number(form.metres) || 0, unitCost: Number(form.unitCost) || 0,
-        quantity: Number(form.quantity) || 0, finishedGood: form.finishedGood, batchRef: form.batchRef, amount,
+        quantity: Number(form.quantity) || 0, finishedGood: form.finishedGood, batchRef: ["raw_to_wip", "raw_from_wip"].includes(form.type) ? "PRODUCTION" : form.batchRef, amount,
         settlementCode: ["raw_material_purchase", "inventory_supplier_payment"].includes(form.type) ? form.settlementCode : form.type.includes("opening") ? "3060" : undefined,
         linkedSaleId: form.linkedSaleId,
       }, entries, editingId ?? "");
@@ -88,8 +88,8 @@ export function InventoryEntries({ entries, sales, canPost, userId }: { entries:
     catch (error) { setMessage(error instanceof Error ? error.message : "Unable to delete inventory entry."); }
   }
 
-  const needsMaterial = ["raw_material_purchase", "raw_material_opening", "raw_material_loss", "raw_to_wip"].includes(form.type);
-  const needsBatch = ["raw_to_wip", "wip_opening", "wip_to_finished", "wip_wastage"].includes(form.type);
+  const needsMaterial = ["raw_material_purchase", "raw_material_opening", "raw_material_loss", "raw_to_wip", "raw_from_wip"].includes(form.type);
+  const needsBatch = ["wip_opening", "wip_to_finished", "wip_wastage"].includes(form.type);
   const needsFinished = ["wip_to_finished", "finished_goods_opening", "finished_goods_sale", "finished_goods_loss"].includes(form.type);
   return <section className="space-y-4">
     <div className="grid gap-3 sm:grid-cols-3">
@@ -111,7 +111,7 @@ export function InventoryEntries({ entries, sales, canPost, userId }: { entries:
         {needsMaterial && <label className="text-sm">Material<select className={input} value={form.material} onChange={e => { const material = e.target.value as InventoryMaterial; const available = position.rawByMaterial[material]; setForm({ ...form, material, ...(form.type === "raw_to_wip" && available.metres > 0 ? { unitCost: String(available.value / available.metres) } : {}) }); }}>{INVENTORY_MATERIALS.map(material => <option key={material}>{material}</option>)}</select>{form.type === "raw_to_wip" && <span className="mt-1 block text-xs text-gray-500">Available: {selectedRaw.metres.toLocaleString()} m · {money(selectedRaw.value)}</span>}</label>}
         {needsMaterial && <label className="text-sm">Number of Rolls<input type="number" min="0" step="1" className={input} value={form.rolls} onChange={e => setForm({ ...form, rolls: e.target.value })} /></label>}
         {needsMaterial && <label className="text-sm">Total Metres<input required type="number" min="0.0001" step="0.0001" className={input} value={form.metres} onChange={e => setForm({ ...form, metres: e.target.value })} /></label>}
-        {needsBatch && <label className="text-sm">Production Batch / Reference<input required maxLength={80} className={input} value={form.batchRef} onChange={e => setForm({ ...form, batchRef: e.target.value })} /></label>}
+        {needsBatch && <label className="text-sm">Production Reference<input required maxLength={80} className={input} value={form.batchRef} onChange={e => setForm({ ...form, batchRef: e.target.value })} /></label>}
         {needsFinished && <label className="text-sm">Pad / Finished-Good Type<input required maxLength={80} className={input} value={form.finishedGood} onChange={e => { const finishedGood = e.target.value; const available = position.finishedByProduct[finishedGood.trim()]; setForm({ ...form, finishedGood, ...(["finished_goods_sale", "finished_goods_loss"].includes(form.type) && available?.quantity > 0 ? { unitCost: String(available.value / available.quantity) } : {}) }); }} />{["finished_goods_sale", "finished_goods_loss"].includes(form.type) && <span className="mt-1 block text-xs text-gray-500">Available: {selectedFinished.quantity.toLocaleString()} units · {money(selectedFinished.value)}</span>}</label>}
         {needsFinished && <label className="text-sm">Number of Pads / Units<input required type="number" min="0.0001" step="0.0001" className={input} value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} /></label>}
         {(needsMaterial || needsFinished) && <label className="text-sm">{needsMaterial ? "Cost per Metre (UGX)" : "Cost per Pad / Unit (UGX)"}<input required type="number" min="0.01" step="0.01" className={input} value={form.unitCost} onChange={e => setForm({ ...form, unitCost: e.target.value })} /></label>}

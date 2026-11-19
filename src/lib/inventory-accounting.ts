@@ -147,8 +147,8 @@ export function inventoryTypeLabel(type: InventoryTransactionType) {
     raw_material_purchase: "Purchase raw materials",
     raw_material_opening: "Opening raw-material balance",
     raw_material_loss: "Record raw-material loss/write-down",
-    raw_to_wip: "Transfer raw materials to WIP",
-    raw_from_wip: "Return unused materials from WIP",
+    raw_to_wip: "Issue materials to production",
+    raw_from_wip: "Return materials from production",
     wip_conversion_cost: "Add conversion cost to WIP",
     wip_opening: "Opening WIP balance",
     wip_to_finished: "Complete WIP into finished goods",
@@ -188,7 +188,7 @@ export function validateInventoryTransaction(entry: Omit<InventoryTransaction, "
   if (["raw_material_purchase", "raw_material_opening", "raw_material_loss", "raw_to_wip", "raw_from_wip"].includes(entry.type) && (!Number.isFinite(Number(entry.unitCost)) || Number(entry.unitCost) <= 0)) throw new Error("Enter a unit cost greater than zero.");
   if (entry.type === "raw_material_purchase" && !["1000", "1030", "2110"].includes(entry.settlementCode ?? "")) throw new Error("Select Bank, Cash, or Accounts Payable for the purchase.");
   if (entry.type === "inventory_supplier_payment" && !["1000", "1030"].includes(entry.settlementCode ?? "")) throw new Error("Select Bank or Cash for the supplier payment.");
-  if (["raw_to_wip", "raw_from_wip", "wip_conversion_cost", "wip_opening", "wip_to_finished", "wip_wastage"].includes(entry.type) && !entry.batchRef?.trim()) throw new Error("Enter the production batch/reference.");
+  if (["wip_conversion_cost", "wip_opening", "wip_to_finished", "wip_wastage"].includes(entry.type) && !entry.batchRef?.trim()) throw new Error("Enter the production reference.");
   if (entry.type === "wip_conversion_cost" && !["1000", "1030", "2110"].includes(entry.settlementCode ?? "")) throw new Error("Select Bank, Cash, or Accounts Payable for the batch cost.");
   if (["wip_to_finished", "finished_goods_opening", "finished_goods_sale", "finished_goods_loss"].includes(entry.type) && (!entry.finishedGood?.trim() || quantity <= 0)) throw new Error("Enter the finished-good/pad type and a quantity greater than zero.");
   const expected = metres > 0 && Number(entry.unitCost) > 0

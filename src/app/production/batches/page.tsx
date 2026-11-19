@@ -18,6 +18,7 @@ import { Batch } from "@/types";
 import { ConfirmDialog } from "@/components/ui/ConfirmDialog";
 import { useCollectionQuery } from "@/hooks/use-firestore-query";
 import { showToast } from "@/components/ui/Toast";
+import { synchronizeBatchFromStg10 } from "@/lib/batch-lifecycle";
 
 export default function BatchesPage() {
   const [creating, setCreating] = useState(false);
@@ -30,11 +31,7 @@ export default function BatchesPage() {
   useEffect(() => {
     batches.forEach((batch) => {
       if (batch.status === "ACTIVE" && (batch.packsProduced ?? 0) >= (batch.maxPacks ?? 10000)) {
-        const batchRef = doc(db, "batches", batch.id);
-        updateDoc(batchRef, {
-          status: "COMPLETE",
-          completionDate: new Date().toISOString().split("T")[0],
-        }).catch(console.error);
+        synchronizeBatchFromStg10(batch.id).catch(console.error);
       }
     });
   }, [batches]);
@@ -72,13 +69,13 @@ export default function BatchesPage() {
   const handleCreateBatch = async () => {
     setCreating(true);
     try {
-      // First, deactivate any existing ACTIVE batch
-      if (batches.length > 0) {
-        const activeBatch = batches.find((b) => b.status === "ACTIVE");
-        if (activeBatch) {
-          await updateDoc(doc(db, "batches", activeBatch.id), { status: "INACTIVE" });
-        }
+      const activeBatches = batches.filter((batch) => batch.status === "ACTIVE");
+      const currentBatch = activeBatches.find((batch) => batch.packsProduced < batch.maxPacks);
+      if (currentBatch) {
+        showToast(`Batch ${currentBatch.batchNumber} is already active. Complete its 10,000 packs first.`, "error");
+        return;
       }
+      await Promise.all(activeBatches.map((batch) => updateDoc(doc(db, "batches", batch.id), { status: "INACTIVE" })));
       const batchNumber = await generateBatchNumber();
       const todayStr = new Date().toISOString().split("T")[0];
       const batchData = {
@@ -103,10 +100,12 @@ export default function BatchesPage() {
   const handleCloseBatch = async () => {
     if (!closeTarget) return;
     try {
-      await updateDoc(doc(db, "batches", closeTarget), {
-        status: "COMPLETE",
-        completionDate: new Date().toISOString().split("T")[0],
-      });
+      const target = batches.find((batch) => batch.id === closeTarget);
+      if (!target || target.packsProduced < target.maxPacks) {
+        showToast("A production batch can only close after reaching 10,000 finished packs.", "error");
+        return;
+      }
+      await synchronizeBatchFromStg10(closeTarget);
     } finally {
       setCloseTarget(null);
     }

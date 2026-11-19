@@ -54,6 +54,7 @@ import { activeEmployeeOptions, isEmployeeActive } from "@/lib/employees";
 import { showToast } from "@/components/ui/Toast";
 import { WIP_VERSION, GLOBAL_WIP_BALANCE_ID, applyWipEntry, emptyWipBalance, type WipBalance } from "@/lib/wip";
 import { FINISHED_PADS_STAGE_ID, STAGE_UNITS } from "@/lib/production-stages";
+import { synchronizeBatchFromStg10 } from "@/lib/batch-lifecycle";
 import { PRODUCTION_ENTRY_STAGE_OPTIONS, productionEntryStageValue, resolveProductionTarget } from "@/lib/production-targets";
 
 type TimeWindow = "today" | "week" | "month" | "12months" | "custom";
@@ -96,11 +97,7 @@ export default function ProductionPage() {
   const [viewDate, setViewDate] = useState(new Date().toISOString().split("T")[0]);
 
   const recalculateBatchPacks = useCallback(async (batchId: string) => {
-    const entriesSnap = await getDocs(
-      query(collection(db, "productionEntries"), where("batchRef", "==", batchId), where("stageId", "==", "STG-10"))
-    );
-    const totalPacks = entriesSnap.docs.reduce((sum, d) => sum + ((d.data().actualPieces as number) || 0), 0);
-    await updateDoc(doc(db, "batches", batchId), { packsProduced: totalPacks });
+    await synchronizeBatchFromStg10(batchId);
   }, []);
 
   const [form, setForm] = useState({
@@ -339,10 +336,19 @@ export default function ProductionPage() {
     if (form.stageId === FINISHED_PADS_STAGE_ID && form.batchRef && batchValidationError) return;
     if (form.stageId === FINISHED_PADS_STAGE_ID && form.batchRef) {
       const selectedBatch = batches.find((b) => b.id === form.batchRef);
-      const isActive = activeBatch ? selectedBatch?.id === activeBatch.id : false;
-      if (!isActive) {
+      if (!selectedBatch || !activeBatch || selectedBatch.id !== activeBatch.id) {
         setBatchValidationError(
           `Batch ${selectedBatch?.batchNumber || form.batchRef} is not the current active batch. Please select ${activeBatch?.batchNumber}.`
+        );
+        return;
+      }
+      const previousPacks = editingEntry?.stageId === FINISHED_PADS_STAGE_ID && editingEntry.batchRef === selectedBatch.id
+        ? editingEntry.actualPieces
+        : 0;
+      const projectedPacks = (selectedBatch.packsProduced ?? 0) - previousPacks + form.actualPieces;
+      if (projectedPacks > (selectedBatch.maxPacks ?? 10000)) {
+        setBatchValidationError(
+          `This entry exceeds ${selectedBatch.batchNumber}'s 10,000-pack capacity. Only ${Math.max(0, (selectedBatch.maxPacks ?? 10000) - (selectedBatch.packsProduced ?? 0) + previousPacks).toLocaleString()} packs remain.`
         );
         return;
       }
@@ -488,10 +494,10 @@ export default function ProductionPage() {
   const [batchValidationError, setBatchValidationError] = useState<string | null>(null);
 
   const activeBatch = useMemo(() => {
-    const notFull = batches.filter((b) => (b.packsProduced ?? 0) < (b.maxPacks ?? 10000));
-    if (notFull.length === 0) return null;
-    notFull.sort((a, b) => a.startDate.localeCompare(b.startDate));
-    return notFull[0];
+    const active = batches.filter((b) => b.status === "ACTIVE" && (b.packsProduced ?? 0) < (b.maxPacks ?? 10000));
+    if (active.length === 0) return null;
+    active.sort((a, b) => a.startDate.localeCompare(b.startDate) || a.batchNumber.localeCompare(b.batchNumber));
+    return active[0];
   }, [batches]);
 
   const maxStageValue = useMemo(
@@ -1082,11 +1088,11 @@ const totalPackagedPads = useMemo(
                   className="flex-1 px-3 py-2 border border-gray-300 rounded-md text-sm"
                 >
                   <option value="">Select batch...</option>
-                  {batches.filter((b) => (b.packsProduced ?? 0) < (b.maxPacks ?? 10000)).map((b) => (
-                    <option key={b.id} value={b.id}>
-                      {b.batchNumber} — {(b.maxPacks - b.packsProduced).toLocaleString()} remaining
+                  {activeBatch && (
+                    <option value={activeBatch.id}>
+                      {activeBatch.batchNumber} - {(activeBatch.maxPacks - activeBatch.packsProduced).toLocaleString()} packs remaining
                     </option>
-                  ))}
+                  )}
                 </select>
                 {batchValidationError && (
                   <div className="mt-2 px-3 py-2 bg-red-100 text-red-800 text-xs rounded-md">

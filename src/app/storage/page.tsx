@@ -407,7 +407,7 @@ export default function StoragePage() {
       // ACTIVE records must not block stock going into the current batch.
       const oldestActive = oldestActiveBatch;
 
-      if (oldestActive && stockInForm.batchRef !== oldestActive.id) {
+      if (!moveEntryId && oldestActive && stockInForm.batchRef !== oldestActive.id) {
         const batchNum = oldestActive.batchNumber;
         const remaining = oldestActive.maxPacks - oldestActive.packsProduced;
         showToast(
@@ -420,28 +420,10 @@ export default function StoragePage() {
 
       // ── Capacity cap: prevent exceeding the remaining capacity ────────────
       if (oldestActive) {
-        const thisBatchCurrentPadsQuery = query(
-          collection(db, "stockIns"),
-          where("batchRef", "==", stockInForm.batchRef)
-        );
-        const currentSnap = await getDocs(thisBatchCurrentPadsQuery);
-        // Capacity check: use raw quantity sum (same unit as packsProduced)
-        const currentPacks = currentSnap.docs.reduce((sum, d) => sum + ((d.data().quantity as number) || 0), 0);
-        const remaining = oldestActive.maxPacks - oldestActive.packsProduced;
-        const incomingPacks = stockInForm.quantity;
-
-        if (incomingPacks > remaining) {
-          showToast(
-            `⚠️ Entry would exceed batch capacity. Only ${remaining.toLocaleString()} packs remaining in ${oldestActive.batchNumber}. You entered ${incomingPacks.toLocaleString()} packs.`,
-            "error"
-          );
-          setSaving(false);
-          return;
-        }
+        // Storage receives packs already counted at STG-10; it does not alter production capacity.
       }
       // ─────────────────────────────────────────────────────────────────────
 
-      const batchDocRef = doc(db, "batches", stockInForm.batchRef);
       await addDoc(collection(db, "stockIns"), { ...stockInForm, createdAt: Timestamp.now() });
       if (moveEntryId) {
         await updateDoc(doc(db, "productionEntries", moveEntryId), {
@@ -450,23 +432,6 @@ export default function StoragePage() {
         setMoveEntryId(null);
       }
       
-      // Update packsProduced = sum of all stock-in quantity entries for this batch
-      const allBatchStockInsSnap = await getDocs(
-        query(collection(db, "stockIns"), where("batchRef", "==", stockInForm.batchRef))
-      );
-      const newPacksProduced = allBatchStockInsSnap.docs.reduce(
-        (sum, d) => sum + ((d.data().quantity as number) || 0),
-        0
-      );
-      const selectedBatch = batches.find((b) => b.id === stockInForm.batchRef);
-      const maxPacks = selectedBatch?.maxPacks ?? 10000;
-      const batchUpdates: Record<string, unknown> = { packsProduced: newPacksProduced };
-      if (newPacksProduced >= maxPacks) {
-        batchUpdates.status = "COMPLETE";
-        batchUpdates.completionDate = new Date().toISOString().split("T")[0];
-      }
-      await updateDoc(batchDocRef, batchUpdates);
-
       queryClient.invalidateQueries({ queryKey: ["stockIns"] });
       queryClient.invalidateQueries({ queryKey: ["batches"] });
       setStockInForm({ date: new Date().toISOString().split("T")[0], batchRef: "", packSize: "HALF_DOZEN", quantity: 0, receivedBy: "", notes: "" });
