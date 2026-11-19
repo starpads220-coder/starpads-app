@@ -627,11 +627,6 @@ const totalPackagedPads = useMemo(
       .sort((a, b) => b.value - a.value);
   }, [filteredEntries]);
 
-  const pendingPackaging = useMemo(
-    () => entries.filter((e) => e.stageId === "STG-10" && !e.movedToStockAt),
-    [entries]
-  );
-
   const batchPackCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     entries
@@ -1212,75 +1207,6 @@ const totalPackagedPads = useMemo(
         })()}
       </div>
 
-      {/* Move to Stock Card */}
-      <div className={`rounded-lg shadow-sm border p-6 space-y-4 ${pendingPackaging.length > 0 ? 'bg-white border-amber-300' : 'bg-white border-gray-200'}`}>
-        <div className="flex items-center justify-between">
-          <div>
-            <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-              Move Packaged Goods to Stock
-              {pendingPackaging.length > 0 && (
-                <span className="inline-flex items-center justify-center px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-800">
-                  {pendingPackaging.length}
-                </span>
-              )}
-            </h2>
-            <p className="text-sm text-gray-500 mt-1">
-              {pendingPackaging.length > 0
-                ? `${pendingPackaging.length} packaging (STG-10) ${pendingPackaging.length === 1 ? 'entry has' : 'entries have'} not yet been moved to stock.`
-                : "All packaged goods have been transferred to stock."}
-            </p>
-          </div>
-        </div>
-        {entriesLoading ? (
-          <div className="text-center text-gray-400 py-4">Loading...</div>
-        ) : pendingPackaging.length === 0 ? (
-          <div className="text-center text-gray-400 py-4">All packaged goods have been transferred to stock. No pending entries.</div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-200 text-sm">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Worker</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Packs</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Batch</th>
-                  <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-                  <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-200">
-                {pendingPackaging.map((entry, i) => (
-                  <tr key={entry.id} className={i % 2 === 0 ? "bg-white" : "bg-gray-50/50"}>
-                    <td className="px-4 py-3 text-sm text-gray-700">{getEmployeeName(entry.employeeId)}</td>
-                    <td className="px-4 py-3 text-sm font-medium text-gray-900">{entry.actualPieces.toLocaleString()}</td>
-                    <td className="px-4 py-3 text-sm font-mono text-gray-500">{getBatchNumber(entry.batchRef)}</td>
-                    <td className="px-4 py-3 text-sm text-gray-500">{entry.date}</td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-onClick={() => {
-                          const pieces = entry.actualPieces;
-                          const packs = pieces;
-                          const params = new URLSearchParams({
-                            tab: "stock-in",
-                            date: entry.date,
-                            quantity: String(packs),
-                            batchRef: entry.batchRef,
-                            entryId: entry.id,
-                            employeeId: entry.employeeId,
-                          });
-                          window.location.href = `/storage?${params.toString()}`;
-                      }}
-                        className="py-1.5 px-3 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 transition-colors"
-                      >
-                        Move to Stock
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
     </div>
     </RouteGuard>
   );

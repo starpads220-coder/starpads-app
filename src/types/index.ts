@@ -113,6 +113,11 @@ export interface ProductionEntry {
   paymentStatus?: "due" | "paid";
   paymentId?: string;
   movedToStockAt?: import("firebase/firestore").Timestamp | null;
+  inventoryValuedAt?: import("firebase/firestore").Timestamp | null;
+  inventoryTransactionId?: string;
+  stockInId?: string;
+  packVariant?: PackVariant;
+  unitInventoryValue?: number;
   /** Version 3 entries participate in the global stage-movement WIP ledger. */
   wipVersion?: 2 | 3;
   /** Preserves the two historical operations that were merged into canonical STG-05. */
@@ -125,9 +130,12 @@ export interface StockIn {
   date: string;
   batchRef: string;
   packSize: PackSize;
+  packVariant?: PackVariant;
   quantity: number;
   receivedBy: string;
   notes?: string;
+  productionEntryId?: string;
+  inventoryTransactionId?: string;
 }
 
 export interface StockOut {

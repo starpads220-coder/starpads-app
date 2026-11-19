@@ -146,6 +146,8 @@ service cloud.firestore {
         || (hasAnyRole(['PRODUCTION_SUPERVISOR', 'FINANCIAL_MANAGER'])
           && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['paymentStatus', 'paymentId'])
           && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['stageId', 'batchRef']) || isCanonicalProductionEntry(request.resource.data)))
+        || (hasRole('STORE_MANAGER')
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['movedToStockAt', 'inventoryValuedAt', 'inventoryTransactionId', 'stockInId', 'packVariant', 'unitInventoryValue']))
         || (hasAnyRole(['FINANCE', 'FINANCIAL_MANAGER'])
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['paymentStatus', 'paymentId']));
       allow delete: if isAdmin();
@@ -192,7 +194,7 @@ service cloud.firestore {
     // ============================================================
     match /payments/{paymentId} {
       allow read: if isAuthenticated();
-      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'STORE_MANAGER', 'PRODUCTION_SUPERVISOR'])
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.createdByRole == getUserRole();
       allow update, delete: if false;
@@ -435,7 +437,7 @@ service cloud.firestore {
     }
     match /taxEntries/{taxId} {
       allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF']);
-      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
+      allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'STORE_MANAGER', 'PRODUCTION_SUPERVISOR'])
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.date is string
         && request.resource.data.description is string
@@ -448,7 +450,7 @@ service cloud.firestore {
       allow delete: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER']);
     }
     match /inventoryTransactions/{transactionId} {
-      allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF']);
+      allow read: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER', 'SALES_MANAGER', 'SALES_STAFF', 'STORE_MANAGER', 'PRODUCTION_SUPERVISOR']);
       allow create: if hasAnyRole(['ADMIN', 'FINANCE', 'FINANCIAL_MANAGER'])
         && request.resource.data.createdBy == request.auth.uid
         && request.resource.data.type in ['raw_material_purchase', 'raw_material_opening', 'raw_material_loss', 'raw_to_wip', 'raw_from_wip', 'wip_conversion_cost', 'wip_opening', 'wip_to_finished', 'wip_wastage', 'finished_goods_opening', 'finished_goods_sale', 'finished_goods_loss', 'inventory_supplier_payment']

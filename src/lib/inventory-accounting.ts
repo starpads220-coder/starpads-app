@@ -44,11 +44,14 @@ export interface InventoryTransaction {
   conversionCostCategory?: "direct_labor" | "factory_overhead" | "outside_processing";
   unitCost?: number;
   quantity?: number;
+  finishedPacks?: number;
   finishedGood?: string;
   batchRef?: string;
   amount: number;
   settlementCode?: "1000" | "1030" | "2110" | "3060";
   linkedSaleId?: string;
+  productionEntryId?: string;
+  packVariant?: "STANDARD" | "MAX";
   createdBy?: string;
   createdAt?: unknown;
   updatedAt?: unknown;

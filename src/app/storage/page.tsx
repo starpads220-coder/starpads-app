@@ -975,7 +975,7 @@ export default function StoragePage() {
                       <td className="px-4 py-3 text-sm text-gray-700">{si.date}</td>
                       <td className="px-4 py-3 text-sm font-mono text-gray-700">{si.batchRef}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">
-                        {si.packSize === "HALF_DOZEN" ? "Half Dozen" : si.packSize === "DOZEN" ? "Dozen" : "Carton"}
+                        {si.packSize === "ONE_PACK" ? si.packVariant === "MAX" ? "1 Pack Maxi" : "1 Pack Standard" : si.packSize === "HALF_DOZEN" ? "Half Dozen" : si.packSize === "DOZEN" ? "Dozen" : "Carton"}
                       </td>
                       <td className="px-4 py-3 text-sm font-medium text-gray-900">{si.quantity.toLocaleString()}</td>
                       <td className="px-4 py-3 text-sm text-gray-700">
