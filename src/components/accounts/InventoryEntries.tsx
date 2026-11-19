@@ -59,7 +59,7 @@ export function InventoryEntries({ entries, sales, canPost, userId }: { entries:
       const candidate = validateInventoryTransaction({
         date: form.date, type: form.type, description: form.description, reference: form.reference, notes: form.notes,
         material: form.material, rolls: Number(form.rolls) || 0, metres: Number(form.metres) || 0, unitCost: Number(form.unitCost) || 0,
-        quantity: Number(form.quantity) || 0, finishedGood: form.finishedGood, batchRef: ["raw_to_wip", "raw_from_wip"].includes(form.type) ? "PRODUCTION" : form.batchRef, amount,
+        quantity: Number(form.quantity) || 0, finishedGood: form.finishedGood, batchRef: form.type === "wip_to_finished" ? form.batchRef : ["raw_to_wip", "raw_from_wip", "wip_conversion_cost", "wip_opening", "wip_wastage"].includes(form.type) ? "PRODUCTION" : "", amount,
         settlementCode: ["raw_material_purchase", "inventory_supplier_payment"].includes(form.type) ? form.settlementCode : form.type.includes("opening") ? "3060" : undefined,
         linkedSaleId: form.linkedSaleId,
       }, entries, editingId ?? "");
@@ -89,7 +89,7 @@ export function InventoryEntries({ entries, sales, canPost, userId }: { entries:
   }
 
   const needsMaterial = ["raw_material_purchase", "raw_material_opening", "raw_material_loss", "raw_to_wip", "raw_from_wip"].includes(form.type);
-  const needsBatch = ["wip_opening", "wip_to_finished", "wip_wastage"].includes(form.type);
+  const needsBatch = form.type === "wip_to_finished";
   const needsFinished = ["wip_to_finished", "finished_goods_opening", "finished_goods_sale", "finished_goods_loss"].includes(form.type);
   return <section className="space-y-4">
     <div className="grid gap-3 sm:grid-cols-3">
@@ -111,7 +111,7 @@ export function InventoryEntries({ entries, sales, canPost, userId }: { entries:
         {needsMaterial && <label className="text-sm">Material<select className={input} value={form.material} onChange={e => { const material = e.target.value as InventoryMaterial; const available = position.rawByMaterial[material]; setForm({ ...form, material, ...(form.type === "raw_to_wip" && available.metres > 0 ? { unitCost: String(available.value / available.metres) } : {}) }); }}>{INVENTORY_MATERIALS.map(material => <option key={material}>{material}</option>)}</select>{form.type === "raw_to_wip" && <span className="mt-1 block text-xs text-gray-500">Available: {selectedRaw.metres.toLocaleString()} m · {money(selectedRaw.value)}</span>}</label>}
         {needsMaterial && <label className="text-sm">Number of Rolls<input type="number" min="0" step="1" className={input} value={form.rolls} onChange={e => setForm({ ...form, rolls: e.target.value })} /></label>}
         {needsMaterial && <label className="text-sm">Total Metres<input required type="number" min="0.0001" step="0.0001" className={input} value={form.metres} onChange={e => setForm({ ...form, metres: e.target.value })} /></label>}
-        {needsBatch && <label className="text-sm">Production Reference<input required maxLength={80} className={input} value={form.batchRef} onChange={e => setForm({ ...form, batchRef: e.target.value })} /></label>}
+        {needsBatch && <label className="text-sm">Finished Product Batch<input required maxLength={80} className={input} value={form.batchRef} onChange={e => setForm({ ...form, batchRef: e.target.value })} /></label>}
         {needsFinished && <label className="text-sm">Pad / Finished-Good Type<input required maxLength={80} className={input} value={form.finishedGood} onChange={e => { const finishedGood = e.target.value; const available = position.finishedByProduct[finishedGood.trim()]; setForm({ ...form, finishedGood, ...(["finished_goods_sale", "finished_goods_loss"].includes(form.type) && available?.quantity > 0 ? { unitCost: String(available.value / available.quantity) } : {}) }); }} />{["finished_goods_sale", "finished_goods_loss"].includes(form.type) && <span className="mt-1 block text-xs text-gray-500">Available: {selectedFinished.quantity.toLocaleString()} units · {money(selectedFinished.value)}</span>}</label>}
         {needsFinished && <label className="text-sm">Number of Pads / Units<input required type="number" min="0.0001" step="0.0001" className={input} value={form.quantity} onChange={e => setForm({ ...form, quantity: e.target.value })} /></label>}
         {(needsMaterial || needsFinished) && <label className="text-sm">{needsMaterial ? "Cost per Metre (UGX)" : "Cost per Pad / Unit (UGX)"}<input required type="number" min="0.01" step="0.01" className={input} value={form.unitCost} onChange={e => setForm({ ...form, unitCost: e.target.value })} /></label>}
@@ -119,7 +119,7 @@ export function InventoryEntries({ entries, sales, canPost, userId }: { entries:
         {form.type === "raw_material_purchase" && <label className="text-sm">Paid From / Purchased On Credit<select className={input} value={form.settlementCode} onChange={e => setForm({ ...form, settlementCode: e.target.value as typeof form.settlementCode })}><option value="1000">Bank</option><option value="1030">Cash</option><option value="2110">Accounts Payable (credit)</option></select></label>}
         {form.type === "inventory_supplier_payment" && <label className="text-sm">Payment Source<select className={input} value={form.settlementCode} onChange={e => setForm({ ...form, settlementCode: e.target.value as typeof form.settlementCode })}><option value="1000">Bank</option><option value="1030">Cash</option></select></label>}
         <label className="text-sm md:col-span-2">Description<input required maxLength={160} className={input} value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} placeholder="What was purchased, transferred, completed, sold, or lost?" /></label>
-        <label className="text-sm">Reference<input maxLength={80} className={input} value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} placeholder="Invoice, receipt, or batch reference" /></label>
+        <label className="text-sm">Reference<input maxLength={80} className={input} value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} placeholder="Invoice, receipt, requisition, or internal reference" /></label>
         {form.type === "finished_goods_sale" && <label className="text-sm">Linked Sale (optional)<select className={input} value={form.linkedSaleId} onChange={e => { const linkedSaleId = e.target.value; const sale = sales.find(item => item.id === linkedSaleId); setForm({ ...form, linkedSaleId, ...(sale && !form.description ? { description: `Cost of goods sold — ${sale.customerName || sale.invoiceNumber || sale.id}` } : {}) }); }}><option value="">Not linked / select later</option>{availableSales.map(sale => <option key={sale.id} value={sale.id}>{sale.date} · {sale.invoiceNumber || sale.customerName || sale.id} · {money(Number(sale.totalAmount) || 0)}</option>)}</select></label>}
         <label className="text-sm md:col-span-2">Notes<input maxLength={240} className={input} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label>
       </div>

@@ -63,6 +63,8 @@ export interface InventoryPosition {
   finishedByProduct: Record<string, { quantity: number; value: number }>;
 }
 
+const PRODUCTION_WIP_KEY = "PRODUCTION";
+
 const emptyMaterials = (): InventoryPosition["rawByMaterial"] => Object.fromEntries(INVENTORY_MATERIALS.map(material => [material, { metres: 0, value: 0 }]));
 
 export function inventoryPosting(entry: InventoryTransaction): Pick<Journal, "date" | "debitCode" | "creditCode" | "amount" | "description"> | null {
@@ -93,7 +95,9 @@ export function inventoryPositions(entries: InventoryTransaction[], throughDate 
     const metres = Number(entry.stockQuantity ?? entry.metres) || 0;
     const quantity = Number(entry.quantity) || 0;
     const material = entry.material;
-    const batch = entry.batchRef?.trim() || "Unspecified batch";
+    // WIP is one production pool. A finished-product batch is only a traceability
+    // reference on completion and must not split raw materials or costs by batch.
+    const batch = PRODUCTION_WIP_KEY;
     const product = entry.finishedGood?.trim() || "Unspecified finished good";
     if (entry.type === "raw_material_purchase" || entry.type === "raw_material_opening") {
       position.rawValue += amount;
@@ -149,10 +153,10 @@ export function inventoryTypeLabel(type: InventoryTransactionType) {
     raw_material_loss: "Record raw-material loss/write-down",
     raw_to_wip: "Issue materials to production",
     raw_from_wip: "Return materials from production",
-    wip_conversion_cost: "Add conversion cost to WIP",
-    wip_opening: "Opening WIP balance",
-    wip_to_finished: "Complete WIP into finished goods",
-    wip_wastage: "Record WIP wastage/loss",
+    wip_conversion_cost: "Add production cost",
+    wip_opening: "Opening production WIP balance",
+    wip_to_finished: "Record finished products",
+    wip_wastage: "Record production waste/loss",
     finished_goods_opening: "Opening finished-goods balance",
     finished_goods_sale: "Recognise cost of finished goods sold",
     finished_goods_loss: "Record finished-goods loss/write-down",
@@ -172,7 +176,7 @@ export function inventoryHistoryIssue(entries: InventoryTransaction[]) {
     if (position.wipValue < -0.01) return `Work in Progress would become negative after ${sorted[index].date}.`;
     if (position.finishedValue < -0.01) return `Finished Goods would become negative after ${sorted[index].date}.`;
     for (const [material, balance] of Object.entries(position.rawByMaterial)) if (balance.metres < -0.0001 || balance.value < -0.01) return `${material} inventory would become negative after ${sorted[index].date}.`;
-    for (const [batch, balance] of Object.entries(position.wipByBatch)) if (balance.value < -0.01) return `WIP batch ${batch} would become negative after ${sorted[index].date}.`;
+  for (const balance of Object.values(position.wipByBatch)) if (balance.value < -0.01) return `Production WIP would become negative after ${sorted[index].date}.`;
     for (const [product, balance] of Object.entries(position.finishedByProduct)) if (balance.quantity < -0.0001 || balance.value < -0.01) return `${product} finished-goods inventory would become negative after ${sorted[index].date}.`;
   }
   return "";
@@ -188,8 +192,8 @@ export function validateInventoryTransaction(entry: Omit<InventoryTransaction, "
   if (["raw_material_purchase", "raw_material_opening", "raw_material_loss", "raw_to_wip", "raw_from_wip"].includes(entry.type) && (!Number.isFinite(Number(entry.unitCost)) || Number(entry.unitCost) <= 0)) throw new Error("Enter a unit cost greater than zero.");
   if (entry.type === "raw_material_purchase" && !["1000", "1030", "2110"].includes(entry.settlementCode ?? "")) throw new Error("Select Bank, Cash, or Accounts Payable for the purchase.");
   if (entry.type === "inventory_supplier_payment" && !["1000", "1030"].includes(entry.settlementCode ?? "")) throw new Error("Select Bank or Cash for the supplier payment.");
-  if (["wip_conversion_cost", "wip_opening", "wip_to_finished", "wip_wastage"].includes(entry.type) && !entry.batchRef?.trim()) throw new Error("Enter the production reference.");
-  if (entry.type === "wip_conversion_cost" && !["1000", "1030", "2110"].includes(entry.settlementCode ?? "")) throw new Error("Select Bank, Cash, or Accounts Payable for the batch cost.");
+  if (entry.type === "wip_to_finished" && !entry.batchRef?.trim()) throw new Error("Select the finished-product batch.");
+  if (entry.type === "wip_conversion_cost" && !["1000", "1030", "2110"].includes(entry.settlementCode ?? "")) throw new Error("Select Bank, Cash, or Accounts Payable for the production cost.");
   if (["wip_to_finished", "finished_goods_opening", "finished_goods_sale", "finished_goods_loss"].includes(entry.type) && (!entry.finishedGood?.trim() || quantity <= 0)) throw new Error("Enter the finished-good/pad type and a quantity greater than zero.");
   const expected = metres > 0 && Number(entry.unitCost) > 0
     ? metres * Number(entry.unitCost) + (entry.type === "raw_material_purchase" ? (Number(entry.deliveryCost) || 0) + (Number(entry.otherLandedCost) || 0) : 0)
@@ -201,12 +205,12 @@ export function validateInventoryTransaction(entry: Omit<InventoryTransaction, "
     if (metres > available.metres + 0.0001 || amount > available.value + 0.01) throw new Error(`Insufficient ${entry.material} inventory. Available: ${available.metres.toLocaleString()} metres valued at UGX ${available.value.toLocaleString()}.`);
   }
   if (["wip_to_finished", "wip_wastage"].includes(entry.type)) {
-    const available = position.wipByBatch[entry.batchRef?.trim() || ""]?.value ?? 0;
-    if (amount > available + 0.01) throw new Error(`Insufficient WIP value for this batch. Available: UGX ${available.toLocaleString()}.`);
+    const available = position.wipValue;
+    if (amount > available + 0.01) throw new Error(`Insufficient production WIP value. Available: UGX ${available.toLocaleString()}.`);
   }
   if (entry.type === "raw_from_wip") {
-    const available = position.wipByBatch[entry.batchRef?.trim() || ""]?.value ?? 0;
-    if (amount > available + 0.01) throw new Error(`The returned material value exceeds this batch's WIP. Available: UGX ${available.toLocaleString()}.`);
+    const available = position.wipValue;
+    if (amount > available + 0.01) throw new Error(`The returned material value exceeds production WIP. Available: UGX ${available.toLocaleString()}.`);
   }
   if (["finished_goods_sale", "finished_goods_loss"].includes(entry.type)) {
     const available = position.finishedByProduct[entry.finishedGood?.trim() || ""] ?? { quantity: 0, value: 0 };
