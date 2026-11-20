@@ -1,6 +1,6 @@
 import type { Journal } from "@/lib/accounts";
 
-import { MATERIAL_CATALOG } from "@/lib/material-catalog";
+import { MATERIAL_CATALOG, materialDefinition, unitLabel } from "@/lib/material-catalog";
 
 export const INVENTORY_MATERIALS = MATERIAL_CATALOG.map(item => item.code);
 export type InventoryMaterial = string;
@@ -205,7 +205,8 @@ export function validateInventoryTransaction(entry: Omit<InventoryTransaction, "
   const position = inventoryPositions(existing, entry.date, excludedId);
   if (["raw_material_loss", "raw_to_wip"].includes(entry.type) && entry.material) {
     const available = position.rawByMaterial[entry.material];
-    if (metres > available.metres + 0.0001 || amount > available.value + 0.01) throw new Error(`Insufficient ${entry.material} inventory. Available: ${available.metres.toLocaleString()} metres valued at UGX ${available.value.toLocaleString()}.`);
+    const definition = materialDefinition(entry.material);
+    if (metres > available.metres + 0.0001 || amount > available.value + 0.01) throw new Error(`Insufficient ${definition.name} inventory. Available: ${available.metres.toLocaleString()} ${unitLabel(definition.stockUnit, available.metres)} valued at UGX ${available.value.toLocaleString()}.`);
   }
   if (["wip_to_finished", "wip_wastage"].includes(entry.type)) {
     const available = position.wipValue;
