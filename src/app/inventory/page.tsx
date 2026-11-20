@@ -192,13 +192,20 @@ function HistoryTable({ entries }: { entries: InventoryTransaction[] }) {
 }
 
 type ImpactPosting = { code: string; name: string; side: "Debit" | "Credit" };
+type StatementEffect = { name: string; change: "Increases" | "Decreases"; note?: string };
+
+function StatementEffectList({ effects, emptyText = "No element affected." }: { effects: StatementEffect[]; emptyText?: string }) {
+  return effects.length
+    ? <ul className="mt-2 space-y-2">{effects.map(effect => <li key={`${effect.name}-${effect.change}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-white px-3 py-2"><span className="font-medium text-gray-900">{effect.name}</span><span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${effect.change === "Increases" ? "bg-amber-100 text-amber-800" : "bg-green-100 text-green-800"}`}>{effect.change}{effect.note ? ` - ${effect.note}` : ""}</span></li>)}</ul>
+    : <p className="mt-2 text-gray-600">{emptyText}</p>;
+}
 const IMPACT_ACCOUNTS: Record<string, string> = {
   "1000": "Cash in Bank - Operating Bank", "1030": "Petty Cash", "1240": "Inventory - Raw Materials",
   "1250": "Inventory - Work in Progress", "1260": "Inventory - Finished Goods", "1270": "Inventory - Packaging Material",
   "2110": "Accounts Payable - Suppliers", "5070": "Inventory Adjustment",
 };
 
-function StatementImpact({ action, wasteArea, settlementCode, materialAccountCode, amount }: { action: Action; wasteArea: "materials" | "production"; settlementCode: string; materialAccountCode: "1240" | "1270"; amount: number }) {
+function LegacyStatementImpact({ action, wasteArea, settlementCode, materialAccountCode, amount }: { action: Action; wasteArea: "materials" | "production"; settlementCode: string; materialAccountCode: "1240" | "1270"; amount: number }) {
   const paymentCode = settlementCode === "2110" ? "2110" : settlementCode === "1030" ? "1030" : "1000";
   const materialCode = materialAccountCode;
   let postings: ImpactPosting[] = [];
@@ -234,6 +241,65 @@ function StatementImpact({ action, wasteArea, settlementCode, materialAccountCod
     <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-blue-950">Accounts Affected</h3><span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800">Balanced entry</span></div>
     <div className="mt-3 space-y-2">{postings.map((posting, index) => <div key={`${posting.code}-${index}`} className="rounded-lg border border-blue-100 bg-white px-3 py-2"><span className="font-medium">Account {index + 1}: {posting.name} ({posting.code})</span><span className="ml-2 font-semibold">- {posting.side} {money(amount)}</span></div>)}</div>
     <div className="mt-3 grid gap-3 lg:grid-cols-3"><p><strong>Income Statement (Profit & Loss):</strong> {incomeStatement}</p><p><strong>Balance Sheet:</strong> {balanceSheet}.</p><p><strong>Cash Flow Statement:</strong> {cashFlow}</p></div>
+    <p className="mt-3 text-xs text-gray-600">Total debits: {money(amount)} · Total credits: {money(amount)}</p>
+  </section>;
+}
+
+void LegacyStatementImpact;
+
+function StatementImpact({ action, wasteArea, settlementCode, materialAccountCode, amount }: { action: Action; wasteArea: "materials" | "production"; settlementCode: string; materialAccountCode: "1240" | "1270"; amount: number }) {
+  const paymentCode = settlementCode === "2110" ? "2110" : settlementCode === "1030" ? "1030" : "1000";
+  const materialCode = materialAccountCode;
+  let postings: ImpactPosting[] = [];
+  let balanceSheetEffects: StatementEffect[] = [];
+  let incomeStatementEffects: StatementEffect[] = [];
+  let cashFlowEffects: StatementEffect[] = [];
+  let cashFlowNote = "No element affected.";
+
+  if (action === "receive") {
+    postings = [{ code: materialCode, name: IMPACT_ACCOUNTS[materialCode], side: "Debit" }, { code: paymentCode, name: IMPACT_ACCOUNTS[paymentCode], side: "Credit" }];
+    balanceSheetEffects = [{ name: IMPACT_ACCOUNTS[materialCode], change: "Increases" }, { name: IMPACT_ACCOUNTS[paymentCode], change: paymentCode === "2110" ? "Increases" : "Decreases" }];
+    if (paymentCode === "2110") cashFlowNote = "No element affected until the supplier is paid.";
+    else cashFlowEffects = [{ name: "Purchases of Raw Materials", change: "Increases", note: "Cash outflow" }];
+  } else if (action === "issue") {
+    postings = [{ code: "1250", name: IMPACT_ACCOUNTS["1250"], side: "Debit" }, { code: materialCode, name: IMPACT_ACCOUNTS[materialCode], side: "Credit" }];
+    balanceSheetEffects = [{ name: IMPACT_ACCOUNTS["1250"], change: "Increases" }, { name: IMPACT_ACCOUNTS[materialCode], change: "Decreases" }];
+  } else if (action === "return") {
+    postings = [{ code: materialCode, name: IMPACT_ACCOUNTS[materialCode], side: "Debit" }, { code: "1250", name: IMPACT_ACCOUNTS["1250"], side: "Credit" }];
+    balanceSheetEffects = [{ name: IMPACT_ACCOUNTS[materialCode], change: "Increases" }, { name: IMPACT_ACCOUNTS["1250"], change: "Decreases" }];
+  } else if (action === "production_cost") {
+    postings = [{ code: "1250", name: IMPACT_ACCOUNTS["1250"], side: "Debit" }, { code: paymentCode, name: IMPACT_ACCOUNTS[paymentCode], side: "Credit" }];
+    balanceSheetEffects = [{ name: IMPACT_ACCOUNTS["1250"], change: "Increases" }, { name: IMPACT_ACCOUNTS[paymentCode], change: paymentCode === "2110" ? "Increases" : "Decreases" }];
+    if (paymentCode === "2110") cashFlowNote = "No element affected until the supplier is paid.";
+    else cashFlowEffects = [{ name: "Other production costs", change: "Increases", note: "Cash outflow" }];
+  } else if (action === "completed") {
+    postings = [{ code: "1260", name: IMPACT_ACCOUNTS["1260"], side: "Debit" }, { code: "1250", name: IMPACT_ACCOUNTS["1250"], side: "Credit" }];
+    balanceSheetEffects = [{ name: IMPACT_ACCOUNTS["1260"], change: "Increases" }, { name: IMPACT_ACCOUNTS["1250"], change: "Decreases" }];
+  } else if (action === "waste") {
+    const inventoryCode = wasteArea === "production" ? "1250" : materialCode;
+    postings = [{ code: "5070", name: IMPACT_ACCOUNTS["5070"], side: "Debit" }, { code: inventoryCode, name: IMPACT_ACCOUNTS[inventoryCode], side: "Credit" }];
+    balanceSheetEffects = [{ name: IMPACT_ACCOUNTS[inventoryCode], change: "Decreases" }];
+    incomeStatementEffects = [
+      { name: "Inventory Cost Recognised", change: "Increases" },
+      { name: "Total Cost of Production", change: "Increases" },
+      { name: "Gross profit", change: "Decreases" },
+      { name: "Income Before Taxes", change: "Decreases" },
+      { name: "Net income", change: "Decreases" },
+    ];
+  } else {
+    postings = [{ code: "2110", name: IMPACT_ACCOUNTS["2110"], side: "Debit" }, { code: paymentCode, name: IMPACT_ACCOUNTS[paymentCode], side: "Credit" }];
+    balanceSheetEffects = [{ name: IMPACT_ACCOUNTS["2110"], change: "Decreases" }, { name: IMPACT_ACCOUNTS[paymentCode], change: "Decreases" }];
+    cashFlowEffects = [{ name: "Purchases of Raw Materials", change: "Increases", note: "Cash outflow" }];
+  }
+
+  return <section className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 text-sm text-gray-800" aria-label="Accounts affected" aria-live="polite">
+    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-blue-950">Accounts Affected</h3><span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800">Balanced entry</span></div>
+    <div className="mt-3 space-y-2">{postings.map((posting, index) => <div key={`${posting.code}-${index}`} className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-blue-100 bg-white px-3 py-2"><span className="font-medium">{posting.name} ({posting.code})</span><span className="font-semibold">{posting.side} {money(amount)}</span></div>)}</div>
+    <div className="mt-4 grid gap-3 lg:grid-cols-3">
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><h4 className="font-semibold text-blue-950">Balance Sheet</h4><StatementEffectList effects={balanceSheetEffects} /></div>
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><h4 className="font-semibold text-blue-950">Income Statement (Profit &amp; Loss)</h4><StatementEffectList effects={incomeStatementEffects} /></div>
+      <div className="rounded-xl border border-blue-100 bg-blue-50 p-3"><h4 className="font-semibold text-blue-950">Cash Flow Statement</h4>{cashFlowEffects.length > 0 && <p className="mt-1 text-xs text-gray-600">A. Cash Flows from Operating Activities - Cash Paid</p>}<StatementEffectList effects={cashFlowEffects} emptyText={cashFlowNote} /></div>
+    </div>
     <p className="mt-3 text-xs text-gray-600">Total debits: {money(amount)} · Total credits: {money(amount)}</p>
   </section>;
 }
