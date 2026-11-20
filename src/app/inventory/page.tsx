@@ -55,6 +55,12 @@ export default function ManufacturingInventoryPage() {
   const averageUnitCost = selectedRaw.metres > 0 ? selectedRaw.value / selectedRaw.metres : 0;
   const finishedRows = Object.entries(position.finishedByProduct).filter(([, row]) => row.quantity !== 0 || row.value !== 0);
   const payable = inventory.data.reduce((sum, entry) => sum + (entry.type === "raw_material_purchase" && entry.settlementCode === "2110" ? entry.amount : entry.type === "inventory_supplier_payment" ? -entry.amount : 0), 0);
+  const statementPreviewAmount = form.action === "receive" ? landedCost
+    : form.action === "issue" ? stockQuantity * averageUnitCost
+      : form.action === "return" ? stockQuantity * (averageUnitCost || (productionWipValue / Math.max(stockQuantity, 1)))
+      : form.action === "completed" ? (Number(form.completedQuantity) || 0) * (Number(form.unitCost) || 0)
+        : form.action === "waste" ? form.wasteArea === "production" ? Number(form.totalValue) || 0 : stockQuantity * averageUnitCost
+          : Number(form.totalValue) || 0;
   const pendingFinishedEntries = productionEntries.data
     .filter(entry => entry.stageId === "STG-10" && !entry.movedToStockAt)
     .sort((a, b) => b.date.localeCompare(a.date));
@@ -161,7 +167,7 @@ export default function ManufacturingInventoryPage() {
         <><label className="text-sm">Reference<input className={input} value={form.reference} onChange={e => setForm({ ...form, reference: e.target.value })} placeholder="Invoice, requisition, or internal reference" /></label><label className="text-sm md:col-span-2">Notes<input className={input} value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} /></label></>
       </div>
       {form.action === "receive" && <div className="grid gap-3 rounded-xl bg-gray-50 p-4 text-sm sm:grid-cols-3"><div><span className="block text-gray-500">Purchase cost</span><strong>{money(purchaseCost)}</strong></div><div><span className="block text-gray-500">Total landed value</span><strong>{money(landedCost)}</strong></div><div><span className="block text-gray-500">Landed cost per {material.stockUnit}</span><strong>{money(stockQuantity > 0 ? landedCost / stockQuantity : 0)}</strong></div></div>}
-      <StatementImpact action={form.action} wasteArea={form.wasteArea} settlementCode={form.settlementCode} />
+      <StatementImpact action={form.action} wasteArea={form.wasteArea} settlementCode={form.settlementCode} materialAccountCode={material.accountCode} amount={statementPreviewAmount} />
       <button disabled={saving} className="rounded-lg bg-gray-900 px-5 py-2.5 font-semibold text-white disabled:opacity-50">{saving ? "Saving..." : ACTIONS.find(item => item.id === form.action)?.label}</button>
     </form>}
 
@@ -185,19 +191,49 @@ function HistoryTable({ entries }: { entries: InventoryTransaction[] }) {
   return <DataTable headers={["Date", "Activity", "Material / Product", "Finished Batch", "Quantity", "Value", "Reference"]} rows={[...entries].sort((a, b) => b.date.localeCompare(a.date)).map(entry => [entry.date, inventoryTypeLabel(entry.type), entry.material || entry.finishedGood || "—", entry.type === "wip_to_finished" ? entry.batchRef || "—" : "—", entry.finishedPacks ? `${entry.finishedPacks.toLocaleString()} packs (${Number(entry.quantity || 0).toLocaleString()} pads)` : `${Number(entry.stockQuantity || entry.metres || entry.quantity || 0).toLocaleString()} ${entry.stockUnit ?? (entry.quantity ? "units" : "")}`, money(entry.amount), entry.reference || "—"])} />;
 }
 
-function StatementImpact({ action, wasteArea, settlementCode }: { action: Action; wasteArea: "materials" | "production"; settlementCode: string }) {
-  const impact = action === "receive"
-    ? { balance: "Raw or Packaging Materials increases; Bank/Cash decreases or Accounts Payable increases.", income: "No immediate effect on profit.", cash: settlementCode === "2110" ? "No cash movement until the supplier is paid." : "Operating cash outflow." }
-    : action === "issue"
-      ? { balance: "Raw or Packaging Materials decreases; Work in Progress increases by the same value.", income: "No effect on profit.", cash: "No cash movement." }
-      : action === "return"
-        ? { balance: "Work in Progress decreases; Raw or Packaging Materials increases by the same value.", income: "No effect on profit.", cash: "No cash movement." }
-        : action === "production_cost"
-          ? { balance: "Work in Progress increases; Bank/Cash decreases or Accounts Payable increases.", income: "No immediate effect; the cost remains in inventory until the goods are sold.", cash: settlementCode === "2110" ? "No cash movement until payment." : "Operating cash outflow." }
-          : action === "completed"
-            ? { balance: "Work in Progress decreases; Finished Goods increases by the same value. Stock-In is created automatically.", income: "No revenue or profit is recognised at production. Profit is recognised when the goods are sold.", cash: "No cash movement." }
-            : action === "waste"
-              ? { balance: `${wasteArea === "production" ? "Work in Progress" : "Raw or Packaging Materials"} decreases.`, income: "Inventory adjustment expense increases; profit decreases.", cash: "No cash movement." }
-              : { balance: "Accounts Payable and Bank/Cash both decrease.", income: "No effect on profit.", cash: "Operating cash outflow." };
-  return <section className="rounded-xl border border-blue-200 bg-blue-50 p-4"><p className="text-xs font-bold uppercase tracking-wide text-blue-700">Accounting effect</p><div className="mt-3 grid gap-3 text-sm md:grid-cols-3"><div><span className="block font-semibold text-gray-900">Balance Sheet</span><span className="text-gray-600">{impact.balance}</span></div><div><span className="block font-semibold text-gray-900">Income Statement</span><span className="text-gray-600">{impact.income}</span></div><div><span className="block font-semibold text-gray-900">Cash Flow</span><span className="text-gray-600">{impact.cash}</span></div></div></section>;
+type ImpactPosting = { code: string; name: string; side: "Debit" | "Credit" };
+const IMPACT_ACCOUNTS: Record<string, string> = {
+  "1000": "Cash in Bank - Operating Bank", "1030": "Petty Cash", "1240": "Inventory - Raw Materials",
+  "1250": "Inventory - Work in Progress", "1260": "Inventory - Finished Goods", "1270": "Inventory - Packaging Material",
+  "2110": "Accounts Payable - Suppliers", "5070": "Inventory Adjustment",
+};
+
+function StatementImpact({ action, wasteArea, settlementCode, materialAccountCode, amount }: { action: Action; wasteArea: "materials" | "production"; settlementCode: string; materialAccountCode: "1240" | "1270"; amount: number }) {
+  const paymentCode = settlementCode === "2110" ? "2110" : settlementCode === "1030" ? "1030" : "1000";
+  const materialCode = materialAccountCode;
+  let postings: ImpactPosting[] = [];
+  let incomeStatement = "No Income Statement line is affected by this inventory movement.";
+  let cashFlow = "No Cash Flow Statement line is affected because no cash moves.";
+
+  if (action === "receive") {
+    postings = [{ code: materialCode, name: IMPACT_ACCOUNTS[materialCode], side: "Debit" }, { code: paymentCode, name: IMPACT_ACCOUNTS[paymentCode], side: "Credit" }];
+    cashFlow = paymentCode === "2110" ? "No Cash Flow Statement line is affected until the supplier is paid." : "A. Cash Flows from Operating Activities - Cash Paid → Purchases of Raw Materials increases (cash outflow).";
+  } else if (action === "issue") {
+    postings = [{ code: "1250", name: IMPACT_ACCOUNTS["1250"], side: "Debit" }, { code: materialCode, name: IMPACT_ACCOUNTS[materialCode], side: "Credit" }];
+  } else if (action === "return") {
+    postings = [{ code: materialCode, name: IMPACT_ACCOUNTS[materialCode], side: "Debit" }, { code: "1250", name: IMPACT_ACCOUNTS["1250"], side: "Credit" }];
+  } else if (action === "production_cost") {
+    postings = [{ code: "1250", name: IMPACT_ACCOUNTS["1250"], side: "Debit" }, { code: paymentCode, name: IMPACT_ACCOUNTS[paymentCode], side: "Credit" }];
+    incomeStatement = "No Income Statement line is affected immediately; the amount remains capitalised in Inventory - Work in Progress.";
+    cashFlow = paymentCode === "2110" ? "No Cash Flow Statement line is affected until payment." : "A. Cash Flows from Operating Activities - Cash Paid → Other production costs increases (cash outflow).";
+  } else if (action === "completed") {
+    postings = [{ code: "1260", name: IMPACT_ACCOUNTS["1260"], side: "Debit" }, { code: "1250", name: IMPACT_ACCOUNTS["1250"], side: "Credit" }];
+    incomeStatement = "No Income Statement line is affected. Revenue, Inventory Cost Recognised, Gross profit and Net income remain unchanged until sale.";
+  } else if (action === "waste") {
+    const inventoryCode = wasteArea === "production" ? "1250" : materialCode;
+    postings = [{ code: "5070", name: IMPACT_ACCOUNTS["5070"], side: "Debit" }, { code: inventoryCode, name: IMPACT_ACCOUNTS[inventoryCode], side: "Credit" }];
+    incomeStatement = "Cost of Production → Inventory Cost Recognised increases; Gross profit and Net income decrease.";
+  } else {
+    postings = [{ code: "2110", name: IMPACT_ACCOUNTS["2110"], side: "Debit" }, { code: paymentCode, name: IMPACT_ACCOUNTS[paymentCode], side: "Credit" }];
+    cashFlow = "A. Cash Flows from Operating Activities - Cash Paid → Purchases of Raw Materials increases (cash outflow).";
+  }
+
+  const balanceSheetPostings = postings.filter(posting => posting.code !== "5070");
+  const balanceSheet = balanceSheetPostings.map(posting => `${posting.name} (${posting.code}) ${posting.side === "Debit" ? posting.code === "2110" ? "decreases" : "increases" : posting.code === "2110" ? "increases" : "decreases"}`).join("; ");
+  return <section className="rounded-xl border border-blue-200 bg-blue-50/60 p-4 text-sm text-gray-800" aria-label="Accounts affected" aria-live="polite">
+    <div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-semibold text-blue-950">Accounts Affected</h3><span className="rounded-full bg-green-100 px-2.5 py-1 text-xs font-semibold text-green-800">Balanced entry</span></div>
+    <div className="mt-3 space-y-2">{postings.map((posting, index) => <div key={`${posting.code}-${index}`} className="rounded-lg border border-blue-100 bg-white px-3 py-2"><span className="font-medium">Account {index + 1}: {posting.name} ({posting.code})</span><span className="ml-2 font-semibold">- {posting.side} {money(amount)}</span></div>)}</div>
+    <div className="mt-3 grid gap-3 lg:grid-cols-3"><p><strong>Income Statement (Profit & Loss):</strong> {incomeStatement}</p><p><strong>Balance Sheet:</strong> {balanceSheet}.</p><p><strong>Cash Flow Statement:</strong> {cashFlow}</p></div>
+    <p className="mt-3 text-xs text-gray-600">Total debits: {money(amount)} · Total credits: {money(amount)}</p>
+  </section>;
 }
